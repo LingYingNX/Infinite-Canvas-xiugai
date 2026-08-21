@@ -819,12 +819,6 @@ function localFolderTotal(folder){
     if(!folder) return 0;
     return (folder.items || []).length + (folder.children || []).reduce((sum, child) => sum + localFolderTotal(child), 0);
 }
-function localFolderId(path=''){
-    return path || '__root__';
-}
-function localChildPath(parentPath='', name=''){
-    return parentPath ? `${parentPath}/${name}` : name;
-}
 // ---------------- 共享文件夹（服务端登记 + 只读浏览/引用，局域网可用） ----------------
 async function loadSharedFolders(){
     try {
@@ -975,11 +969,6 @@ function canvasAssetsForCategory(categoryId=activeCanvasAssetCategory){
     list = list.filter(canvas => (canvas.kind || 'classic') === categoryId);
     return list.sort((a, b) => String(a.title || '').localeCompare(String(b.title || ''), 'zh-Hans-CN', {numeric:true, sensitivity:'base'}));
 }
-function canvasAssetOpenUrl(canvas){
-    if(!canvas?.id) return '';
-    const id = encodeURIComponent(canvas.id);
-    return canvas.kind === 'smart' ? `/static/smart-canvas.html?id=${id}` : `/static/canvas.html?id=${id}`;
-}
 function activeCanvasAssetCanvas(){
     if(!activeCanvasAssetCanvasId) return null;
     return (canvasAssetsData.canvases || []).find(canvas => canvas.id === activeCanvasAssetCanvasId) || null;
@@ -1064,11 +1053,6 @@ function assetMoveTargets(){
             if(key !== currentKey) targets.push({key, libraryId:lib.id, categoryId:cat.id, label:`${lib.name || '资产库'} / ${cat.name || '分组'}`});
         });
     });
-    return targets;
-}
-function normalizeAssetMoveTarget(){
-    const targets = assetMoveTargets();
-    if(!targets.some(item => item.key === assetMoveTarget)) assetMoveTarget = targets[0]?.key || '';
     return targets;
 }
 function currentPromptItems(){
@@ -1840,17 +1824,6 @@ function folderContainsLocalActive(folder){
     if(folder.id === activeLocalFolderId) return true;
     return (folder.children || []).some(child => folderContainsLocalActive(child));
 }
-function renderLocalCard(item){
-    const hasCaption = localItemKind(item) === 'image' && String(item.caption || '').trim();
-    return `<article class="asset-card ${item.id === selectedLocalId ? 'active' : ''}" data-local-card="${escapeAttr(item.id)}">
-        <input class="asset-card-check" type="checkbox" data-local-check="${escapeAttr(item.id)}" ${selectedLocalIds.has(item.id) ? 'checked' : ''}>
-        <div class="asset-thumb">${localAssetThumb(item)}</div>
-        <div class="asset-card-body">
-            <div class="asset-card-name" title="${escapeAttr(item.relativePath || item.name || '')}">${escapeHtml(item.name || 'local')}</div>
-            <div class="asset-card-meta">${escapeHtml(assetKindLabel(item))} · ${escapeHtml(formatFileSize(item.size))}${hasCaption ? ' · 有提示词' : ''}</div>
-        </div>
-    </article>`;
-}
 function renderLocalClipboardBar(){
     if(!localClipboard?.items?.length) return '';
     const modeLabel = localClipboard.mode === 'cut' ? '剪切' : '复制';
@@ -1862,31 +1835,6 @@ function renderLocalClipboardBar(){
             <button class="asset-icon-btn" type="button" data-local-clear-clipboard title="清空本地剪贴板"><i data-lucide="x"></i></button>
         </div>
     </div>`;
-}
-function renderLocalDetail(item){
-    if(!item) return `<div class="panel-head"><div class="panel-title"><strong>本地预览</strong><span>选择一个本地素材查看详情</span></div></div><div class="detail-scroll"><div class="detail-empty"><i data-lucide="folder-open"></i><span>暂无可预览素材</span></div></div>`;
-    return `
-        <div class="panel-head">
-            <div class="panel-title"><strong>本地预览</strong><span>${escapeHtml(assetKindLabel(item))}</span></div>
-            <div class="panel-actions">
-                <button class="asset-icon-btn" type="button" data-local-open="${escapeAttr(item.id)}" title="打开预览"><i data-lucide="external-link"></i></button>
-                <button class="asset-btn primary" type="button" data-local-import-one="${escapeAttr(item.id)}"><i data-lucide="download"></i><span>导入</span></button>
-            </div>
-        </div>
-        <div class="detail-scroll">
-            <div class="detail-media"><button class="detail-media-frame detail-media-zoomable" type="button" data-local-preview="${escapeAttr(item.id)}" title="点击放大预览">${localAssetThumb(item)}</button></div>
-            <div class="detail-body">
-                <div class="detail-name">${escapeHtml(item.name || '本地素材')}</div>
-                <div class="detail-meta-grid">
-                    <div class="detail-meta"><span>类型</span><strong>${escapeHtml(assetKindLabel(item))}</strong></div>
-                    <div class="detail-meta"><span>大小</span><strong>${escapeHtml(formatFileSize(item.size))}</strong></div>
-                    <div class="detail-meta"><span>修改时间</span><strong>${escapeHtml(formatDate(item.lastModified))}</strong></div>
-                    <div class="detail-meta"><span>来源</span><strong>${escapeHtml(activeSharedFolderName || '共享文件夹')}</strong></div>
-                </div>
-                <div class="detail-url">${escapeHtml(item.relativePath || item.name || '')}</div>
-            </div>
-        </div>
-    `;
 }
 function renderAssetManager(){
     normalizeAssetState();
