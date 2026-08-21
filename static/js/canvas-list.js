@@ -7,7 +7,6 @@ function refreshIcons(){ if(window.lucide) lucide.createIcons(); }
 function tr(key){ return window.StudioI18n ? StudioI18n.t(key) : key; }
 function langIsEn(){ return window.StudioI18n?.lang?.() === 'en'; }
 function escapeHtml(str){ return String(str == null ? '' : str).replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
-function escapeAttr(str){ return escapeHtml(str); }
 function L(zh, en){ return langIsEn() ? en : zh; }
 function compactLabel(fullZh, compactZh, en){ return window.innerWidth <= 760 ? L(compactZh, en) : L(fullZh, en); }
 const CANVAS_LIST_PROJECT_KEY = 'canvasListCurrentProjectId';
@@ -1042,11 +1041,6 @@ async function exportCanvasWithResources(id){
 }
 
 /* ===== Cut / paste a canvas across projects ===== */
-function cutCanvas(id){
-    clipboardCanvasId = id;
-    setStatus(L('已剪切，切换到目标项目后点“粘贴到此项目”','Cut — open another project, then Paste'));
-    renderBoard();
-}
 function updatePasteBtn(){
     if(!pasteCanvasBtn) return;
     const show = !!clipboardCanvasId && canvases.some(x => x.id === clipboardCanvasId);
