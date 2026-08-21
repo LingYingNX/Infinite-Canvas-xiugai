@@ -698,25 +698,69 @@ function positionPopup(pop, left, top, fallbackW, fallbackH){
     pop.style.left = Math.round(Math.max(12, Math.min(left, window.innerWidth - w - 12))) + 'px';
     pop.style.top = Math.round(Math.max(12, Math.min(top, window.innerHeight - h - 12))) + 'px';
 }
+function projectSubmenuItems(canvas){
+    const items = projects
+        .filter(p => p.id !== (canvas.project || 'default'))
+        .map(p => `<button class="ws-pop-proj" type="button" data-project-id="${escapeHtml(p.id)}">${escapeHtml(p.name)}</button>`)
+        .join('');
+    return items || `<div class="ws-pop-sub-empty">${L('没有其它项目','No other projects')}</div>`;
+}
 function openCardMenu(canvasId, clientX, clientY){
     closeCardMenu();
     const c = canvases.find(x => x.id === canvasId);
     if(!c) return;
     const pop = document.createElement('div');
     pop.className = 'ws-card-pop';
+    const projectItems = projectSubmenuItems(c);
     pop.innerHTML = `
         <button class="ws-pop-item" data-act="rename"><i data-lucide="pencil" class="w-4 h-4"></i><span>${L('重命名','Rename')}</span></button>
         <button class="ws-pop-item" data-act="export"><i data-lucide="download" class="w-4 h-4"></i><span>${L('导出画布','Export canvas')}</span></button>
         <button class="ws-pop-item" data-act="export-assets"><i data-lucide="archive" class="w-4 h-4"></i><span>${L('导出画布 + 资源','Export with assets')}</span></button>
-        <button class="ws-pop-item" data-act="cut"><i data-lucide="scissors" class="w-4 h-4"></i><span>${L('剪切到其他项目','Cut to project')}</span></button>
+        <div class="ws-pop-has-sub">
+            <button class="ws-pop-item" data-act="copy"><i data-lucide="copy" class="w-4 h-4"></i><span>${L('复制','Copy')}</span></button>
+            <div class="ws-card-pop-sub">
+                <div class="ws-pop-sub-title">${L('复制到项目','Copy to project')}</div>
+                ${projectItems}
+            </div>
+        </div>
+        <div class="ws-pop-has-sub">
+            <button class="ws-pop-item" data-act="move"><i data-lucide="folder-input" class="w-4 h-4"></i><span>${L('移动','Move')}</span></button>
+            <div class="ws-card-pop-sub">
+                <div class="ws-pop-sub-title">${L('移动到项目','Move to project')}</div>
+                ${projectItems}
+            </div>
+        </div>
         <div class="ws-pop-sep"></div>
         <button class="ws-pop-item danger" data-act="delete"><i data-lucide="trash-2" class="w-4 h-4"></i><span>${L('删除','Delete')}</span></button>`;
     document.body.appendChild(pop);
     positionPopup(pop, clientX, clientY, 188, 120);
+    pop.querySelectorAll('.ws-card-pop-sub').forEach(sub => {
+        const prevDisplay = sub.style.display;
+        sub.style.visibility = 'hidden';
+        sub.style.display = 'flex';
+        const sw = sub.offsetWidth || 184;
+        sub.style.display = prevDisplay;
+        sub.style.visibility = '';
+        const pr = pop.getBoundingClientRect();
+        if(pr.right + sw > window.innerWidth - 12){
+            sub.style.left = 'auto';
+            sub.style.right = '100%';
+        }
+    });
     pop.querySelector('[data-act="rename"]').onclick = () => { closeCardMenu(); startCardRename(canvasId); };
     pop.querySelector('[data-act="export"]').onclick = () => { closeCardMenu(); exportCanvas(canvasId); };
     pop.querySelector('[data-act="export-assets"]').onclick = () => { closeCardMenu(); exportCanvasWithResources(canvasId); };
-    pop.querySelector('[data-act="cut"]').onclick = () => { closeCardMenu(); cutCanvas(canvasId); };
+    pop.querySelectorAll('.ws-pop-has-sub').forEach(wrap => {
+        const act = wrap.querySelector('.ws-pop-item').dataset.act;
+        wrap.querySelectorAll('.ws-pop-proj').forEach(btn => {
+            btn.onclick = () => {
+                const pid = btn.dataset.projectId;
+                closeCardMenu();
+                if(act === 'copy') copyCanvasToProject(canvasId, pid);
+                else moveCanvasToProject(canvasId, pid);
+            };
+        });
+    });
     pop.querySelector('[data-act="delete"]').onclick = () => { closeCardMenu(); showCardDeleteConfirm(canvasId); };
     refreshIcons();
 }
@@ -1062,6 +1106,44 @@ async function moveCanvasToProject(id, projectId){
     renderProjects();
     setStatus(L('已移动','Moved'));
     await persistMeta(id, { project: projectId });
+}
+async function copyCanvasToProject(id, projectId){
+    const target = projects.find(p => p.id === projectId);
+    try {
+        const res = await fetch(`/api/canvases/${encodeURIComponent(id)}`);
+        if(!res.ok) throw new Error('load failed');
+        const data = await res.json();
+        const source = data.canvas;
+        if(!source) throw new Error('load failed');
+        const fd = new FormData();
+        fd.append('file', new Blob([JSON.stringify(source)], { type:'application/json' }), 'canvas.json');
+        fd.append('project', projectId);
+        if(source.board_x != null) fd.append('board_x', String(source.board_x));
+        if(source.board_y != null) fd.append('board_y', String(source.board_y));
+        const copyRes = await fetch('/api/canvases/import', { method:'POST', body: fd });
+        if(!copyRes.ok){
+            let msg = 'copy failed';
+            try {
+                const d = await copyRes.json();
+                if(d && (d.detail || d.message)) msg = d.detail || d.message;
+            } catch(_){}
+            throw new Error(msg);
+        }
+        const copyData = await copyRes.json();
+        const nc = copyData.canvas;
+        if(nc){
+            if(nc.project == null) nc.project = projectId;
+            if(nc.board_x == null) nc.board_x = source.board_x;
+            if(nc.board_y == null) nc.board_y = source.board_y;
+            canvases.push(nc);
+            renderBoard();
+            renderProjects();
+        }
+        setStatus(L(`已复制到「${target?.name || '项目'}」`, `Copied to ${target?.name || 'project'}`));
+    } catch(e){
+        console.error(e);
+        setStatus(L('复制失败','Copy failed'));
+    }
 }
 
 /* ===== Card meta persist (POST /meta) ===== */
