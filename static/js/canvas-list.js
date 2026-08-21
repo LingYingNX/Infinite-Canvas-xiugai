@@ -1068,7 +1068,7 @@ board.addEventListener('dblclick', e => {
     openCreateCard(screenToWorld(e.clientX, e.clientY));
 });
 board.addEventListener('contextmenu', e => {
-    if(e.target.closest('.ws-card') || e.target.closest('.ws-create-card') || e.target.closest('.ws-card-pop') || e.target.closest('button,input,textarea,select')) return;
+    if(e.target.closest('.ws-create-card') || e.target.closest('.ws-card-pop') || e.target.closest('button,input,textarea,select')) return;
     e.preventDefault();
     e.stopPropagation();
     openBoardContextMenu(e);
