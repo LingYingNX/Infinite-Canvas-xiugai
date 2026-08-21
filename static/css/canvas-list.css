@@ -216,7 +216,6 @@ html[data-studio-scale="off"].studio-scale-managed .workspace {
 .ws-card-pop-sub { position:absolute; top:-4px; left:100%; z-index:230; width:200px; max-height:min(340px, 60vh); overflow:auto; padding:0; border-radius:5px; background-color:#0D1117; color:#fff; display:none; flex-direction:column; gap:0; }
 .ws-pop-has-sub:hover .ws-card-pop-sub { display:flex; }
 .ws-pop-sub-empty { padding:10px; color:#8b949e; font-size:12px; font-weight:700; }
-.ws-pop-sub-title { padding:10px 10px 2px; font-size:9px; font-weight:800; letter-spacing:0; text-transform:uppercase; color:#8b949e; }
 .ws-pop-proj { display:flex; align-items:center; gap:5px; width:100%; padding:10px; border-radius:4px; background-color:transparent; border:none; cursor:pointer; color:#fff; font-size:12px; font-weight:700; text-align:left; position:relative; transition:background-color .12s var(--ease); }
 .ws-pop-proj:not(:active):hover,
 .ws-pop-proj:focus { background-color:#21262C; }

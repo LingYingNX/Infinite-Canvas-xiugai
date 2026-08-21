@@ -719,14 +719,12 @@ function openCardMenu(canvasId, clientX, clientY){
         <div class="ws-pop-has-sub">
             <button class="ws-pop-item" data-act="copy"><i data-lucide="copy" class="w-4 h-4"></i><span>${L('复制','Copy')}</span></button>
             <div class="ws-card-pop-sub">
-                <div class="ws-pop-sub-title">${L('复制到项目','Copy to project')}</div>
                 ${projectItems}
             </div>
         </div>
         <div class="ws-pop-has-sub">
             <button class="ws-pop-item" data-act="move"><i data-lucide="folder-input" class="w-4 h-4"></i><span>${L('移动','Move')}</span></button>
             <div class="ws-card-pop-sub">
-                <div class="ws-pop-sub-title">${L('移动到项目','Move to project')}</div>
                 ${projectItems}
             </div>
         </div>
