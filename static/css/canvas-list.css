@@ -198,7 +198,7 @@ html[data-studio-scale="off"].studio-scale-managed .workspace {
 .ws-card-delete-no { background:var(--card-solid); color:var(--muted); }
 
 /* ===== Card context menu ===== */
-.ws-card-pop { position:fixed; left:0; top:0; z-index:200; width:200px; padding:0; border-radius:5px; background-color:#0D1117; color:#fff; display:flex; flex-direction:column; justify-content:center; gap:0; }
+.ws-card-pop { position:fixed; left:0; top:0; z-index:200; width:200px; padding:0; border-radius:5px; background-color:#1E293B; color:#fff; display:flex; flex-direction:column; justify-content:center; gap:0; }
 .ws-pop-item { background-color:transparent; border:none; padding:10px; color:#fff; display:flex; position:relative; gap:5px; cursor:pointer; border-radius:4px; width:100%; font-size:12.5px; font-weight:700; text-align:left; transition:background-color .12s var(--ease); }
 .ws-pop-item:not(:active):hover,
 .ws-pop-item:focus { background-color:#21262C; }
@@ -214,7 +214,7 @@ html[data-studio-scale="off"].studio-scale-managed .workspace {
 .ws-pop-sep { height:1px; margin:3px 4px; background-color:#21262D; }
 .ws-pop-has-sub { position:relative; width:100%; }
 .ws-pop-has-sub:hover > .ws-pop-item { background-color:#21262C; }
-.ws-card-pop-sub { position:absolute; top:-4px; left:100%; z-index:230; width:200px; max-height:min(340px, 60vh); overflow:auto; padding:0; border-radius:5px; background-color:#0D1117; color:#fff; display:none; flex-direction:column; gap:0; }
+.ws-card-pop-sub { position:absolute; top:-4px; left:100%; z-index:230; width:200px; max-height:min(340px, 60vh); overflow:auto; padding:0; border-radius:5px; background-color:#1E293B; color:#fff; display:none; flex-direction:column; gap:0; }
 .ws-pop-has-sub:hover .ws-card-pop-sub { display:flex; }
 .ws-pop-sub-empty { padding:10px; color:#8b949e; font-size:12px; font-weight:700; }
 .ws-pop-proj { display:flex; align-items:center; gap:5px; width:100%; padding:10px; border-radius:4px; background-color:transparent; border:none; cursor:pointer; color:#fff; font-size:12px; font-weight:700; text-align:left; position:relative; transition:background-color .12s var(--ease); }
