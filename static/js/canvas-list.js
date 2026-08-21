@@ -93,11 +93,17 @@ function applyViewport(){
     board.style.backgroundSize = `${120 * viewport.scale}px ${120 * viewport.scale}px, ${120 * viewport.scale}px ${120 * viewport.scale}px, ${24 * viewport.scale}px ${24 * viewport.scale}px`;
     board.style.backgroundPosition = `${viewport.x}px ${viewport.y}px, ${viewport.x}px ${viewport.y}px, ${viewport.x}px ${viewport.y}px`;
 }
+function uiScale(){
+    const raw = getComputedStyle(document.documentElement).getPropertyValue('--studio-ui-scale');
+    const n = parseFloat(raw);
+    return Number.isFinite(n) && n > 0 ? n : 1;
+}
 function screenToWorld(clientX, clientY){
     const rect = board.getBoundingClientRect();
+    const z = uiScale();
     return {
-        x: (clientX - rect.left - viewport.x) / viewport.scale,
-        y: (clientY - rect.top - viewport.y) / viewport.scale
+        x: ((clientX - rect.left) / z - viewport.x) / viewport.scale,
+        y: ((clientY - rect.top) / z - viewport.y) / viewport.scale
     };
 }
 function boardCenterWorld(){
@@ -146,8 +152,9 @@ function onBoardPanStart(e){
 }
 function onBoardPanMove(e){
     if(!panState) return;
-    viewport.x = panState.ox + (e.clientX - panState.startX);
-    viewport.y = panState.oy + (e.clientY - panState.startY);
+    const z = uiScale();
+    viewport.x = panState.ox + (e.clientX - panState.startX) / z;
+    viewport.y = panState.oy + (e.clientY - panState.startY) / z;
     if(Math.abs(e.clientX - panState.startX) > 3 || Math.abs(e.clientY - panState.startY) > 3) panState.moved = true;
     applyViewport();
 }
@@ -159,7 +166,8 @@ function onBoardPanEnd(){
 function onBoardWheel(e){
     e.preventDefault();
     const rect = board.getBoundingClientRect();
-    const px = e.clientX - rect.left, py = e.clientY - rect.top;
+    const z = uiScale();
+    const px = (e.clientX - rect.left) / z, py = (e.clientY - rect.top) / z;
     // world point under cursor before zoom
     const wx = (px - viewport.x) / viewport.scale;
     const wy = (py - viewport.y) / viewport.scale;
