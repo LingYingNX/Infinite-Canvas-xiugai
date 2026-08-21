@@ -199,7 +199,7 @@ function onMarqueeEnd(e){
     marqueeState = null;
     SelectionBox.hide();
     if(ms.moved){
-        const a = ms.start, b = screenToWorld(e);
+        const a = ms.start, b = screenToWorld(e.clientX, e.clientY);
         const rect = {
             left: Math.min(a.x, b.x),
             top: Math.min(a.y, b.y),
