@@ -334,6 +334,23 @@ function selectProject(pid){
     resetView();
 }
 
+function attachInlineInput(input, onCommit, onCancel){
+    let done = false;
+    const finish = commit => {
+        if(done) return;
+        done = true;
+        const value = input.value.trim();
+        if(commit && value) onCommit(value);
+        else onCancel();
+    };
+    input.onblur = () => finish(true);
+    input.onkeydown = e => {
+        e.stopPropagation();
+        if(e.key === 'Enter'){ e.preventDefault(); finish(true); }
+        if(e.key === 'Escape'){ e.preventDefault(); finish(false); }
+    };
+}
+
 function startProjectRename(pid, row){
     const p = projects.find(x => x.id === pid);
     if(!p) return;
@@ -345,19 +362,11 @@ function startProjectRename(pid, row){
     nameEl.replaceWith(input);
     input.focus(); input.select();
     input.onclick = e => e.stopPropagation();
-    let done = false;
-    const finish = commit => {
-        if(done) return; done = true;
-        const v = input.value.trim();
-        if(commit && v && v !== p.name) renameProject(pid, v);
-        else renderProjects();
-    };
-    input.onblur = () => finish(true);
-    input.onkeydown = e => {
-        e.stopPropagation();
-        if(e.key === 'Enter'){ e.preventDefault(); finish(true); }
-        if(e.key === 'Escape'){ e.preventDefault(); finish(false); }
-    };
+    attachInlineInput(
+        input,
+        value => { if(value !== p.name) renameProject(pid, value); else renderProjects(); },
+        renderProjects
+    );
 }
 
 /* ===== Project CRUD ===== */
@@ -1071,19 +1080,11 @@ function startCardRename(canvasId){
     input.onmousedown = e => e.stopPropagation();
     input.onclick = e => e.stopPropagation();
     input.focus(); input.select();
-    let done = false;
-    const finish = commit => {
-        if(done) return; done = true;
-        const v = input.value.trim();
-        if(commit && v && v !== c.title) setCanvasTitle(canvasId, v);
-        else renderBoard();
-    };
-    input.onblur = () => finish(true);
-    input.onkeydown = e => {
-        e.stopPropagation();
-        if(e.key === 'Enter'){ e.preventDefault(); finish(true); }
-        if(e.key === 'Escape'){ e.preventDefault(); finish(false); }
-    };
+    attachInlineInput(
+        input,
+        value => { if(value !== c.title) setCanvasTitle(canvasId, value); else renderBoard(); },
+        renderBoard
+    );
 }
 
 async function setCanvasTitle(id, title){
