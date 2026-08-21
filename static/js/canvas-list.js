@@ -430,26 +430,32 @@ function attachCardDrag(card, c){
         if(e.target.closest('.ws-card-menu')) return;
         if(e.target.closest('.ws-card-delete-confirm')) return;
         if(card.querySelector('.ws-card-title-input')) return; // editing title
+        e.preventDefault();
         e.stopPropagation();
         closeCardMenu();
         const startWorld = screenToWorld(e.clientX, e.clientY);
         const origX = c.board_x || 0, origY = c.board_y || 0;
         let moved = false;
+        let lastDx = 0, lastDy = 0;
         const onMove = ev => {
             const w = screenToWorld(ev.clientX, ev.clientY);
             const dx = w.x - startWorld.x, dy = w.y - startWorld.y;
-            c.board_x = origX + dx; c.board_y = origY + dy;
-            card.style.left = c.board_x + 'px';
-            card.style.top = c.board_y + 'px';
-            if(!moved && (Math.abs(dx * viewport.scale) > 3 || Math.abs(dy * viewport.scale) > 3)){
+            lastDx = dx; lastDy = dy;
+            if(!moved){
+                if(Math.abs(dx * viewport.scale) <= 3 && Math.abs(dy * viewport.scale) <= 3) return;
                 moved = true; card.classList.add('dragging');
             }
+            card.style.transform = `translate(${dx}px, ${dy}px)`;
         };
         const onUp = () => {
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
             card.classList.remove('dragging');
+            card.style.transform = '';
             if(moved){
+                c.board_x = origX + lastDx; c.board_y = origY + lastDy;
+                card.style.left = c.board_x + 'px';
+                card.style.top = c.board_y + 'px';
                 persistMeta(c.id, { board_x: Math.round(c.board_x), board_y: Math.round(c.board_y) });
             } else {
                 c.board_x = origX; c.board_y = origY;
