@@ -1176,15 +1176,18 @@ async function deleteCanvas(id){
 }
 
 /* ===== Trash / recycle bin ===== */
+function updateTrashBadge(count){
+    trashBadge.textContent = String(count);
+    trashBadge.classList.toggle('visible', count > 0);
+}
+
 async function refreshTrashCount(){
     try {
         const res = await fetch('/api/canvases/trash');
         if(!res.ok) return;
         const data = await res.json();
         deletedCanvases = data.canvases || [];
-        const n = deletedCanvases.length;
-        trashBadge.textContent = String(n);
-        trashBadge.classList.toggle('visible', n > 0);
+        updateTrashBadge(deletedCanvases.length);
     } catch(e){}
 }
 async function openTrashView(){
@@ -1204,9 +1207,7 @@ async function loadTrash(){
         const data = await res.json();
         deletedCanvases = data.canvases || [];
         renderTrash();
-        const n = deletedCanvases.length;
-        trashBadge.textContent = String(n);
-        trashBadge.classList.toggle('visible', n > 0);
+        updateTrashBadge(deletedCanvases.length);
     } catch(e){ console.error(e); setStatus(L('加载回收站失败','Load trash failed')); }
 }
 function renderTrash(){
@@ -1266,9 +1267,7 @@ async function purgeCanvas(id){
         if(!res.ok) throw new Error('purge failed');
         deletedCanvases = deletedCanvases.filter(c => c.id !== id);
         renderTrash();
-        const n = deletedCanvases.length;
-        trashBadge.textContent = String(n);
-        trashBadge.classList.toggle('visible', n > 0);
+        updateTrashBadge(deletedCanvases.length);
         setStatus(L('已彻底删除','Deleted'));
     } catch(e){ console.error(e); setStatus(L('删除失败','Delete failed')); }
 }
