@@ -992,11 +992,6 @@ function renderPreviewField(f){
     return `<div class="pfield">${label}<input class="pfield-input" type="text" value="${escapeAttr(v)}" oninput="setPreviewValue('${f.id}',this.value)"></div>`;
 }
 
-function miniCardStyle(key){
-    const p = miniCards[key] || defaultMiniCards()[key] || {x:0,y:0};
-    return `left:${p.x}px;top:${p.y}px`;
-}
-
 function miniLine(aKey, bKey){
     const a = miniCards[aKey] || defaultMiniCards()[aKey];
     const b = miniCards[bKey] || defaultMiniCards()[bKey];
