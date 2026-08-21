@@ -16141,6 +16141,54 @@ async def trashed_canvases():
 async def create_canvas(payload: CanvasCreateRequest):
     return {"canvas": new_canvas(payload.title, payload.icon, payload.kind, payload.project, payload.board_x, payload.board_y)}
 
+@app.post("/api/canvases/import")
+async def import_canvas_file(
+    file: UploadFile = File(...),
+    project: str = Form(""),
+    board_x: float = Form(0),
+    board_y: float = Form(0),
+):
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="文件为空")
+    filename = str(file.filename or "").lower()
+    resource_mapping = {}
+    imported = None
+    try:
+        if filename.endswith(".zip") or raw[:2] == b"PK":
+            imported, resource_mapping = import_canvas_zip(raw)
+        else:
+            imported = json.loads(raw.decode("utf-8-sig"))
+    except HTTPException:
+        raise
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=400, detail="无法读取压缩包") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"无法解析画布文件：{exc}") from exc
+    if not isinstance(imported, dict):
+        raise HTTPException(status_code=400, detail="画布文件格式不正确")
+    kind = normalize_canvas_kind(imported.get("kind"))
+    title = str(imported.get("title") or ("智能画布" if kind == "smart" else "未命名画布"))[:80]
+    icon = str(imported.get("icon") or ("sparkles" if kind == "smart" else "layers"))[:32]
+    canvas = new_canvas(
+        title=title,
+        icon=icon,
+        kind=kind,
+        project=project,
+        board_x=float(board_x or 0),
+        board_y=float(board_y or 0),
+    )
+    for key in ("nodes", "connections", "viewport", "owner", "color", "pinned"):
+        if key in imported:
+            canvas[key] = json.loads(json.dumps(imported[key]))
+    if resource_mapping:
+        canvas = canvas_workflow_replace_strings(canvas, resource_mapping)
+    canvas.setdefault("nodes", [])
+    canvas.setdefault("connections", [])
+    canvas.setdefault("viewport", {"x": 0, "y": 0, "scale": 1})
+    save_canvas(canvas)
+    return {"canvas": canvas_record(canvas), "resource_count": len(resource_mapping)}
+
 @app.get("/api/canvases/{canvas_id}/meta")
 async def get_canvas_meta(canvas_id: str):
     canvas = load_canvas(canvas_id)
@@ -16278,6 +16326,45 @@ def sanitize_export_filename(name: str, fallback: str) -> str:
     base = os.path.basename(str(name or "").strip()) or fallback
     base = re.sub(r'[\\/:*?"<>|]+', "_", base)
     return base or fallback
+
+def import_canvas_zip(raw):
+    mapping = {}
+    with zipfile.ZipFile(BytesIO(raw), "r") as zf:
+        candidates = [n for n in zf.namelist() if n.lower().endswith("canvas.json")]
+        canvas_name = "canvas.json" if "canvas.json" in zf.namelist() else (candidates[0] if candidates else "")
+        if not canvas_name:
+            raise HTTPException(status_code=400, detail="压缩包中没有 canvas.json")
+        canvas_data = json.loads(zf.read(canvas_name).decode("utf-8-sig"))
+        manifest = None
+        if "resources-manifest.json" in zf.namelist():
+            try:
+                manifest = json.loads(zf.read("resources-manifest.json").decode("utf-8-sig"))
+            except Exception:
+                manifest = None
+        manifest_items = {}
+        for item in (manifest or {}).get("resources") or []:
+            file_key = str(item.get("file") or "").replace("\\", "/").lstrip("/")
+            manifest_items[file_key] = str(item.get("url") or "").strip()
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        import_dir = os.path.join(OUTPUT_INPUT_DIR, f"canvas_import_{stamp}_{uuid.uuid4().hex[:6]}")
+        os.makedirs(import_dir, exist_ok=True)
+        for entry in zf.namelist():
+            normalized = entry.replace("\\", "/").lstrip("/")
+            if not normalized.startswith("resources/") or normalized.endswith("/"):
+                continue
+            base = sanitize_export_filename(os.path.basename(normalized), os.path.basename(normalized) or "resource.bin")
+            target = os.path.join(import_dir, f"{uuid.uuid4().hex[:8]}_{base}")
+            with zf.open(entry) as src, open(target, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+            rel = os.path.relpath(target, ASSETS_DIR).replace("\\", "/")
+            new_url = f"/assets/{rel}"
+            old_url = manifest_items.get(normalized) or manifest_items.get(entry)
+            if old_url:
+                mapping[old_url] = new_url
+            mapping[normalized] = new_url
+            mapping[f"./{normalized}"] = new_url
+            mapping[os.path.basename(normalized)] = new_url
+    return canvas_data, mapping
 
 def canvas_workflow_collect_resource_refs(value, found=None):
     if found is None:

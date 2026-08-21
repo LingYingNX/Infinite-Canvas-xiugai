@@ -579,6 +579,78 @@ function openCardMenu(canvasId, anchorBtn){
     refreshIcons();
 }
 
+/* ===== Board context menu (import / new) ===== */
+function openBoardContextMenu(e){
+    closeCardMenu();
+    const pop = document.createElement('div');
+    pop.className = 'ws-card-pop ws-board-pop';
+    const worldPt = screenToWorld(e.clientX, e.clientY);
+    pop.innerHTML = `
+        <button class="ws-pop-item" data-act="import"><i data-lucide="upload" class="w-4 h-4"></i><span>${L('导入画布','Import canvas')}</span></button>
+        <button class="ws-pop-item" data-act="import-assets"><i data-lucide="archive" class="w-4 h-4"></i><span>${L('导入画布 + 资源','Import canvas + assets')}</span></button>`;
+    document.body.appendChild(pop);
+    const w = pop.offsetWidth || 214, h = pop.offsetHeight || 88;
+    let left = Math.min(e.clientX, window.innerWidth - w - 12);
+    let top = Math.min(e.clientY, window.innerHeight - h - 12);
+    pop.style.left = Math.round(Math.max(12, left)) + 'px';
+    pop.style.top = Math.round(Math.max(12, top)) + 'px';
+    pop.querySelector('[data-act="import"]').onclick = () => { closeCardMenu(); pickCanvasImportFile(false, worldPt); };
+    pop.querySelector('[data-act="import-assets"]').onclick = () => { closeCardMenu(); pickCanvasImportFile(true, worldPt); };
+    refreshIcons();
+}
+
+function pickCanvasImportFile(withAssets, worldPt){
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = withAssets ? '.zip,application/zip' : '.json,application/json';
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    input.addEventListener('change', () => {
+        const file = input.files && input.files[0];
+        input.remove();
+        if(file) importCanvasFile(file, worldPt);
+    });
+    input.addEventListener('cancel', () => input.remove());
+    input.click();
+}
+
+async function importCanvasFile(file, worldPt){
+    setStatus(L('正在导入...','Importing...'));
+    try {
+        const fd = new FormData();
+        fd.append('file', file);
+        fd.append('project', currentProjectId);
+        fd.append('board_x', String(Math.round(worldPt.x)));
+        fd.append('board_y', String(Math.round(worldPt.y)));
+        const res = await fetch('/api/canvases/import', { method:'POST', body: fd });
+        if(!res.ok){
+            let msg = 'import failed';
+            try {
+                const d = await res.json();
+                if(d && (d.detail || d.message)) msg = d.detail || d.message;
+            } catch(_){}
+            throw new Error(msg);
+        }
+        const data = await res.json();
+        const nc = data.canvas;
+        if(nc){
+            if(nc.project == null) nc.project = currentProjectId;
+            if(nc.board_x == null) nc.board_x = Math.round(worldPt.x);
+            if(nc.board_y == null) nc.board_y = Math.round(worldPt.y);
+            canvases.push(nc);
+            renderBoard();
+            renderProjects();
+        }
+        const count = Number(data.resource_count || 0);
+        setStatus(count
+            ? L(`已导入 ${count} 个资源`,`Imported ${count} assets`)
+            : L('已导入','Imported'));
+    } catch(e){
+        console.error(e);
+        setStatus(L('导入失败','Import failed'));
+    }
+}
+
 function showCardDeleteConfirm(canvasId){
     const card = boardWorld.querySelector(`.ws-card[data-canvas-id="${CSS.escape(canvasId)}"]`);
     if(!card) return;
@@ -988,6 +1060,12 @@ board.addEventListener('wheel', onBoardWheel, { passive: false });
 board.addEventListener('dblclick', e => {
     if(e.target.closest('.ws-card') || e.target.closest('.ws-create-card')) return;
     openCreateCard(screenToWorld(e.clientX, e.clientY));
+});
+board.addEventListener('contextmenu', e => {
+    if(e.target.closest('.ws-card') || e.target.closest('.ws-create-card') || e.target.closest('.ws-card-pop') || e.target.closest('button,input,textarea,select')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openBoardContextMenu(e);
 });
 
 newCanvasBtn.addEventListener('click', () => openCreateCard(boardCenterWorld()));
