@@ -73,6 +73,7 @@ let pendingDeleteProjectId = null;
 let statusTimer = null;
 let clipboardCanvasId = null;   // 剪切的画布（切到别的项目后粘贴）
 let selectedIds = new Set();
+let lastSelectedId = null;
 
 // board viewport (mirrors smart-canvas math)
 const viewport = { x: 0, y: 0, scale: 1 };
@@ -210,9 +211,11 @@ function onMarqueeEnd(e){
         } else {
             selectedIds = new Set(ids);
         }
+        lastSelectedId = selectedIds.size ? Array.from(selectedIds)[0] : null;
         syncSelectionUI();
     } else if(!ms.moved){
         selectedIds.clear();
+        lastSelectedId = null;
         syncSelectionUI();
     }
     ms.box?.remove();
@@ -250,6 +253,7 @@ async function loadAll(){
         if(!projects.length) projects = [{ id: 'default', name: L('默认项目','Default'), order: 0, canvas_count: 0 }];
         canvases = cData.canvases || [];
         selectedIds.clear();
+        lastSelectedId = null;
         // pick first project (prefer default / order 0)
         if(!projects.find(p => p.id === currentProjectId)){
             const def = projects.find(p => p.id === 'default') || projects.slice().sort((a, b) => (a.order || 0) - (b.order || 0))[0];
@@ -323,6 +327,7 @@ function selectProject(pid){
     rememberProjectId(pid);
     closeTrashView();
     selectedIds.clear();
+    lastSelectedId = null;
     renderProjects();
     renderBoard();
     resetView();
@@ -478,11 +483,10 @@ function buildCard(c){
     card.dataset.canvasId = c.id;
     card.style.left = (c.board_x || 0) + 'px';
     card.style.top = (c.board_y || 0) + 'px';
-    // 卡片布局：顶部=类型标签+更多按钮；中部=标题；底部=节点数·时间。已移除图标。
+    // 卡片布局：顶部=类型标签；中部=标题；底部=节点数·时间。已移除图标。
     card.innerHTML = `
         <div class="ws-card-top">
             <span class="ws-card-kind ${isSmart ? 'smart' : 'classic'}">${isSmart ? compactLabel('智能画布','智能','Smart') : compactLabel('普通画布','普通','Classic')}</span>
-            <button class="ws-card-menu" type="button" title="${L('更多','More')}" aria-label="${L('更多','More')}"><i data-lucide="more-horizontal" class="w-4 h-4"></i></button>
         </div>
         <div class="ws-card-title">${escapeHtml(c.title)}</div>
         <div class="ws-card-meta">
@@ -499,7 +503,7 @@ function buildCard(c){
         </div>`;
     attachCardDrag(card, c);
     card.addEventListener('dblclick', e => {
-        if(e.target.closest('.ws-card-menu') || e.target.closest('.ws-card-delete-confirm')) return;
+        if(e.target.closest('.ws-card-delete-confirm')) return;
         e.preventDefault();
         e.stopPropagation();
         openCanvas(c);
@@ -511,12 +515,10 @@ function buildCard(c){
             selectedIds = new Set([c.id]);
             syncSelectionUI();
         }
+        lastSelectedId = c.id;
         closeCardMenu();
-        openCardMenu(c.id, null, e.clientX, e.clientY);
+        openCardMenu(c.id, e.clientX, e.clientY);
     });
-    const menuBtn = card.querySelector('.ws-card-menu');
-    menuBtn.onmousedown = e => e.stopPropagation();
-    menuBtn.onclick = e => { e.stopPropagation(); openCardMenu(c.id, menuBtn); };
     card.querySelector('.ws-card-delete-confirm').onmousedown = e => e.stopPropagation();
     card.querySelector('.ws-card-delete-yes').onclick = e => { e.stopPropagation(); deleteCanvas(c.id); };
     card.querySelector('.ws-card-delete-no').onclick = e => { e.stopPropagation(); card.classList.remove('confirming-delete'); };
@@ -527,7 +529,6 @@ function buildCard(c){
 function attachCardDrag(card, c){
     card.addEventListener('mousedown', e => {
         if(e.button !== 0) return;
-        if(e.target.closest('.ws-card-menu')) return;
         if(e.target.closest('.ws-card-delete-confirm')) return;
         if(card.querySelector('.ws-card-title-input')) return; // editing title
         e.preventDefault();
@@ -535,12 +536,20 @@ function attachCardDrag(card, c){
         closeCardMenu();
         const additive = e.ctrlKey || e.metaKey;
         if(additive){
-            if(selectedIds.has(c.id)) selectedIds.delete(c.id);
-            else selectedIds.add(c.id);
+            if(selectedIds.has(c.id)){
+                selectedIds.delete(c.id);
+                if(lastSelectedId === c.id) lastSelectedId = selectedIds.size ? Array.from(selectedIds)[selectedIds.size - 1] : null;
+            } else {
+                selectedIds.add(c.id);
+                lastSelectedId = c.id;
+            }
             syncSelectionUI();
         } else if(!selectedIds.has(c.id)){
             selectedIds = new Set([c.id]);
+            lastSelectedId = c.id;
             syncSelectionUI();
+        } else {
+            lastSelectedId = c.id;
         }
         const dragIds = selectedIds.has(c.id) ? Array.from(selectedIds) : [c.id];
         const origins = new Map();
@@ -684,7 +693,7 @@ function positionPopup(pop, left, top, fallbackW, fallbackH){
     pop.style.left = Math.round(Math.max(12, Math.min(left, window.innerWidth - w - 12))) + 'px';
     pop.style.top = Math.round(Math.max(12, Math.min(top, window.innerHeight - h - 12))) + 'px';
 }
-function openCardMenu(canvasId, anchorBtn, clientX, clientY){
+function openCardMenu(canvasId, clientX, clientY){
     closeCardMenu();
     const c = canvases.find(x => x.id === canvasId);
     if(!c) return;
@@ -698,15 +707,7 @@ function openCardMenu(canvasId, anchorBtn, clientX, clientY){
         <div class="ws-pop-sep"></div>
         <button class="ws-pop-item danger" data-act="delete"><i data-lucide="trash-2" class="w-4 h-4"></i><span>${L('删除','Delete')}</span></button>`;
     document.body.appendChild(pop);
-    if(anchorBtn){
-        const r = anchorBtn.getBoundingClientRect();
-        const w = pop.offsetWidth || 188, h = pop.offsetHeight || 120;
-        let top = r.bottom + 6;
-        if(top + h > window.innerHeight - 12) top = r.top - h - 6;
-        positionPopup(pop, r.left, top, 188, 120);
-    } else {
-        positionPopup(pop, clientX, clientY, 188, 120);
-    }
+    positionPopup(pop, clientX, clientY, 188, 120);
     pop.querySelector('[data-act="rename"]').onclick = () => { closeCardMenu(); startCardRename(canvasId); };
     pop.querySelector('[data-act="export"]').onclick = () => { closeCardMenu(); exportCanvas(canvasId); };
     pop.querySelector('[data-act="export-assets"]').onclick = () => { closeCardMenu(); exportCanvasWithResources(canvasId); };
@@ -719,6 +720,7 @@ function openCardMenu(canvasId, anchorBtn, clientX, clientY){
 function openBoardContextMenu(e){
     closeCardMenu();
     selectedIds.clear();
+    lastSelectedId = null;
     syncSelectionUI();
     const pop = document.createElement('div');
     pop.className = 'ws-card-pop ws-board-pop';
@@ -1083,6 +1085,7 @@ async function deleteCanvas(id){
         if(!res.ok) throw new Error('delete failed');
         canvases = canvases.filter(x => x.id !== id);
         selectedIds.delete(id);
+        if(lastSelectedId === id) lastSelectedId = selectedIds.size ? Array.from(selectedIds)[0] : null;
         renderBoard();
         renderProjects();
         refreshTrashCount();
@@ -1232,7 +1235,7 @@ trashCloseBtn.addEventListener('click', closeTrashView);
 
 // close card menu when clicking outside
 document.addEventListener('mousedown', e => {
-    if(document.querySelector('.ws-card-pop') && !e.target.closest('.ws-card-pop') && !e.target.closest('.ws-card-menu')){
+    if(document.querySelector('.ws-card-pop') && !e.target.closest('.ws-card-pop')){
         closeCardMenu();
     }
     if(document.querySelector('.ws-card.confirming-delete') && !e.target.closest('.ws-card.confirming-delete')){
@@ -1241,6 +1244,17 @@ document.addEventListener('mousedown', e => {
 });
 
 document.addEventListener('keydown', e => {
+    if(e.key === 'F2'){
+        const t = e.target;
+        if(t && (t.closest?.('input,textarea,select') || t.isContentEditable)) return;
+        if(trashPanel.classList.contains('active')) return;
+        const id = selectedIds.size === 1 ? Array.from(selectedIds)[0] : lastSelectedId;
+        if(!id || !canvases.some(x => x.id === id)) return;
+        e.preventDefault();
+        closeCardMenu();
+        startCardRename(id);
+        return;
+    }
     if(e.key !== 'Escape') return;
     closeCardMenu();
     closeCreateCard();
