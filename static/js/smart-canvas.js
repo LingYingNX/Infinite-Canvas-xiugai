@@ -6453,7 +6453,6 @@ function scheduleConnectionLayerRefresh(){
     connectionLayerRaf = requestAnimationFrame(refreshConnectionLayer);
 }
 let interactionLayerRaf = 0;
-let canvasMoveRaf = 0;
 // 拖动/缩放节点时，每个 mousemove 都全量重建连线 SVG + 小地图会掉帧；
 // 用 requestAnimationFrame 把它们合并成每帧最多刷新一次（节点本身的位移仍是即时的）。
 function scheduleInteractionLayerRefresh(){
@@ -6480,57 +6479,6 @@ function moveNodeElementsDuringDrag(){
         positionComposerForNode(active);
     }
     scheduleInteractionLayerRefresh();
-}
-function applyNodeDragPosition(clientX, clientY){
-    const node = nodes.find(n => n.id === dragState.id);
-    if(!node) return;
-    const moveDx = (clientX - dragState.startX) / viewport.scale;
-    const moveDy = (clientY - dragState.startY) / viewport.scale;
-    (dragState.group || [{id:dragState.id, ox:dragState.ox, oy:dragState.oy}]).forEach(item => {
-        const n = nodes.find(x => x.id === item.id);
-        if(!n) return;
-        n.x = item.ox + moveDx;
-        n.y = item.oy + moveDy;
-    });
-    if(assetLibraryOpen){
-        const hit = document.elementFromPoint(clientX, clientY);
-        if(hit && assetPanel?.contains(hit)){
-            setAssetDragOver(true);
-            clearDropHighlight();
-            setAssetDragOver(true);
-            return;
-        }
-        setAssetDragOver(false);
-    }
-    const draggedRect = nodeRect(node);
-    const rawTarget = dragState.ctrlGroup
-        ? (['smart-prompt','smart-loop'].includes(node.type)
-            ? dragConnectTargetFor(node, screenToWorld({clientX, clientY}))
-            : rectOverlapNode(node.id, draggedRect.x, draggedRect.y, draggedRect.width, draggedRect.height, dragState.groupIds))
-        : null;
-    const target = isSmartGroupNode(rawTarget) ? null : rawTarget;
-    setDropHighlight(target?.id || '');
-    moveNodeElementsDuringDrag();
-    updateLoopInsertPreview();
-    if(target) setDropHighlight(target.id);
-}
-function flushCanvasMove(){
-    canvasMoveRaf = 0;
-    if(panState){
-        const dx = panState.px - panState.startX;
-        const dy = panState.py - panState.startY;
-        if(Math.abs(dx) + Math.abs(dy) > 3) didPan = true;
-        viewport.x = panState.ox + dx;
-        viewport.y = panState.oy + dy;
-        applyViewport();
-    }
-    if(dragState && dragState.px !== undefined){
-        applyNodeDragPosition(dragState.px, dragState.py);
-    }
-}
-function scheduleCanvasMoveFlush(){
-    if(canvasMoveRaf) return;
-    canvasMoveRaf = requestAnimationFrame(flushCanvasMove);
 }
 function updateNodeElementDuringResize(node){
     if(!node) return;
@@ -9960,7 +9908,7 @@ function bindNodeEvents(){
                 const n = nodes.find(x => x.id === dragId);
                 return n ? {id:n.id, ox:Number(n.x) || 0, oy:Number(n.y) || 0} : null;
             }).filter(Boolean);
-            dragState = {id:node.id, startX:e.clientX, startY:e.clientY, px:e.clientX, py:e.clientY, ox:node.x || 0, oy:node.y || 0, group, groupIds:group.map(item => item.id), ctrlGroup:Boolean(e.ctrlKey)};
+            dragState = {id:node.id, startX:e.clientX, startY:e.clientY, ox:node.x || 0, oy:node.y || 0, group, groupIds:group.map(item => item.id), ctrlGroup:Boolean(e.ctrlKey)};
             document.body.classList.add('smart-node-drag');
             capturePendingUndo();
         };
@@ -17540,7 +17488,7 @@ shell.addEventListener('mousedown', e => {
     e.stopPropagation();
     closeCreateMenu();
     didPan = false;
-    panState = {button:e.button, startX:e.clientX, startY:e.clientY, px:e.clientX, py:e.clientY, ox:viewport.x, oy:viewport.y};
+    panState = {button:e.button, startX:e.clientX, startY:e.clientY, ox:viewport.x, oy:viewport.y};
     shell.classList.add('panning');
 }, true);
 shell.onmousedown = e => {
@@ -17569,7 +17517,7 @@ shell.onmousedown = e => {
     }
     e.preventDefault();
     didPan = false;
-    panState = {button:e.button, startX:e.clientX, startY:e.clientY, px:e.clientX, py:e.clientY, ox:viewport.x, oy:viewport.y};
+    panState = {button:e.button, startX:e.clientX, startY:e.clientY, ox:viewport.x, oy:viewport.y};
     shell.classList.add('panning');
 };
 shell.oncontextmenu = e => {
@@ -17882,7 +17830,7 @@ window.onmousemove = e => {
                     selectedImage = {nodeId:'', index:-1};
                     const newNode = createImageNodeAt(point, [img], {select:false, skipUndo:true});
                     undoSuppressed = false;
-                    dragState = {id:newNode.id, startX:e.clientX, startY:e.clientY, px:e.clientX, py:e.clientY, ox:newNode.x, oy:newNode.y, thumbDetached:true};
+                    dragState = {id:newNode.id, startX:e.clientX, startY:e.clientY, ox:newNode.x, oy:newNode.y, thumbDetached:true};
                     thumbDragState.detached = true;
                     render();
                 }
@@ -17892,15 +17840,46 @@ window.onmousemove = e => {
         else return;
     }
     if(panState){
-        panState.px = e.clientX;
-        panState.py = e.clientY;
-        scheduleCanvasMoveFlush();
+        const dx = e.clientX - panState.startX;
+        const dy = e.clientY - panState.startY;
+        if(Math.abs(dx) + Math.abs(dy) > 3) didPan = true;
+        viewport.x = panState.ox + dx;
+        viewport.y = panState.oy + dy;
+        applyViewport();
         return;
     }
     if(!dragState) return;
-    dragState.px = e.clientX;
-    dragState.py = e.clientY;
-    scheduleCanvasMoveFlush();
+    const node = nodes.find(n => n.id === dragState.id);
+    if(!node) return;
+    const moveDx = (e.clientX - dragState.startX) / viewport.scale;
+    const moveDy = (e.clientY - dragState.startY) / viewport.scale;
+    (dragState.group || [{id:dragState.id, ox:dragState.ox, oy:dragState.oy}]).forEach(item => {
+        const n = nodes.find(x => x.id === item.id);
+        if(!n) return;
+        n.x = item.ox + moveDx;
+        n.y = item.oy + moveDy;
+    });
+    if(assetLibraryOpen){
+        const hit = document.elementFromPoint(e.clientX, e.clientY);
+        if(hit && assetPanel?.contains(hit)){
+            setAssetDragOver(true);
+            clearDropHighlight();
+            setAssetDragOver(true);
+            return;
+        }
+        setAssetDragOver(false);
+    }
+    const draggedRect = nodeRect(node);
+    const rawTarget = dragState.ctrlGroup
+        ? (['smart-prompt','smart-loop'].includes(node.type)
+            ? dragConnectTargetFor(node, screenToWorld(e))
+            : rectOverlapNode(node.id, draggedRect.x, draggedRect.y, draggedRect.width, draggedRect.height, dragState.groupIds))
+        : null;
+    const target = isSmartGroupNode(rawTarget) ? null : rawTarget;
+    setDropHighlight(target?.id || '');
+    moveNodeElementsDuringDrag();
+    updateLoopInsertPreview();
+    if(target) setDropHighlight(target.id);
 };
 window.onmouseup = e => {
     document.body.classList.remove('smart-node-drag');
@@ -17983,7 +17962,6 @@ window.onmouseup = e => {
         if(!thumbDragState.detached) discardPendingUndo();
         thumbDragState = null;
     }
-    flushCanvasMove();
     if(panState) {
         panState = null;
         shell.classList.remove('panning');
