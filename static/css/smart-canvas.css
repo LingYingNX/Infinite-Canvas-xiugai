@@ -842,6 +842,11 @@ video.node-img { object-fit:cover; background:#0f172a; }
 .engine-select:hover { border-color:var(--text); }
 .engine-select:focus { border-color:var(--strong); }
 .composer-head-hint { color:var(--faint); font-size:9.5px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; margin-left:2px; }
+.composer-head-right { flex:0 0 auto; display:flex; align-items:center; gap:6px; }
+.composer-pin-btn { height:24px; min-width:34px; padding:0 9px; border-radius:999px; border:1px solid var(--line); background:var(--card); color:var(--muted); font-size:10.5px; font-weight:500; display:inline-flex; align-items:center; justify-content:center; gap:4px; cursor:pointer; transition:background .14s ease, color .14s ease, border-color .14s ease, transform .14s ease; }
+.composer-pin-btn i,.composer-pin-btn svg { width:12px !important; height:12px !important; stroke-width:2.2; }
+.composer-pin-btn:hover { color:var(--text); border-color:var(--text); transform:translateY(-1px); }
+.composer-pin-btn.active { color:var(--strong-text); background:var(--strong); border-color:var(--strong); }
 .kind-toggle { display:inline-flex; align-items:center; gap:2px; padding:2px; border-radius:999px; border:1px solid var(--line); background:var(--card); }
 .kind-toggle button { height:20px; padding:0 8px; border-radius:999px; border:0; background:transparent; color:var(--muted); font-size:10.5px; font-weight:500; display:inline-flex; align-items:center; gap:4px; cursor:pointer; transition:background .14s ease, color .14s ease; }
 .kind-toggle button i, .kind-toggle button svg { width:11px !important; height:11px !important; stroke-width:2; }

@@ -15846,17 +15846,8 @@ board.onmousedown = e => {
     if(document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     if(e.target !== board && e.target !== world && e.target !== nodesEl && e.target !== linksEl) return;
     closeCreateMenu();
-    if(isRKeyDown){
-        e.preventDefault();
-        startSelection(e);
-        return;
-    }
-    if(e.ctrlKey || e.metaKey){
-        e.preventDefault();
-        startSelection(e);
-        return;
-    }
-    startBoardPan(e, {clearSelectionOnClick:true});
+    e.preventDefault();
+    startSelection(e);
 };
 board.addEventListener('mousemove', e => {
     const point = screenToWorld(e.clientX, e.clientY);

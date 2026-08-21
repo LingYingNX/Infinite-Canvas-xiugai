@@ -5,6 +5,7 @@ const CANVAS_LIST_PROJECT_KEY = 'canvasListCurrentProjectId';
 const shell = document.getElementById('shell');
 const world = document.getElementById('world');
 const composer = document.getElementById('composer');
+const composerPinBtn = document.getElementById('composerPinBtn');
 const createMenu = document.getElementById('createMenu');
 const promptInput = document.getElementById('promptInput');
 const mentionPicker = document.getElementById('mentionPicker');
@@ -6471,7 +6472,7 @@ function moveNodeElementsDuringDrag(){
             el.style.top = `${n.y || 0}px`;
         }
     });
-    const active = selectedNode();
+    const active = activeComposerNode() || selectedNode();
     if(active && (dragState.group || [{id:dragState.id}]).some(item => item.id === active.id)){
         positionComposerForNode(active);
     }
@@ -12888,6 +12889,7 @@ function applyImageEdit(){
 }
 let lastComposerNodeId = '';
 let activeComposerSubject = null;
+let composerPinned = false;
 function currentComposerSubject(){
     return selectedNode();
 }
@@ -12958,7 +12960,10 @@ function updateComposer(){
     }
     composerUpdateSeq++;
     const node = selectedNode();
-    syncRunButtonState(node);
+    const subjectNode = (node && isSmartRunnableNode(node))
+        ? node
+        : (composerPinned ? (activeComposerNode() || activeComposerSubject) : node);
+    syncRunButtonState(subjectNode);
     if(smartCascadeSilentSelection && !activeComposerSubject){
         composer.classList.remove('open');
         if(cascadeRunBtn) cascadeRunBtn.style.display = 'none';
@@ -12966,7 +12971,7 @@ function updateComposer(){
         lastComposerNodeId = '';
         return;
     }
-    if(node?.type === 'smart-minimax'){
+    if(subjectNode?.type === 'smart-minimax'){
         savePromptDraftForCurrent();
         composer.classList.remove('open');
         if(cascadeRunBtn) cascadeRunBtn.style.display = 'none';
@@ -12975,37 +12980,37 @@ function updateComposer(){
         setPromptInputLocked(false);
         return;
     }
-    composer.classList.toggle('open', !!node);
-    if(!isSmartRunnableNode(node)){
+    composer.classList.toggle('open', !!subjectNode);
+    if(!isSmartRunnableNode(subjectNode)){
         if(cascadeRunBtn) cascadeRunBtn.style.display = 'none';
         savePromptDraftForCurrent();
         composer.classList.remove('open');
         activeComposerSubject = null;
         lastComposerNodeId = '';
         setPromptInputLocked(false);
-        if(!node) setPromptText('');
+        if(!subjectNode) setPromptText('');
         return;
     }
     // composer 只绑定节点本身：图片只是素材/结果，不携带提示词或参数状态。
-    const subject = node;
-    const composerKey = `${node.id}:node`;
+    const subject = subjectNode;
+    const composerKey = `${subjectNode.id}:node`;
     const switchedNode = lastComposerNodeId !== composerKey;
     if(switchedNode) savePromptDraftForCurrent();
     lastComposerNodeId = composerKey;
     activeComposerSubject = subject;
-    const hasPromptInput = promptInputNodesFor(node).length > 0;
+    const hasPromptInput = promptInputNodesFor(subjectNode).length > 0;
     if(switchedNode){
         settings = smartSettingsForNode(subject);
         loadPromptDraft(subject);
     }
     setPromptInputLocked(false);
-    syncCascadeRunButton(node);
-    positionComposerForNode(node);
+    syncCascadeRunButton(subjectNode);
+    positionComposerForNode(subjectNode);
     const ph = Math.max(60, Math.min(380, Number(settings.promptH) || 124));
     promptInput.style.setProperty('--prompt-h', `${ph}px`);
-    renderInputThumbsRow(node);
-    renderInputPromptPreview(node);
-    syncCascadeRunButton(node);
+    renderInputThumbsRow(subjectNode);
+    renderInputPromptPreview(subjectNode);
+    syncCascadeRunButton(subjectNode);
     scheduleDynamicParamsRefresh(140);
 }
 function renderInputPromptPreview(node){
@@ -17467,6 +17472,16 @@ shell.addEventListener('click', e => {
     if(nodeEl?.dataset?.id) exitZoomPreviewToNode(nodeEl.dataset.id);
     else exitZoomPreview(screenToWorld(e));
 }, true);
+shell.addEventListener('mousedown', e => {
+    if(e.button !== 1) return;
+    if(!e.target.closest('.image-node')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    closeCreateMenu();
+    didPan = false;
+    panState = {button:e.button, startX:e.clientX, startY:e.clientY, ox:viewport.x, oy:viewport.y};
+    shell.classList.add('panning');
+}, true);
 shell.onmousedown = e => {
     if(zoomPreviewState && e.button === 0 && !e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
     if(e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.create-menu,.smart-minimap')) return;
@@ -17480,21 +17495,14 @@ shell.onmousedown = e => {
         eraseConnectionsAtPoint(e);
         return;
     }
-    if(e.button === 0 && isRKeyDown){
-        e.preventDefault();
-        didPan = false;
-        selectionState = {startScreen:{x:e.clientX, y:e.clientY}, startWorld:screenToWorld(e)};
-        updateSelectionBox(e);
-        return;
-    }
-    if(e.button === 0 && (e.ctrlKey || e.metaKey)){
-        e.preventDefault();
-        didPan = false;
-        selectionState = {startScreen:{x:e.clientX, y:e.clientY}, startWorld:screenToWorld(e)};
-        updateSelectionBox(e);
-        return;
-    }
     if(e.button !== 0 && e.button !== 1) return;
+    if(e.button === 0){
+        e.preventDefault();
+        didPan = false;
+        selectionState = {startScreen:{x:e.clientX, y:e.clientY}, startWorld:screenToWorld(e)};
+        updateSelectionBox(e);
+        return;
+    }
     e.preventDefault();
     didPan = false;
     panState = {button:e.button, startX:e.clientX, startY:e.clientY, ox:viewport.x, oy:viewport.y};
@@ -17548,6 +17556,23 @@ smartArrangeBtn?.addEventListener('click', e => {
     e.preventDefault();
     e.stopPropagation();
     arrangeSelectedSmartNodes();
+});
+composerPinBtn?.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    composerPinned = !composerPinned;
+    composerPinBtn.classList.toggle('active', composerPinned);
+    const icon = composerPinBtn.querySelector('i');
+    const label = composerPinBtn.querySelector('span');
+    const title = composerPinned ? tr('smart.unpinComposer') : tr('smart.pinComposer');
+    if(icon) icon.setAttribute('data-lucide', composerPinned ? 'pin-off' : 'pin');
+    if(label) label.textContent = title;
+    if(label) label.removeAttribute('data-i18n');
+    composerPinBtn.title = title;
+    composerPinBtn.setAttribute('aria-label', title);
+    composerPinBtn.removeAttribute('data-i18n-title');
+    refreshIcons();
+    updateComposer();
 });
 window.onmousemove = e => {
     lastMouseWorld = screenToWorld(e);

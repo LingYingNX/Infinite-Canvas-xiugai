@@ -219,7 +219,7 @@
         "smart.toastNoUndo": { zh: "没有可撤销的操作", en: "Nothing to undo" },
         "smart.toastUndone": { zh: "已撤销", en: "Undone" },
         "smart.toastNeedPrompt": { zh: "请输入提示词", en: "Please enter a prompt" },
-        "smart.toastNeedGroup": { zh: "请先按住 Ctrl 框选至少两个图片节点", en: "Ctrl+box-select at least two image nodes first" },
+        "smart.toastNeedGroup": { zh: "请先框选至少两个图片节点", en: "Box-select at least two image nodes first" },
         "smart.toastUploadFail": { zh: "素材上传失败", en: "Media upload failed" },
         "smart.toastApiSettingsFail": { zh: "API 设置加载失败", en: "Failed to load API settings" },
         "smart.toastCanvasFail": { zh: "智能画布加载失败", en: "Failed to load smart canvas" },
@@ -271,7 +271,9 @@
         "smart.mediaDrawerAdd": { zh: "放入画布", en: "Add to canvas" },
         "smart.mediaDrawerSave": { zh: "存资产", en: "Save asset" },
         "smart.shortcuts": { zh: "快捷键", en: "Shortcuts" },
-        "smart.shortcutBoxSelect": { zh: "按住并拖拽框选节点", en: "Hold and drag to box-select nodes" },
+        "smart.pinComposer": { zh: "固定面板", en: "Pin panel" },
+        "smart.unpinComposer": { zh: "取消固定", en: "Unpin panel" },
+        "smart.shortcutBoxSelect": { zh: "左键拖拽框选节点", en: "Left-drag to box-select nodes" },
         "smart.shortcutGroup": { zh: "合并选中的图片为组", en: "Group selected image nodes" },
         "smart.shortcutUngroup": { zh: "释放选中的分组", en: "Ungroup selected group nodes" },
         "smart.shortcutUndo": { zh: "撤销上一步操作", en: "Undo the last action" },
@@ -283,7 +285,7 @@
         "smart.shortcutAssets": { zh: "打开/关闭资源库", en: "Open/close the asset library" },
         "smart.shortcutOverview": { zh: "缩小画布视图", en: "Zoom out to canvas overview" },
         "smart.shortcutCreateMenu": { zh: "打开快捷菜单", en: "Open the quick create menu" },
-        "smart.shortcutPan": { zh: "拖动画布", en: "Drag to pan the canvas" },
+        "smart.shortcutPan": { zh: "按住中键拖动画布", en: "Hold the middle mouse button to pan the canvas" },
         "smart.shortcutZoom": { zh: "缩放画布或预览图片", en: "Zoom canvas or preview image" },
         "smart.shortcutDelete": { zh: "删除选中节点", en: "Delete selected nodes" }
     });

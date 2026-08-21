@@ -1,0 +1,11 @@
+# Local deployment artifacts
+python/Lib/
+python/Scripts/
+resources/
+
+# Local user data
+assets/input/
+data/canvases/
+data/media_previews/
+data/projects.json
+data/prompt_libraries.json
