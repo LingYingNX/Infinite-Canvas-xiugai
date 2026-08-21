@@ -453,22 +453,24 @@ function attachCardDrag(card, c){
                 if(Math.abs(dx * viewport.scale) <= 3 && Math.abs(dy * viewport.scale) <= 3) return;
                 moved = true; card.classList.add('dragging');
             }
-            card.style.transform = `translate(${dx}px, ${dy}px)`;
+            c.board_x = origX + dx; c.board_y = origY + dy;
+            card.style.left = c.board_x + 'px';
+            card.style.top = c.board_y + 'px';
         };
         const onUp = () => {
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
-            card.classList.remove('dragging');
-            card.style.transform = '';
             if(moved){
                 c.board_x = origX + lastDx; c.board_y = origY + lastDy;
                 card.style.left = c.board_x + 'px';
                 card.style.top = c.board_y + 'px';
+                card.classList.remove('dragging');
                 persistMeta(c.id, { board_x: Math.round(c.board_x), board_y: Math.round(c.board_y) });
             } else {
                 c.board_x = origX; c.board_y = origY;
                 card.style.left = origX + 'px';
                 card.style.top = origY + 'px';
+                card.classList.remove('dragging');
                 openCanvas(c);
             }
         };
