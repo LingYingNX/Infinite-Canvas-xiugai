@@ -287,6 +287,7 @@
         "smart.shortcutCreateMenu": { zh: "打开快捷菜单", en: "Open the quick create menu" },
         "smart.shortcutPan": { zh: "按住中键拖动画布", en: "Hold the middle mouse button to pan the canvas" },
         "smart.shortcutZoom": { zh: "缩放画布或预览图片", en: "Zoom canvas or preview image" },
+        "smart.shortcutEraseConn": { zh: "右键滑动切割连接线", en: "Right-drag to cut connections" },
         "smart.shortcutDelete": { zh: "删除选中节点", en: "Delete selected nodes" }
     });
 })();

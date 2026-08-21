@@ -100,6 +100,8 @@ let panState = null;
 let didPan = false;
 let portDragState = null;
 let connectionEraseState = null;
+let rightEraseGesture = null;
+let rightEraseJustFinished = false;
 let saveTimer = null;
 let apiProviders = [];
 let comfyWorkflows = [];
@@ -17473,6 +17475,11 @@ shell.addEventListener('click', e => {
     else exitZoomPreview(screenToWorld(e));
 }, true);
 shell.addEventListener('mousedown', e => {
+    if(e.button === 0 && e.target.closest('.conn-cut')){
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+    }
     if(e.button !== 1) return;
     if(!e.target.closest('.image-node')) return;
     e.preventDefault();
@@ -17484,6 +17491,9 @@ shell.addEventListener('mousedown', e => {
 }, true);
 shell.onmousedown = e => {
     if(zoomPreviewState && e.button === 0 && !e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')) return;
+    if(e.button === 2 && !e.target.closest('.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.image-edit-modal,.create-menu,.smart-minimap')){
+        rightEraseGesture = {startX:e.clientX, startY:e.clientY, active:false};
+    }
     if(e.target.closest('.image-node,.composer,.smart-back,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.log-modal,.shortcut-modal,.create-menu,.smart-minimap')) return;
     closeCreateMenu();
     if(e.button === 0 && e.shiftKey){
@@ -17509,6 +17519,12 @@ shell.onmousedown = e => {
     shell.classList.add('panning');
 };
 shell.oncontextmenu = e => {
+    if(rightEraseGesture?.active || rightEraseJustFinished || connectionEraseState){
+        e.preventDefault();
+        e.stopPropagation();
+        rightEraseJustFinished = false;
+        return;
+    }
     if((e.ctrlKey || e.metaKey) || isRKeyDown){
         e.preventDefault();
         e.stopPropagation();
@@ -17579,6 +17595,20 @@ window.onmousemove = e => {
     if(smartMinimapDrag){
         e.preventDefault();
         centerViewportOnWorldPoint(minimapEventToWorld(e));
+        return;
+    }
+    if(rightEraseGesture){
+        if(!rightEraseGesture.active && Math.hypot(e.clientX - rightEraseGesture.startX, e.clientY - rightEraseGesture.startY) >= 6){
+            rightEraseGesture.active = true;
+            closeCreateMenu();
+            connectionEraseState = {started:false, count:0, indices:new Set(), lastX:rightEraseGesture.startX, lastY:rightEraseGesture.startY, trail:[]};
+            shell.classList.add('connection-erasing');
+        }
+        if(rightEraseGesture.active && connectionEraseState){
+            e.preventDefault();
+            updateConnectionEraseTrail(e);
+            eraseConnectionsAlongPointer(e);
+        }
         return;
     }
     if(connectionEraseState){
@@ -17852,6 +17882,19 @@ window.onmousemove = e => {
 window.onmouseup = e => {
     document.body.classList.remove('smart-node-drag');
     document.body.classList.remove('smart-node-resize');
+    if(rightEraseGesture){
+        rightEraseGesture = null;
+        if(connectionEraseState){
+            const changed = finishConnectionErase();
+            connectionEraseState = null;
+            shell.classList.remove('connection-erasing');
+            clearConnectionEraseTrail();
+            if(changed) scheduleSave();
+            rightEraseJustFinished = true;
+            setTimeout(() => { rightEraseJustFinished = false; }, 250);
+            return;
+        }
+    }
     if(connectionEraseState){
         const changed = finishConnectionErase();
         connectionEraseState = null;
