@@ -10159,7 +10159,11 @@ function ensureConnectionEraseTrail(){
 function updateConnectionEraseTrail(event){
     if(!connectionEraseState) return;
     const p = shellPoint(event);
-    connectionEraseState.trail = [...(connectionEraseState.trail || []), p].slice(-80);
+    const trail = connectionEraseState.trail || [];
+    const last = trail[trail.length - 1];
+    if(!last || Math.hypot(p.x - last.x, p.y - last.y) >= 1){
+        connectionEraseState.trail = [...trail, p];
+    }
     const points = connectionEraseState.trail;
     const svg = ensureConnectionEraseTrail();
     const rect = shell.getBoundingClientRect();
