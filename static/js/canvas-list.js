@@ -844,6 +844,17 @@ function showCardDeleteConfirm(canvasId){
 }
 
 /* ===== Export canvas (download the full canvas JSON) ===== */
+function downloadBlob(blob, filename){
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
 async function exportCanvas(id){
     const c = canvases.find(x => x.id === id);
     setStatus(L('正在导出...','Exporting...'));
@@ -854,11 +865,7 @@ async function exportCanvas(id){
         const cv = data.canvas || data;
         const base = String((c?.title) || cv.title || 'canvas').replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 60) || 'canvas';
         const blob = new Blob([JSON.stringify(cv, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = base + '.json';
-        document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 1500);
+        downloadBlob(blob, base + '.json');
         setStatus(L('已导出','Exported'));
     } catch(e){ console.error(e); setStatus(L('导出失败','Export failed')); }
 }
@@ -1027,12 +1034,7 @@ async function exportCanvasWithResources(id){
         }
         entries.push({ name:'resources-manifest.json', bytes:ZIP_ENCODER.encode(JSON.stringify({ canvas_id:id, resources:manifest }, null, 2)) });
         const blob = createZipBlob(entries);
-        const href = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = href;
-        a.download = `${base}.zip`;
-        document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(href), 1500);
+        downloadBlob(blob, `${base}.zip`);
         const included = Math.max(0, entries.length - 2);
         setStatus(skipped
             ? L(`已导出，跳过 ${skipped} 个资源`, `Exported, skipped ${skipped} assets`)
