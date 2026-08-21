@@ -72,6 +72,7 @@ let currentProjectId = rememberedProjectId();
 let pendingDeleteProjectId = null;
 let statusTimer = null;
 let clipboardCanvasId = null;   // 剪切的画布（切到别的项目后粘贴）
+let selectedIds = new Set();
 
 // board viewport (mirrors smart-canvas math)
 const viewport = { x: 0, y: 0, scale: 1 };
@@ -143,12 +144,21 @@ function resetView(){
 
 /* ===== Board pan & zoom ===== */
 let panState = null;
-function onBoardPanStart(e){
+let marqueeState = null;
+function onBoardMouseDown(e){
+    if(e.button === 1){
+        e.preventDefault();
+        if(e.target.closest('.ws-card') || e.target.closest('.ws-create-card') || e.target.closest('.ws-card-pop') || e.target.closest('button,input,textarea,select')) return;
+        closeCardMenu();
+        panState = { startX: e.clientX, startY: e.clientY, ox: viewport.x, oy: viewport.y, moved: false };
+        board.classList.add('panning');
+        return;
+    }
     if(e.button !== 0) return;
     if(e.target.closest('.ws-card') || e.target.closest('.ws-create-card') || e.target.closest('.ws-card-pop') || e.target.closest('button,input,textarea,select')) return;
+    e.preventDefault();
     closeCardMenu();
-    panState = { startX: e.clientX, startY: e.clientY, ox: viewport.x, oy: viewport.y, moved: false };
-    board.classList.add('panning');
+    marqueeState = { start: screenToWorld(e.clientX, e.clientY), moved: false, box: null };
 }
 function onBoardPanMove(e){
     if(!panState) return;
@@ -162,6 +172,50 @@ function onBoardPanEnd(){
     if(!panState) return;
     panState = null;
     board.classList.remove('panning');
+}
+function onMarqueeMove(e){
+    if(!marqueeState) return;
+    const p = screenToWorld(e.clientX, e.clientY);
+    const sx = marqueeState.start.x, sy = marqueeState.start.y;
+    const left = Math.min(sx, p.x), top = Math.min(sy, p.y);
+    const width = Math.abs(p.x - sx), height = Math.abs(p.y - sy);
+    if(!marqueeState.moved){
+        if(width * viewport.scale <= 4 && height * viewport.scale <= 4) return;
+        marqueeState.moved = true;
+        const box = document.createElement('div');
+        box.className = 'ws-selection-box';
+        boardWorld.appendChild(box);
+        marqueeState.box = box;
+    }
+    const box = marqueeState.box;
+    box.style.left = left + 'px';
+    box.style.top = top + 'px';
+    box.style.width = width + 'px';
+    box.style.height = height + 'px';
+}
+function onMarqueeEnd(e){
+    if(!marqueeState) return;
+    const ms = marqueeState;
+    marqueeState = null;
+    if(ms.moved && ms.box){
+        const boxLeft = parseFloat(ms.box.style.left) || 0;
+        const boxTop = parseFloat(ms.box.style.top) || 0;
+        const boxRight = boxLeft + (parseFloat(ms.box.style.width) || 0);
+        const boxBottom = boxTop + (parseFloat(ms.box.style.height) || 0);
+        const ids = Array.from(boardWorld.querySelectorAll('.ws-card'))
+            .filter(card => rectsIntersect(cardWorldRect(card), { left: boxLeft, top: boxTop, right: boxRight, bottom: boxBottom }))
+            .map(card => card.dataset.canvasId);
+        if(e.ctrlKey || e.metaKey){
+            ids.forEach(id => selectedIds.add(id));
+        } else {
+            selectedIds = new Set(ids);
+        }
+        syncSelectionUI();
+    } else if(!ms.moved){
+        selectedIds.clear();
+        syncSelectionUI();
+    }
+    ms.box?.remove();
 }
 function onBoardWheel(e){
     e.preventDefault();
@@ -195,6 +249,7 @@ async function loadAll(){
         projects = (pData.projects || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
         if(!projects.length) projects = [{ id: 'default', name: L('默认项目','Default'), order: 0, canvas_count: 0 }];
         canvases = cData.canvases || [];
+        selectedIds.clear();
         // pick first project (prefer default / order 0)
         if(!projects.find(p => p.id === currentProjectId)){
             const def = projects.find(p => p.id === 'default') || projects.slice().sort((a, b) => (a.order || 0) - (b.order || 0))[0];
@@ -267,6 +322,7 @@ function selectProject(pid){
     currentProjectId = pid;
     rememberProjectId(pid);
     closeTrashView();
+    selectedIds.clear();
     renderProjects();
     renderBoard();
     resetView();
@@ -382,6 +438,25 @@ function autoLayoutNulls(items){
     });
 }
 
+function cardWorldRect(card){
+    const left = parseFloat(card.style.left) || 0;
+    const top = parseFloat(card.style.top) || 0;
+    return {
+        left,
+        top,
+        right: left + (card.offsetWidth || 248),
+        bottom: top + (card.offsetHeight || 150)
+    };
+}
+function rectsIntersect(a, b){
+    return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+function syncSelectionUI(){
+    boardWorld.querySelectorAll('.ws-card').forEach(card => {
+        card.classList.toggle('selected', selectedIds.has(card.dataset.canvasId));
+    });
+}
+
 function renderBoard(){
     updateBoardHeader();
     const items = canvasesInProject(currentProjectId);
@@ -398,7 +473,8 @@ function buildCard(c){
     const card = document.createElement('div');
     card.className = 'ws-card'
         + (String(c.color || '').trim() ? ' cc-marked' : '')
-        + (clipboardCanvasId === c.id ? ' cut' : '');
+        + (clipboardCanvasId === c.id ? ' cut' : '')
+        + (selectedIds.has(c.id) ? ' selected' : '');
     card.dataset.canvasId = c.id;
     card.style.left = (c.board_x || 0) + 'px';
     card.style.top = (c.board_y || 0) + 'px';
@@ -422,6 +498,22 @@ function buildCard(c){
             </div>
         </div>`;
     attachCardDrag(card, c);
+    card.addEventListener('dblclick', e => {
+        if(e.target.closest('.ws-card-menu') || e.target.closest('.ws-card-delete-confirm')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        openCanvas(c);
+    });
+    card.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        if(!selectedIds.has(c.id)){
+            selectedIds = new Set([c.id]);
+            syncSelectionUI();
+        }
+        closeCardMenu();
+        openCardMenu(c.id, null, e.clientX, e.clientY);
+    });
     const menuBtn = card.querySelector('.ws-card-menu');
     menuBtn.onmousedown = e => e.stopPropagation();
     menuBtn.onclick = e => { e.stopPropagation(); openCardMenu(c.id, menuBtn); };
@@ -441,32 +533,58 @@ function attachCardDrag(card, c){
         e.preventDefault();
         e.stopPropagation();
         closeCardMenu();
+        const additive = e.ctrlKey || e.metaKey;
+        if(additive){
+            if(selectedIds.has(c.id)) selectedIds.delete(c.id);
+            else selectedIds.add(c.id);
+            syncSelectionUI();
+        } else if(!selectedIds.has(c.id)){
+            selectedIds = new Set([c.id]);
+            syncSelectionUI();
+        }
+        const dragIds = selectedIds.has(c.id) ? Array.from(selectedIds) : [c.id];
+        const origins = new Map();
+        dragIds.forEach(id => {
+            const cc = canvases.find(x => x.id === id);
+            if(cc) origins.set(id, { x: cc.board_x || 0, y: cc.board_y || 0 });
+        });
         const startWorld = screenToWorld(e.clientX, e.clientY);
-        const origX = c.board_x || 0, origY = c.board_y || 0;
         let moved = false;
         const onMove = ev => {
             const w = screenToWorld(ev.clientX, ev.clientY);
             const dx = w.x - startWorld.x, dy = w.y - startWorld.y;
             if(!moved){
                 if(Math.abs(dx * viewport.scale) <= 3 && Math.abs(dy * viewport.scale) <= 3) return;
-                moved = true; card.classList.add('dragging');
+                moved = true;
+                dragIds.forEach(id => {
+                    const el = boardWorld.querySelector(`[data-canvas-id="${CSS.escape(id)}"]`);
+                    el?.classList.add('dragging');
+                });
             }
-            c.board_x = origX + dx; c.board_y = origY + dy;
-            card.style.left = c.board_x + 'px';
-            card.style.top = c.board_y + 'px';
+            dragIds.forEach(id => {
+                const cc = canvases.find(x => x.id === id);
+                const o = origins.get(id);
+                if(!cc || !o) return;
+                cc.board_x = o.x + dx; cc.board_y = o.y + dy;
+                const el = boardWorld.querySelector(`[data-canvas-id="${CSS.escape(id)}"]`);
+                if(el){
+                    el.style.left = cc.board_x + 'px';
+                    el.style.top = cc.board_y + 'px';
+                }
+            });
         };
         const onUp = () => {
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
+            dragIds.forEach(id => {
+                const el = boardWorld.querySelector(`[data-canvas-id="${CSS.escape(id)}"]`);
+                el?.classList.remove('dragging');
+            });
             if(moved){
-                card.classList.remove('dragging');
-                persistMeta(c.id, { board_x: Math.round(c.board_x), board_y: Math.round(c.board_y) });
-            } else {
-                c.board_x = origX; c.board_y = origY;
-                card.style.left = origX + 'px';
-                card.style.top = origY + 'px';
-                card.classList.remove('dragging');
-                openCanvas(c);
+                dragIds.forEach(id => {
+                    const cc = canvases.find(x => x.id === id);
+                    if(cc) persistMeta(id, { board_x: Math.round(cc.board_x), board_y: Math.round(cc.board_y) });
+                });
             }
         };
         document.addEventListener('mousemove', onMove);
@@ -566,7 +684,7 @@ function positionPopup(pop, left, top, fallbackW, fallbackH){
     pop.style.left = Math.round(Math.max(12, Math.min(left, window.innerWidth - w - 12))) + 'px';
     pop.style.top = Math.round(Math.max(12, Math.min(top, window.innerHeight - h - 12))) + 'px';
 }
-function openCardMenu(canvasId, anchorBtn){
+function openCardMenu(canvasId, anchorBtn, clientX, clientY){
     closeCardMenu();
     const c = canvases.find(x => x.id === canvasId);
     if(!c) return;
@@ -580,11 +698,15 @@ function openCardMenu(canvasId, anchorBtn){
         <div class="ws-pop-sep"></div>
         <button class="ws-pop-item danger" data-act="delete"><i data-lucide="trash-2" class="w-4 h-4"></i><span>${L('删除','Delete')}</span></button>`;
     document.body.appendChild(pop);
-    const r = anchorBtn.getBoundingClientRect();
-    const w = pop.offsetWidth || 188, h = pop.offsetHeight || 120;
-    let top = r.bottom + 6;
-    if(top + h > window.innerHeight - 12) top = r.top - h - 6;
-    positionPopup(pop, r.left, top, 188, 120);
+    if(anchorBtn){
+        const r = anchorBtn.getBoundingClientRect();
+        const w = pop.offsetWidth || 188, h = pop.offsetHeight || 120;
+        let top = r.bottom + 6;
+        if(top + h > window.innerHeight - 12) top = r.top - h - 6;
+        positionPopup(pop, r.left, top, 188, 120);
+    } else {
+        positionPopup(pop, clientX, clientY, 188, 120);
+    }
     pop.querySelector('[data-act="rename"]').onclick = () => { closeCardMenu(); startCardRename(canvasId); };
     pop.querySelector('[data-act="export"]').onclick = () => { closeCardMenu(); exportCanvas(canvasId); };
     pop.querySelector('[data-act="export-assets"]').onclick = () => { closeCardMenu(); exportCanvasWithResources(canvasId); };
@@ -596,6 +718,8 @@ function openCardMenu(canvasId, anchorBtn){
 /* ===== Board context menu (import / new) ===== */
 function openBoardContextMenu(e){
     closeCardMenu();
+    selectedIds.clear();
+    syncSelectionUI();
     const pop = document.createElement('div');
     pop.className = 'ws-card-pop ws-board-pop';
     const worldPt = screenToWorld(e.clientX, e.clientY);
@@ -958,6 +1082,7 @@ async function deleteCanvas(id){
         const res = await fetch(`/api/canvases/${encodeURIComponent(id)}`, { method: 'DELETE' });
         if(!res.ok) throw new Error('delete failed');
         canvases = canvases.filter(x => x.id !== id);
+        selectedIds.delete(id);
         renderBoard();
         renderProjects();
         refreshTrashCount();
@@ -1064,9 +1189,11 @@ async function purgeCanvas(id){
 }
 
 /* ===== Event bindings ===== */
-board.addEventListener('mousedown', onBoardPanStart);
+board.addEventListener('mousedown', onBoardMouseDown);
 document.addEventListener('mousemove', onBoardPanMove);
 document.addEventListener('mouseup', onBoardPanEnd);
+document.addEventListener('mousemove', onMarqueeMove);
+document.addEventListener('mouseup', onMarqueeEnd);
 board.addEventListener('wheel', onBoardWheel, { passive: false });
 board.addEventListener('dblclick', e => {
     if(e.target.closest('.ws-card') || e.target.closest('.ws-create-card')) return;
