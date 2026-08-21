@@ -157,6 +157,8 @@ function onBoardMouseDown(e){
     }
     if(e.button !== 0) return;
     if(e.target.closest('.ws-card') || e.target.closest('.ws-create-card') || e.target.closest('.ws-card-pop') || e.target.closest('button,input,textarea,select')) return;
+    const activeRename = boardWorld.querySelector('.ws-card-title-input');
+    if(activeRename) activeRename.blur();
     e.preventDefault();
     closeCardMenu();
     marqueeState = { start: screenToWorld(e.clientX, e.clientY), moved: false, box: null };
@@ -481,6 +483,7 @@ function buildCard(c){
         + (clipboardCanvasId === c.id ? ' cut' : '')
         + (selectedIds.has(c.id) ? ' selected' : '');
     card.dataset.canvasId = c.id;
+    card.tabIndex = -1;
     card.style.left = (c.board_x || 0) + 'px';
     card.style.top = (c.board_y || 0) + 'px';
     // 卡片布局：顶部=类型标签；中部=标题；底部=节点数·时间。已移除图标。
@@ -516,6 +519,7 @@ function buildCard(c){
             syncSelectionUI();
         }
         lastSelectedId = c.id;
+        if(!boardWorld.querySelector('.ws-card-title-input')) card.focus({ preventScroll: true });
         closeCardMenu();
         openCardMenu(c.id, e.clientX, e.clientY);
     });
@@ -551,6 +555,7 @@ function attachCardDrag(card, c){
         } else {
             lastSelectedId = c.id;
         }
+        if(!boardWorld.querySelector('.ws-card-title-input')) card.focus({ preventScroll: true });
         const dragIds = selectedIds.has(c.id) ? Array.from(selectedIds) : [c.id];
         const origins = new Map();
         dragIds.forEach(id => {
@@ -1244,7 +1249,7 @@ document.addEventListener('mousedown', e => {
 });
 
 document.addEventListener('keydown', e => {
-    if(e.key === 'F2'){
+    if(e.key === 'F2' || e.code === 'F2'){
         const t = e.target;
         if(t && (t.closest?.('input,textarea,select') || t.isContentEditable)) return;
         if(trashPanel.classList.contains('active')) return;
