@@ -323,9 +323,6 @@ function lockedRecommendedApi(itemOrId){
             || (apiHost && normalizedHost === apiHost);
     }) || null;
 }
-function hasLockedRecommendedProtocol(itemOrId){
-    return Boolean(lockedRecommendedApi(itemOrId));
-}
 function applyLockedRecommendedProtocol(item){
     const api = lockedRecommendedApi(item);
     if(!item || !api) return false;
@@ -740,46 +737,6 @@ async function saveOnboardingRunningHubKey(){
         if(rhWalletKeyInput) rhWalletKeyInput.value = '';
     }
 }
-function applyProviderOnboardingDefaults(id){
-    const item = providers.find(provider => provider.id === id);
-    if(!item) return;
-    if(id === 'modelscope'){
-        item.base_url = MS_DEFAULT_BASE_URL;
-        item.protocol = 'openai';
-        item.image_models = unique([...MS_BUILTIN_IMAGE_MODELS, ...(item.image_models || [])]);
-        item.chat_models = unique([...(item.chat_models || [])]);
-        item.ms_defaults_version = Math.max(3, Number(item.ms_defaults_version || 0));
-    } else if(id === 'runninghub'){
-        item.base_url = normalizeRunningHubBaseUrl(item.base_url);
-        item.protocol = 'runninghub';
-        item.image_models = unique(item.image_models || []);
-        item.chat_models = unique(item.chat_models || []);
-        item.video_models = unique(item.video_models || []);
-        ensureRunningHubLists(item);
-    } else if(id === 'volcengine'){
-        item.base_url = VOLCENGINE_DEFAULT_BASE_URL;
-        item.protocol = 'volcengine';
-        item.video_models = unique(item.video_models || []);
-        item.volcengine_project_name = item.volcengine_project_name || VOLCENGINE_DEFAULT_PROJECT_NAME;
-        item.volcengine_region = item.volcengine_region || VOLCENGINE_DEFAULT_REGION;
-    } else if(id === 'lingjing'){
-        item.base_url = item.base_url || LINGJING_DEFAULT_BASE_URL;
-        item.protocol = item.protocol || 'openai';
-        item.image_request_mode = normalizeImageRequestMode(item.image_request_mode);
-    } else if(id === 'jimeng'){
-        item.base_url = '';
-        item.protocol = 'jimeng';
-        item.image_models = unique([...(item.image_models || []).filter(model => !JIMENG_LEGACY_IMAGE_MODELS.has(String(model || '').trim())), ...JIMENG_DEFAULT_IMAGE_MODELS]);
-        item.video_models = unique([...(item.video_models || []).filter(model => !JIMENG_LEGACY_VIDEO_MODELS.has(String(model || '').trim())), ...JIMENG_DEFAULT_VIDEO_MODELS]);
-    } else if(id === 'codex'){
-        applyCliProtocolDefaults(item, 'codex');
-    } else if(id === 'gemini-cli'){
-        applyCliProtocolDefaults(item, 'gemini-cli');
-    }
-    selectedId = item.id;
-    renderEditor();
-    setStatus('已显示默认配置，填写 Key 后点击保存生效');
-}
 function refreshProviderOnboarding(){
     renderProviderOnboarding(provider());
     refreshIcons();
@@ -874,10 +831,6 @@ function updateProtocolFromInput(){
 }
 function isVolcengineProvider(item){
     return String(item?.protocol || '').toLowerCase() === 'volcengine';
-}
-function handleRhPasteInput(value){
-    const parsed = parseRunningHubRunRef(value);
-    if(parsed) setStatus('已识别 RunningHub 路径，点击右侧创建卡片');
 }
 async function createRhEntryFromPaste(){
     const item = provider();
@@ -1265,19 +1218,6 @@ function updateRhWorkflowEditorMeta(prop, value){
 function toggleRhWorkflowEditorGroup(groupId){
     const expanded = rhWorkflowEditorState.expanded;
     expanded[groupId] = expanded[groupId] === false;
-    withRhEditorScrollPreserved(() => renderRhWorkflowEditor());
-}
-function focusRhWorkflowEditorNode(nodeId){
-    const state = rhWorkflowEditorState;
-    const config = state.config;
-    if(!config) return;
-    state.activeNodeId = String(nodeId || '');
-    (config.fields || []).forEach(field => {
-        if(String(field.nodeId) === state.activeNodeId){
-            const groupId = rhWorkflowGroupKey(field).replace(/[^a-zA-Z0-9_-]/g, '_');
-            state.expanded[groupId] = true;
-        }
-    });
     withRhEditorScrollPreserved(() => renderRhWorkflowEditor());
 }
 function openRhWorkflowNodePopover(nodeId, anchorEl){
@@ -1785,39 +1725,6 @@ function renderRhWorkflowEditorSummary(){
         <div><span>字段</span><strong>${enabled} / ${fields.length}</strong></div>
         ${rhEditorMode === 'workflow' ? `<div><span>可选图</span><strong>${optionalImages} / ${imageFields.length}</strong></div>` : ''}
     `;
-}
-function renderRhWorkflowEditorNodeList(){
-    const config = rhWorkflowEditorState.config;
-    if(!config || !rhWorkflowEditorNodeList) return;
-    const groups = {};
-    (config.fields || []).forEach(field => {
-        const key = rhWorkflowGroupKey(field);
-        (groups[key] = groups[key] || { field, items:[] }).items.push(field);
-    });
-    const values = Object.entries(groups);
-    if(!values.length){
-        rhWorkflowEditorNodeList.innerHTML = `<div class="rh-editor-empty">没有可配置字段</div>`;
-        return;
-    }
-    rhWorkflowEditorNodeList.innerHTML = values.map(([groupKey, group]) => {
-        const safeGroup = groupKey.replace(/[^a-zA-Z0-9_-]/g, '_');
-        const expanded = rhWorkflowEditorState.expanded[safeGroup] !== false;
-        const enabledCount = group.items.filter(field => field.enabled === true).length;
-        return `
-            <div class="rh-editor-node ${expanded ? 'expanded' : ''} ${String(group.field.nodeId) === rhWorkflowEditorState.activeNodeId ? 'is-focused' : ''}" data-node-id="${escapeAttr(group.field.nodeId)}">
-                <button class="rh-editor-node-head" type="button" onclick="toggleRhWorkflowEditorGroup('${escapeAttr(safeGroup)}')">
-                    <span>
-                        <strong>${escapeHtml(group.field.group || `Node #${group.field.nodeId}`)}</strong>
-                        <small>#${escapeHtml(group.field.nodeId)} · ${enabledCount}/${group.items.length}</small>
-                    </span>
-                    <i data-lucide="chevron-down" class="w-4 h-4"></i>
-                </button>
-                <div class="rh-editor-node-body">
-                    ${group.items.map(field => renderRhWorkflowEditorField(field)).join('')}
-                </div>
-            </div>
-        `;
-    }).join('');
 }
 function renderRhWorkflowEditorField(field){
     const key = rhWorkflowFieldKey(field);
