@@ -438,13 +438,11 @@ function attachCardDrag(card, c){
         const onMove = ev => {
             const w = screenToWorld(ev.clientX, ev.clientY);
             const dx = w.x - startWorld.x, dy = w.y - startWorld.y;
-            if(!moved && (Math.abs(dx * viewport.scale) > 5 || Math.abs(dy * viewport.scale) > 5)){
+            c.board_x = origX + dx; c.board_y = origY + dy;
+            card.style.left = c.board_x + 'px';
+            card.style.top = c.board_y + 'px';
+            if(!moved && (Math.abs(dx * viewport.scale) > 3 || Math.abs(dy * viewport.scale) > 3)){
                 moved = true; card.classList.add('dragging');
-            }
-            if(moved){
-                c.board_x = origX + dx; c.board_y = origY + dy;
-                card.style.left = c.board_x + 'px';
-                card.style.top = c.board_y + 'px';
             }
         };
         const onUp = () => {
@@ -454,6 +452,9 @@ function attachCardDrag(card, c){
             if(moved){
                 persistMeta(c.id, { board_x: Math.round(c.board_x), board_y: Math.round(c.board_y) });
             } else {
+                c.board_x = origX; c.board_y = origY;
+                card.style.left = origX + 'px';
+                card.style.top = origY + 'px';
                 openCanvas(c);
             }
         };
