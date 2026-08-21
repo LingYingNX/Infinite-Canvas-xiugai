@@ -10152,7 +10152,7 @@ function ensureConnectionEraseTrail(){
     svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('class', 'connection-erase-trail');
     svg.setAttribute('aria-hidden', 'true');
-    svg.innerHTML = '<path class="connection-erase-trail-glow" fill="none"></path><path class="connection-erase-trail-line" fill="none"></path>';
+    svg.innerHTML = '<path class="connection-erase-trail-line" fill="none"></path>';
     shell.appendChild(svg);
     return svg;
 }
@@ -13003,7 +13003,6 @@ function updateComposer(){
     if(switchedNode) savePromptDraftForCurrent();
     lastComposerNodeId = composerKey;
     activeComposerSubject = subject;
-    const hasPromptInput = promptInputNodesFor(subjectNode).length > 0;
     if(switchedNode){
         settings = smartSettingsForNode(subject);
         loadPromptDraft(subject);

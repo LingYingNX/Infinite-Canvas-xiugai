@@ -155,7 +155,7 @@ function onBoardPanMove(e){
     const z = uiScale();
     viewport.x = panState.ox + (e.clientX - panState.startX) / z;
     viewport.y = panState.oy + (e.clientY - panState.startY) / z;
-    if(Math.abs(e.clientX - panState.startX) > 3 || Math.abs(e.clientY - panState.startY) > 3) panState.moved = true;
+    if(Math.abs(e.clientX - panState.startX) > 3 / z || Math.abs(e.clientY - panState.startY) > 3 / z) panState.moved = true;
     applyViewport();
 }
 function onBoardPanEnd(){
@@ -444,11 +444,9 @@ function attachCardDrag(card, c){
         const startWorld = screenToWorld(e.clientX, e.clientY);
         const origX = c.board_x || 0, origY = c.board_y || 0;
         let moved = false;
-        let lastDx = 0, lastDy = 0;
         const onMove = ev => {
             const w = screenToWorld(ev.clientX, ev.clientY);
             const dx = w.x - startWorld.x, dy = w.y - startWorld.y;
-            lastDx = dx; lastDy = dy;
             if(!moved){
                 if(Math.abs(dx * viewport.scale) <= 3 && Math.abs(dy * viewport.scale) <= 3) return;
                 moved = true; card.classList.add('dragging');
@@ -461,9 +459,6 @@ function attachCardDrag(card, c){
             document.removeEventListener('mousemove', onMove);
             document.removeEventListener('mouseup', onUp);
             if(moved){
-                c.board_x = origX + lastDx; c.board_y = origY + lastDy;
-                card.style.left = c.board_x + 'px';
-                card.style.top = c.board_y + 'px';
                 card.classList.remove('dragging');
                 persistMeta(c.id, { board_x: Math.round(c.board_x), board_y: Math.round(c.board_y) });
             } else {
@@ -566,6 +561,11 @@ async function createCanvasOnBoard(title, kind, worldPt){
 
 /* ===== Card context menu (rename / delete / move) ===== */
 function closeCardMenu(){ document.querySelector('.ws-card-pop')?.remove(); }
+function positionPopup(pop, left, top, fallbackW, fallbackH){
+    const w = pop.offsetWidth || fallbackW, h = pop.offsetHeight || fallbackH;
+    pop.style.left = Math.round(Math.max(12, Math.min(left, window.innerWidth - w - 12))) + 'px';
+    pop.style.top = Math.round(Math.max(12, Math.min(top, window.innerHeight - h - 12))) + 'px';
+}
 function openCardMenu(canvasId, anchorBtn){
     closeCardMenu();
     const c = canvases.find(x => x.id === canvasId);
@@ -582,11 +582,9 @@ function openCardMenu(canvasId, anchorBtn){
     document.body.appendChild(pop);
     const r = anchorBtn.getBoundingClientRect();
     const w = pop.offsetWidth || 188, h = pop.offsetHeight || 120;
-    let left = Math.min(r.left, window.innerWidth - w - 12);
     let top = r.bottom + 6;
     if(top + h > window.innerHeight - 12) top = r.top - h - 6;
-    pop.style.left = Math.round(Math.max(12, left)) + 'px';
-    pop.style.top = Math.round(Math.max(12, top)) + 'px';
+    positionPopup(pop, r.left, top, 188, 120);
     pop.querySelector('[data-act="rename"]').onclick = () => { closeCardMenu(); startCardRename(canvasId); };
     pop.querySelector('[data-act="export"]').onclick = () => { closeCardMenu(); exportCanvas(canvasId); };
     pop.querySelector('[data-act="export-assets"]').onclick = () => { closeCardMenu(); exportCanvasWithResources(canvasId); };
@@ -605,11 +603,7 @@ function openBoardContextMenu(e){
         <button class="ws-pop-item" data-act="import"><i data-lucide="upload" class="w-4 h-4"></i><span>${L('导入画布','Import canvas')}</span></button>
         <button class="ws-pop-item" data-act="import-assets"><i data-lucide="archive" class="w-4 h-4"></i><span>${L('导入画布 + 资源','Import canvas + assets')}</span></button>`;
     document.body.appendChild(pop);
-    const w = pop.offsetWidth || 214, h = pop.offsetHeight || 88;
-    let left = Math.min(e.clientX, window.innerWidth - w - 12);
-    let top = Math.min(e.clientY, window.innerHeight - h - 12);
-    pop.style.left = Math.round(Math.max(12, left)) + 'px';
-    pop.style.top = Math.round(Math.max(12, top)) + 'px';
+    positionPopup(pop, e.clientX, e.clientY, 214, 88);
     pop.querySelector('[data-act="import"]').onclick = () => { closeCardMenu(); pickCanvasImportFile(false, worldPt); };
     pop.querySelector('[data-act="import-assets"]').onclick = () => { closeCardMenu(); pickCanvasImportFile(true, worldPt); };
     refreshIcons();
@@ -663,7 +657,8 @@ async function importCanvasFile(file, worldPt){
             : L('已导入','Imported'));
     } catch(e){
         console.error(e);
-        setStatus(L('导入失败','Import failed'));
+        const msg = e && e.message ? e.message : L('导入失败','Import failed');
+        setStatus(L(`导入失败：${msg}`, `Import failed: ${msg}`));
     }
 }
 
