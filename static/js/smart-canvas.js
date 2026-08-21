@@ -17598,7 +17598,7 @@ window.onmousemove = e => {
         return;
     }
     if(rightEraseGesture){
-        if(!rightEraseGesture.active && Math.hypot(e.clientX - rightEraseGesture.startX, e.clientY - rightEraseGesture.startY) >= 6){
+        if(!rightEraseGesture.active && Math.hypot(e.clientX - rightEraseGesture.startX, e.clientY - rightEraseGesture.startY) >= 2){
             rightEraseGesture.active = true;
             closeCreateMenu();
             connectionEraseState = {started:false, count:0, indices:new Set(), lastX:rightEraseGesture.startX, lastY:rightEraseGesture.startY, trail:[]};
