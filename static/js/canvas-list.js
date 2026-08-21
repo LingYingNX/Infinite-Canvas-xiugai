@@ -161,7 +161,7 @@ function onBoardMouseDown(e){
     if(activeRename) activeRename.blur();
     e.preventDefault();
     closeCardMenu();
-    marqueeState = { start: screenToWorld(e.clientX, e.clientY), moved: false, box: null };
+    marqueeState = { start: screenToWorld(e.clientX, e.clientY), startScreen: {x:e.clientX, y:e.clientY}, moved: false };
 }
 function onBoardPanMove(e){
     if(!panState) return;
@@ -180,33 +180,34 @@ function onMarqueeMove(e){
     if(!marqueeState) return;
     const p = screenToWorld(e.clientX, e.clientY);
     const sx = marqueeState.start.x, sy = marqueeState.start.y;
-    const left = Math.min(sx, p.x), top = Math.min(sy, p.y);
-    const width = Math.abs(p.x - sx), height = Math.abs(p.y - sy);
     if(!marqueeState.moved){
-        if(width * viewport.scale <= 4 && height * viewport.scale <= 4) return;
+        if(Math.abs(p.x - sx) * viewport.scale <= 4 && Math.abs(p.y - sy) * viewport.scale <= 4) return;
         marqueeState.moved = true;
-        const box = document.createElement('div');
-        box.className = 'ws-selection-box';
-        boardWorld.appendChild(box);
-        marqueeState.box = box;
     }
-    const box = marqueeState.box;
-    box.style.left = left + 'px';
-    box.style.top = top + 'px';
-    box.style.width = width + 'px';
-    box.style.height = height + 'px';
+    const z = uiScale();
+    const rect = board.getBoundingClientRect();
+    SelectionBox.update(
+        (marqueeState.startScreen.x - rect.left) / z,
+        (marqueeState.startScreen.y - rect.top) / z,
+        (e.clientX - rect.left) / z,
+        (e.clientY - rect.top) / z
+    );
 }
 function onMarqueeEnd(e){
     if(!marqueeState) return;
     const ms = marqueeState;
     marqueeState = null;
-    if(ms.moved && ms.box){
-        const boxLeft = parseFloat(ms.box.style.left) || 0;
-        const boxTop = parseFloat(ms.box.style.top) || 0;
-        const boxRight = boxLeft + (parseFloat(ms.box.style.width) || 0);
-        const boxBottom = boxTop + (parseFloat(ms.box.style.height) || 0);
+    SelectionBox.hide();
+    if(ms.moved){
+        const a = ms.start, b = screenToWorld(e);
+        const rect = {
+            left: Math.min(a.x, b.x),
+            top: Math.min(a.y, b.y),
+            right: Math.max(a.x, b.x),
+            bottom: Math.max(a.y, b.y)
+        };
         const ids = Array.from(boardWorld.querySelectorAll('.ws-card'))
-            .filter(card => rectsIntersect(cardWorldRect(card), { left: boxLeft, top: boxTop, right: boxRight, bottom: boxBottom }))
+            .filter(card => rectsIntersect(cardWorldRect(card), rect))
             .map(card => card.dataset.canvasId);
         if(e.ctrlKey || e.metaKey){
             ids.forEach(id => selectedIds.add(id));
@@ -215,12 +216,11 @@ function onMarqueeEnd(e){
         }
         lastSelectedId = selectedIds.size ? Array.from(selectedIds)[0] : null;
         syncSelectionUI();
-    } else if(!ms.moved){
+    } else {
         selectedIds.clear();
         lastSelectedId = null;
         syncSelectionUI();
     }
-    ms.box?.remove();
 }
 function onBoardWheel(e){
     e.preventDefault();

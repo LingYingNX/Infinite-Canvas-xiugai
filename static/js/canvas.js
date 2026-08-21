@@ -274,7 +274,7 @@ const linkCreateMenu = document.getElementById('linkCreateMenu');
 const nodeInputMenu = document.getElementById('nodeInputMenu');
 const nodeOutputMenu = document.getElementById('nodeOutputMenu');
 const imageNodeMenu = document.getElementById('imageNodeMenu');
-const selectionBox = document.getElementById('selectionBox');
+const selectionBox = SelectionBox.init('#selectionBox');
 const selectionHub = document.getElementById('selectionHub');
 const gateStatus = document.getElementById('gateStatus');
 const gateCreateBtn = document.getElementById('gateCreateBtn');
@@ -14682,25 +14682,19 @@ function startSelection(e){
     if(document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
     selectDrag = {sx:e.clientX, sy:e.clientY, x:e.clientX, y:e.clientY};
     document.body.classList.add('canvas-selecting');
-    selectionBox.style.display = 'block';
-    updateSelectionBox(e.clientX, e.clientY);
+    SelectionBox.update(selectDrag.sx, selectDrag.sy, selectDrag.x, selectDrag.y);
     window.onmousemove = e2 => updateSelectionBox(e2.clientX, e2.clientY);
     window.onmouseup = finishSelection;
 }
 function updateSelectionBox(x, y){
     if(!selectDrag) return;
     selectDrag.x = x; selectDrag.y = y;
-    const left = Math.min(selectDrag.sx, x);
-    const top = Math.min(selectDrag.sy, y);
-    selectionBox.style.left = `${left}px`;
-    selectionBox.style.top = `${top}px`;
-    selectionBox.style.width = `${Math.abs(x - selectDrag.sx)}px`;
-    selectionBox.style.height = `${Math.abs(y - selectDrag.sy)}px`;
+    SelectionBox.update(selectDrag.sx, selectDrag.sy, x, y);
 }
 function finishSelection(){
     if(!selectDrag) return;
     const rect = selectionBox.getBoundingClientRect();
-    selectionBox.style.display = 'none';
+    SelectionBox.hide();
     selected.clear();
     nodesEl.querySelectorAll('.node').forEach(el => {
         const r = el.getBoundingClientRect();
@@ -16022,7 +16016,7 @@ window.addEventListener('keyup', e => {
 window.addEventListener('blur', () => { isRKeyDown = false; setKnifeMode(false); });
 window.addEventListener('blur', () => {
     if(selectDrag){
-        selectionBox.style.display = 'none';
+        SelectionBox.hide();
         selectDrag = null;
         document.body.classList.remove('canvas-selecting');
         window.onmousemove = null;

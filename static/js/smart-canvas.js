@@ -40,7 +40,6 @@ const smartWorkflowTransferSub = document.getElementById('smartWorkflowTransferS
 const smartWorkflowExportMeta = document.getElementById('smartWorkflowExportMeta');
 const smartWorkflowImportInput = document.getElementById('smartWorkflowImportInput');
 const smartWorkflowImportDropZone = document.getElementById('smartWorkflowImportDropZone');
-const selectionBox = document.getElementById('selectionBox');
 const assetToggle = document.getElementById('assetToggle');
 const assetPanel = document.getElementById('assetPanel');
 const assetCloseBtn = document.getElementById('assetCloseBtn');
@@ -17213,13 +17212,7 @@ function resumeSmartPendingTasks(){
 }
 function updateSelectionBox(event){
     if(!selectionState) return;
-    const sx = selectionState.startScreen.x, sy = selectionState.startScreen.y;
-    const x = Math.min(sx, event.clientX), y = Math.min(sy, event.clientY);
-    selectionBox.style.display = 'block';
-    selectionBox.style.left = `${x}px`;
-    selectionBox.style.top = `${y}px`;
-    selectionBox.style.width = `${Math.abs(event.clientX - sx)}px`;
-    selectionBox.style.height = `${Math.abs(event.clientY - sy)}px`;
+    SelectionBox.update(selectionState.startScreen.x, selectionState.startScreen.y, event.clientX, event.clientY);
 }
 function finishSelection(event){
     if(!selectionState) return;
@@ -17235,7 +17228,7 @@ function finishSelection(event){
     selectedImage = {nodeId:'', index:-1};
     selectionState = null;
     selectionJustFinished = true;
-    selectionBox.style.display = 'none';
+    SelectionBox.hide();
     render();
     setTimeout(() => { selectionJustFinished = false; }, 0);
 }
