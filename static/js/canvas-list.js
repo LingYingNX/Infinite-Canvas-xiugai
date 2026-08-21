@@ -92,8 +92,8 @@ function setStatus(text){
 /* ===== Viewport math (mirrors smart-canvas.js) ===== */
 function applyViewport(){
     boardWorld.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`;
-    board.style.backgroundSize = `${120 * viewport.scale}px ${120 * viewport.scale}px, ${120 * viewport.scale}px ${120 * viewport.scale}px, ${24 * viewport.scale}px ${24 * viewport.scale}px`;
-    board.style.backgroundPosition = `${viewport.x}px ${viewport.y}px, ${viewport.x}px ${viewport.y}px, ${viewport.x}px ${viewport.y}px`;
+    board.style.backgroundSize = `${20 * viewport.scale}px ${20 * viewport.scale}px, ${20 * viewport.scale}px ${20 * viewport.scale}px`;
+    board.style.backgroundPosition = `${viewport.x}px ${viewport.y}px, ${viewport.x}px ${viewport.y}px`;
 }
 function uiScale(){
     const raw = getComputedStyle(document.documentElement).getPropertyValue('--studio-ui-scale');
