@@ -10174,8 +10174,7 @@ function updateConnectionEraseTrail(event){
 function clearConnectionEraseTrail(){
     const svg = shell.querySelector(':scope > svg.connection-erase-trail');
     if(!svg) return;
-    svg.classList.add('fading');
-    setTimeout(() => svg.remove(), 180);
+    svg.remove();
 }
 function connectionMidpoint(conn){
     const fromNode = nodes.find(n => n.id === conn?.from);
