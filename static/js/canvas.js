@@ -661,9 +661,6 @@ function isRunningHubProvider(provider){
     const name = String(provider?.name || '').trim().toLowerCase();
     return id === 'runninghub' || protocol === 'runninghub' || name === 'runninghub' || id === 'rh';
 }
-function normalizeProviderId(value){
-    return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-').replace(/-+/g, '-').slice(0, 40);
-}
 function imageApiProviders(){
     const providers = (apiProviders.length ? apiProviders : defaultApiProviders())
         .filter(p => p.id !== 'modelscope' && p.enabled !== false && (p.image_models || []).length);
@@ -688,9 +685,6 @@ function midjourneyProviderOptions(selectedId){
 }
 function providerById(id){
     return (apiProviders.length ? apiProviders : defaultApiProviders()).find(p => p.id === id) || imageApiProviders()[0] || defaultApiProviders()[0];
-}
-function resolveProviderId(id){
-    return providerById(id)?.id || 'comfly';
 }
 function chatApiProviders(){
     const providers = (apiProviders.length ? apiProviders : defaultApiProviders())
@@ -1550,16 +1544,6 @@ try {
         }
     };
 } catch(e) { /* 不支持 BroadcastChannel 的旧浏览器忽略 */ }
-function msChatModelOptions(selected){
-    // 单一数据源：从 API 设置里 modelscope 平台的 chat_models 取
-    const msProvider = apiProviders.find(p => p.id === 'modelscope');
-    const list = uniqueModels(msProvider?.chat_models || []);
-    if(!list.length){
-        return `<option value="" disabled selected>${tr('canvas.noModelsHint') || '暂无模型，请到 API 设置添加'}</option>`;
-    }
-    const sel = selected && list.includes(selected) ? selected : list[0];
-    return list.map(m => `<option value="${escapeHtml(m)}" ${m === sel ? 'selected' : ''}>${escapeHtml(m.split('/').pop().split(':')[0])}</option>`).join('');
-}
 async function loadCanvasList(openFirst=true){
     try {
         const res = await fetch('/api/canvases');
@@ -2670,18 +2654,6 @@ function addRhNode(point){
         inputs:[],
         running:false
     });
-}
-function defaultLTXSegment(start=0, length=120){
-    return {
-        id:uid('ltxseg'),
-        type:'text',
-        prompt:'',
-        start,
-        length,
-        color:LTX_SEGMENT_COLORS[0],
-        strength:1,
-        imageRef:null
-    };
 }
 function addLTXDirectorNode(point){
     const p = point || defaultPoint(200, 0);
@@ -6530,15 +6502,6 @@ function defaultNodeSize(type){
 function loopCount(node){
     return Math.max(1, Math.min(100, Number(node?.count || 1) || 1));
 }
-function splitPromptIntoItems(text){
-    const trimmed = String(text || '').trim();
-    if(!trimmed) return [];
-    const numbered = trimmed.split(/\s*(?:^|\s)\d+\s*[.、)）．]\s+/).map(s => s.trim()).filter(Boolean);
-    if(numbered.length >= 2) return numbered;
-    const lines = trimmed.split(/\r?\n+/).map(s => s.trim()).filter(Boolean);
-    if(lines.length >= 2) return lines;
-    return [trimmed];
-}
 const loopPromptVisiting = new Set();
 function loopInputPromptItems(node){
     if(!node?.showPrompt) return [];
@@ -6649,19 +6612,6 @@ function videoRefsFromNode(node){
     }
     if(CANVAS_MEDIA_OUTPUT_TYPES.includes(node.type)) return generatedImageRefs(node).filter(ref => ref.kind === 'video');
     return [];
-}
-function loopInputVideoRefs(node, ctx=loopContext){
-    if(!node?.videoInput) return [];
-    const allRefs = connections
-        .filter(c => c.to === node.id)
-        .flatMap(c => videoRefsFromNode(nodes.find(n => n.id === c.from)))
-        .filter(ref => ref?.url);
-    if(!allRefs.length) return [];
-    const startBase = Math.max(1, Number(node.loopStart) || 1);
-    const batchSize = Math.max(1, Math.min(100, Number(node.videoBatchSize) || 1));
-    const currentIndex = Math.max(1, Number(ctx?.index || startBase) || startBase);
-    const start = Math.max(0, currentIndex - 1);
-    return allRefs.slice(start, start + batchSize);
 }
 function loopTokenLabel(token){
     if(token === '《计数》') return tr('canvas.counterToken');
@@ -8871,18 +8821,6 @@ function miniMaxUniqueRefs(refs=[]){
         seen.add(key);
         return true;
     });
-}
-function miniMaxRefSummary(refs=[]){
-    const counts = refs.reduce((map, ref) => {
-        const kind = mediaKindForRef(ref);
-        map[kind] = (map[kind] || 0) + 1;
-        return map;
-    }, {});
-    const parts = [];
-    if(counts.image) parts.push(`${counts.image} 图`);
-    if(counts.video) parts.push(`${counts.video} 视频`);
-    if(counts.audio) parts.push(`${counts.audio} 音频`);
-    return parts.join(' · ') || 'No refs';
 }
 function miniMaxEnsureSegment(node){
     node.minimaxEngine = miniMaxEngine(node);
@@ -11123,29 +11061,6 @@ function generatedImageRefs(node){
             return clean;
         });
 }
-function mediaRefsFromNode(node){
-    if(!node) return [];
-    if(node.type === 'image' && node.url){
-        const kind = mediaKindForNode(node);
-        return [{url:node.url, name:node.name || kind, role:node.role || '', kind}];
-    }
-    if(node.type === 'group'){
-        return (node.items || [])
-            .map(id => nodes.find(x => x.id === id))
-            .filter(x => x?.type === 'image' && x?.url)
-            .map(item => ({url:item.url, name:item.name || mediaKindForNode(item), role:item.role || '', kind:mediaKindForNode(item)}));
-    }
-    if(node.type === 'output'){
-        return (node.images || []).map((item, i) => {
-            const url = outputUrlValue(item);
-            if(!url) return null;
-            const kind = mediaKindForOutputItem(item);
-            return {url, name:outputImageName(url) || `output-${i + 1}`, kind, nodeId:node.id, outputIndex:i};
-        }).filter(Boolean);
-    }
-    if(CANVAS_MEDIA_OUTPUT_TYPES.includes(node.type)) return generatedImageRefs(node);
-    return [];
-}
 function generatorSources(gen){
     return connections.filter(c => c.to === gen.id).map(c => nodes.find(n => n.id === c.from)).filter(Boolean).map(n => {
         if(n.type === 'output' && (n.images||[]).length){
@@ -12936,33 +12851,6 @@ function canvasWorkflowEdges(){
     });
     return direct;
 }
-function computeConnectedWorkflowOrder(anchorId){
-    const anchor = nodes.find(n => n.id === anchorId);
-    const runTypes = canvasRunTypes();
-    if(!anchor || !runTypes.includes(anchor.type)) return [];
-    const edges = canvasWorkflowEdges();
-    const connected = new Set([anchorId]);
-    let changed = true;
-    while(changed){
-        changed = false;
-        edges.forEach(([from, to]) => {
-            if(connected.has(from) && !connected.has(to)){ connected.add(to); changed = true; }
-            if(connected.has(to) && !connected.has(from)){ connected.add(from); changed = true; }
-        });
-    }
-    const order = [];
-    const seen = new Set();
-    const visit = id => {
-        if(seen.has(id)) return;
-        seen.add(id);
-        edges.filter(([, to]) => to === id).forEach(([from]) => {
-            if(connected.has(from)) visit(from);
-        });
-        if(connected.has(id)) order.push(id);
-    };
-    nodes.filter(n => connected.has(n.id) && runTypes.includes(n.type)).forEach(n => visit(n.id));
-    return order;
-}
 async function runCanvasGenerate(nodeId){
     const node = nodes.find(n => n.id === nodeId);
     if(!node || node.running || cascadeRunningIds.has(nodeId)) return;
@@ -14711,23 +14599,6 @@ function finishSelection(){
 function renderSelectionHub(){
     selectionHub.innerHTML = '';
     selectionHub.classList.remove('open');
-}
-function startSelectionLink(e, kind){
-    e.preventDefault();
-    e.stopPropagation();
-    const p = screenToWorld(e.clientX, e.clientY);
-    tempLink = {from:`selection:${kind}`, x1:p.x, y1:p.y, x2:p.x, y2:p.y};
-    window.onmousemove = e2 => { const next = screenToWorld(e2.clientX, e2.clientY); tempLink.x2 = next.x; tempLink.y2 = next.y; renderLinks(); };
-    window.onmouseup = e2 => {
-        const targetPort = nearestPort(e2.clientX, e2.clientY, 'in');
-        const target = targetPort?.closest('.generator-node');
-        if(target) connectSelectionToGenerator(kind, target.dataset.id);
-        tempLink = null;
-        window.onmousemove = null;
-        window.onmouseup = null;
-        render();
-        scheduleSave();
-    };
 }
 function connectSelectionToGenerator(kind, genId){
     const ids = [...selected];
