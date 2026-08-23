@@ -9193,6 +9193,13 @@ function bindMinimaxToggleMute(el, node, focusMinimaxNode){
 
 
 function bindMinimaxSegmentControls(el, node, focusMinimaxNode, bindFastMinimaxButton, renderAfterMinimaxDelete){
+    bindMinimaxSegmentSelection(el, node, focusMinimaxNode);
+    bindMinimaxTrimHandlers(el, node, focusMinimaxNode);
+    bindMinimaxSegmentAdd(el, node, focusMinimaxNode);
+    bindMinimaxSegmentDelete(el, node, bindFastMinimaxButton, renderAfterMinimaxDelete);
+}
+
+function bindMinimaxSegmentSelection(el, node, focusMinimaxNode){
     el.querySelectorAll('[data-minimax-segment]').forEach(btn => {
         btn.addEventListener('mousedown', e => {
             if(e.target.closest('[data-minimax-trim]')) return;
@@ -9213,6 +9220,9 @@ function bindMinimaxSegmentControls(el, node, focusMinimaxNode, bindFastMinimaxB
             scheduleSave();
         };
     });
+}
+
+function bindMinimaxTrimHandlers(el, node, focusMinimaxNode){
     el.querySelectorAll('[data-minimax-trim]').forEach(handle => {
         handle.addEventListener('mousedown', e => {
             e.preventDefault();
@@ -9247,6 +9257,9 @@ function bindMinimaxSegmentControls(el, node, focusMinimaxNode, bindFastMinimaxB
             window.addEventListener('mouseup', onUp, true);
         });
     });
+}
+
+function bindMinimaxSegmentAdd(el, node, focusMinimaxNode){
     el.querySelectorAll('[data-minimax-add-segment]').forEach(btn => {
         btn.onclick = e => {
             e.preventDefault();
@@ -9264,6 +9277,9 @@ function bindMinimaxSegmentControls(el, node, focusMinimaxNode, bindFastMinimaxB
             scheduleSave();
         };
     });
+}
+
+function bindMinimaxSegmentDelete(el, node, bindFastMinimaxButton, renderAfterMinimaxDelete){
     el.querySelectorAll('[data-minimax-delete-segment]').forEach(btn => {
         bindFastMinimaxButton(btn, () => {
             if((node.segments || []).length <= 1) return;
@@ -18808,5 +18824,6 @@ window.onload = async () => {
     syncApiKindToggleVisibility();
     render();
 };
+
 
 
