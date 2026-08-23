@@ -127,6 +127,13 @@ function normalizeRunningHubBaseUrl(value){
     const url = String(value || '').trim().replace(/\/+$/, '');
     return url || RH_DEFAULT_BASE_URL;
 }
+async function apiRequestJson(url, init={}, fallback='请求失败'){
+    const response = await fetch(url, init);
+    const data = await response.json().catch(() => ({}));
+    if(!response.ok) throw new Error(data?.detail || fallback);
+    return data;
+}
+
 function applyCliProtocolDefaults(item, protocol){
     if(!item) return;
     const value = String(protocol || item.protocol || '').toLowerCase();
@@ -1515,11 +1522,7 @@ async function pickRhPreviewMedia(key, kind){
         const form = new FormData();
         form.append('files', file);
         try {
-            const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(async r => {
-                const json = await r.json();
-                if(!r.ok) throw new Error(json.detail || '上传失败');
-                return json;
-            });
+            const data = await apiRequestJson('/api/ai/upload', {method:'POST', body:form}, '上传失败');
             const uploaded = data.files?.[0];
             rhWorkflowEditorState.previewParams[key] = {
                 ...(rhWorkflowEditorState.previewParams[key] || {}),
@@ -2592,11 +2595,7 @@ async function startJimengLogin(){
     setJimengStatus('等待扫码...');
     if(jimengCredit) jimengCredit.textContent = '';
     try {
-        const data = await fetch('/api/jimeng/login/start', {method:'POST'}).then(async r => {
-            const json = await r.json();
-            if(!r.ok) throw new Error(json.detail || '启动登录失败');
-            return json;
-        });
+        const data = await apiRequestJson('/api/jimeng/login/start', {method:'POST'}, '启动登录失败');
         renderJimengLoginBox(data);
         clearInterval(jimengLoginTimer);
         jimengLoginTimer = setInterval(pollJimengLogin, 2500);
@@ -2630,11 +2629,7 @@ async function pollJimengLogin(){
 async function refreshJimengCredit(){
     setJimengStatus('查询余额...');
     try {
-        const data = await fetch('/api/jimeng/credit').then(async r => {
-            const json = await r.json();
-            if(!r.ok) throw new Error(json.detail || '查询余额失败');
-            return json;
-        });
+        const data = await apiRequestJson('/api/jimeng/credit', '查询余额失败');
         setJimengStatus('已登录', true);
         if(jimengCredit) jimengCredit.textContent = jimengCreditText(data.raw);
     } catch(e){
@@ -2645,11 +2640,7 @@ async function refreshJimengCredit(){
 async function logoutJimeng(){
     if(!confirm('确认退出即梦 CLI 登录？')) return;
     try {
-        const data = await fetch('/api/jimeng/logout', {method:'POST'}).then(async r => {
-            const json = await r.json();
-            if(!r.ok) throw new Error(json.detail || '退出登录失败');
-            return json;
-        });
+        const data = await apiRequestJson('/api/jimeng/logout', {method:'POST'}, '退出登录失败');
         setJimengStatus('已退出', false);
         if(jimengCredit) jimengCredit.textContent = prettyJson(data.raw);
         if(jimengLoginBox) jimengLoginBox.hidden = true;
@@ -2671,15 +2662,11 @@ async function loadJimengHelp(){
     jimengHelpOutput.textContent = '加载中...';
     try {
         const command = jimengHelpCommand?.value || '';
-        const data = await fetch('/api/jimeng/help', {
+        const data = await apiRequestJson('/api/jimeng/help', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({command})
-        }).then(async r => {
-            const json = await r.json();
-            if(!r.ok) throw new Error(json.detail || '加载帮助失败');
-            return json;
-        });
+        }, '加载帮助失败');
         jimengHelpOutput.textContent = data.text || prettyJson(data.raw);
     } catch(e){
         jimengHelpOutput.textContent = e.message || String(e);
@@ -2722,15 +2709,11 @@ async function loadCodexHelp(){
     codexHelpOutput.textContent = '加载中...';
     try {
         const command = codexHelpCommand?.value || '';
-        const data = await fetch('/api/codex/help', {
+        const data = await apiRequestJson('/api/codex/help', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({command})
-        }).then(async r => {
-            const json = await r.json();
-            if(!r.ok) throw new Error(json.detail || '加载帮助失败');
-            return json;
-        });
+        }, '加载帮助失败');
         codexHelpOutput.textContent = data.text || prettyJson(data.raw);
     } catch(e){
         codexHelpOutput.textContent = e.message || String(e);
@@ -2773,15 +2756,11 @@ async function loadGeminiCliHelp(){
     geminiCliHelpOutput.textContent = '加载中...';
     try {
         const command = geminiCliHelpCommand?.value || '';
-        const data = await fetch('/api/gemini-cli/help', {
+        const data = await apiRequestJson('/api/gemini-cli/help', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({command})
-        }).then(async r => {
-            const json = await r.json();
-            if(!r.ok) throw new Error(json.detail || '加载帮助失败');
-            return json;
-        });
+        }, '加载帮助失败');
         geminiCliHelpOutput.textContent = data.text || prettyJson(data.raw);
     } catch(e){
         geminiCliHelpOutput.textContent = e.message || String(e);
@@ -2908,7 +2887,7 @@ async function probeAsync(){
         const apiKey = currentProviderApiKey(item);
         const currentProtocol = String(protocolInput?.value || item.protocol || 'openai').toLowerCase();
         if(isRunningHubContext(item, baseUrl)){
-            const data = await fetch('/api/providers/test-connection', {
+            const data = await apiRequestJson('/api/providers/test-connection', {
                 method:'POST',
                 headers:{'Content-Type':'application/json'},
                 body:JSON.stringify({
@@ -2918,10 +2897,7 @@ async function probeAsync(){
                     protocol:'runninghub',
                     image_request_mode:'openai'
                 })
-            }).then(async r => {
-                if(!r.ok) throw new Error((await r.json()).detail || '请求失败');
-                return r.json();
-            });
+            }, '请求失败');
             applyDetectedProtocol('runninghub');
             setFetchedModelState(data);
             const openBtn = document.getElementById('openPickerBtn');
@@ -2929,7 +2905,7 @@ async function probeAsync(){
             showVerifyResult(`<span style="color:#15803d;font-size:11px;font-weight:800">✓ RunningHub OpenAPI 验证通过 · 找到 ${data.model_count || data.total || 0} 个模型${runninghubModelSourceNote(data)}</span>`);
             return;
         }
-        const data = await fetch('/api/providers/probe-async', {
+        const data = await apiRequestJson('/api/providers/probe-async', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
@@ -2939,10 +2915,7 @@ async function probeAsync(){
                 protocol: currentProtocol,
                 image_request_mode: imageRequestModeInput?.value || item.image_request_mode || 'openai'
             })
-        }).then(async r => {
-            if(!r.ok) throw new Error((await r.json()).detail || '请求失败');
-            return r.json();
-        });
+        }, '请求失败');
         const detectedProtocol = String(data.protocol || '').toLowerCase();
         const isAsync = data.ok === true && detectedProtocol === 'apimart';
         const isOpenAiCompat = data.ok === true && detectedProtocol === 'openai';
@@ -2997,7 +2970,7 @@ async function testConnection(){
     try {
         const apiKey = currentProviderApiKey(item);
         const runninghubContext = isRunningHubContext(item, baseUrl);
-        const data = await fetch('/api/providers/test-connection', {
+        const data = await apiRequestJson('/api/providers/test-connection', {
             method: 'POST', headers: {'Content-Type':'application/json'},
             body: JSON.stringify({
                 base_url: baseUrl,
@@ -3006,10 +2979,7 @@ async function testConnection(){
                 protocol: runninghubContext ? 'runninghub' : (protocolInput?.value || 'openai'),
                 image_request_mode: imageRequestModeInput?.value || item.image_request_mode || 'openai'
             })
-        }).then(async r => {
-            if(!r.ok) throw new Error((await r.json()).detail || (tr('api.urlInvalid') || '验证失败'));
-            return r.json();
-        });
+        }, (tr('api.urlInvalid') || '验证失败'));
         if(data.ok){
             const detectedProtocol = String(data.protocol || '').toLowerCase();
             if(detectedProtocol && detectedProtocol !== String(protocolInput?.value || '').toLowerCase()){
@@ -3155,7 +3125,7 @@ async function fetchModels(){
     setStatus(tr('api.fetchingModels') || '正在从上游拉取模型列表...');
     try {
         const runninghubContext = isRunningHubContext(item, baseUrl);
-        const data = await fetch('/api/providers/fetch-models', {
+        const data = await apiRequestJson('/api/providers/fetch-models', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({
@@ -3165,10 +3135,7 @@ async function fetchModels(){
                 protocol:runninghubContext ? 'runninghub' : (protocolInput?.value || 'openai'),
                 image_request_mode:imageRequestModeInput?.value || item.image_request_mode || 'openai'
             })
-        }).then(async r => {
-            if(!r.ok) throw new Error((await r.json()).detail || (tr('api.urlInvalid') || '拉取失败'));
-            return r.json();
-        });
+        }, (tr('api.urlInvalid') || '拉取失败'));
         setFetchedModelState(data);
         const detectedProtocol = String(data.protocol || '').toLowerCase();
         if(detectedProtocol && detectedProtocol !== String(protocolInput?.value || '').toLowerCase()){
@@ -3710,7 +3677,7 @@ async function saveProviders(){
     }
     setStatus(tr('api.saving'));
     try {
-        const res = await fetch('/api/providers', {
+        const data = await apiRequestJson('/api/providers', {
             method:'PUT',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify(providers.map(item => ({
@@ -3744,9 +3711,7 @@ async function saveProviders(){
                 clear_volcengine_access_key_id:item._clearVolcengineAccessKey === true,
                 clear_volcengine_secret_access_key:item._clearVolcengineSecretKey === true
             })))
-        });
-        if(!res.ok) throw new Error((await res.json()).detail || tr('api.saveFailed'));
-        const data = await res.json();
+        }, tr('api.saveFailed'));
         providers = data.providers || providers;
         providers.forEach(item => {
             delete item.api_key;
