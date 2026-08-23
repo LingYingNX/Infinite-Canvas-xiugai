@@ -9725,6 +9725,63 @@ function bindNodeResizeHandle(el, id){
         });
 }
 
+
+function bindNodeDragAndDrop(el, id){
+        const beginNodeDrag = e => {
+            if(e.button !== 0 || e.target.closest('.mini-x, .smart-node-floating-menu, .node-resize-handle, .thumb-item, .node-port, .prompt-node-control, select, input, textarea, button')) return;
+            if(e.target.closest('.prompt-node-pill, textarea:not(.prompt-node-text)')) return;
+            e.preventDefault(); e.stopPropagation();
+            window.getSelection?.()?.removeAllRanges?.();
+            if(document.activeElement?.blur) document.activeElement.blur();
+            let node = nodes.find(n => n.id === id);
+            if(!node) return;
+            if(e.altKey) node = duplicateForAltDrag(node, e.shiftKey);
+            let dragIds = selectedIds.includes(node.id) ? selectedIds.slice() : [node.id];
+            if(isSmartGroupNode(node)){
+                const memberIds = smartGroupMembers(node).map(member => member.id);
+                dragIds = Array.from(new Set([...dragIds, ...memberIds]));
+            }
+            const group = dragIds.map(dragId => {
+                const n = nodes.find(x => x.id === dragId);
+                return n ? {id:n.id, ox:Number(n.x) || 0, oy:Number(n.y) || 0} : null;
+            }).filter(Boolean);
+            dragState = {id:node.id, startX:e.clientX, startY:e.clientY, ox:node.x || 0, oy:node.y || 0, group, groupIds:group.map(item => item.id), ctrlGroup:Boolean(e.ctrlKey)};
+            document.body.classList.add('smart-node-drag');
+            capturePendingUndo();
+        };
+        el.querySelectorAll('.node-port').forEach(port => {
+            port.addEventListener('mousedown', e => {
+                if(e.button !== 0) return;
+                e.preventDefault(); e.stopPropagation();
+                const portType = port.dataset.port;
+                const p = screenToWorld(e);
+                portDragState = {
+                    fromId:id,
+                    fromPort:portType,
+                    currentWorld:p,
+                    hoverTargetId:'',
+                    hoverPort:'',
+                    moved:false
+                };
+                shell.classList.add('port-dragging');
+                capturePendingUndo();
+                ensurePortDragPathElement();
+                updatePortDragVisual();
+            });
+            port.addEventListener('click', e => { e.stopPropagation(); });
+            port.addEventListener('dblclick', e => { e.stopPropagation(); });
+        });
+        el.onmousedown = beginNodeDrag;
+        el.ondragover = e => setSmartDropCopyEffect(e);
+        el.ondrop = async e => {
+            e.preventDefault();
+            e.stopPropagation();
+            const payload = await resolveSmartImageDropPayload(e.dataTransfer);
+            if(payload.type === 'none') return;
+            await handleSmartImageDropPayload(payload, id);
+        };
+}
+
 function bindNodeEvents(){
     world.querySelectorAll('.image-node').forEach(el => {
         const id = el.dataset.id;
@@ -9789,59 +9846,7 @@ function bindNodeEvents(){
 
         bindNodeThumbSelection(el, id);
         bindNodeResizeHandle(el, id);
-        const beginNodeDrag = e => {
-            if(e.button !== 0 || e.target.closest('.mini-x, .smart-node-floating-menu, .node-resize-handle, .thumb-item, .node-port, .prompt-node-control, select, input, textarea, button')) return;
-            if(e.target.closest('.prompt-node-pill, textarea:not(.prompt-node-text)')) return;
-            e.preventDefault(); e.stopPropagation();
-            window.getSelection?.()?.removeAllRanges?.();
-            if(document.activeElement?.blur) document.activeElement.blur();
-            let node = nodes.find(n => n.id === id);
-            if(!node) return;
-            if(e.altKey) node = duplicateForAltDrag(node, e.shiftKey);
-            let dragIds = selectedIds.includes(node.id) ? selectedIds.slice() : [node.id];
-            if(isSmartGroupNode(node)){
-                const memberIds = smartGroupMembers(node).map(member => member.id);
-                dragIds = Array.from(new Set([...dragIds, ...memberIds]));
-            }
-            const group = dragIds.map(dragId => {
-                const n = nodes.find(x => x.id === dragId);
-                return n ? {id:n.id, ox:Number(n.x) || 0, oy:Number(n.y) || 0} : null;
-            }).filter(Boolean);
-            dragState = {id:node.id, startX:e.clientX, startY:e.clientY, ox:node.x || 0, oy:node.y || 0, group, groupIds:group.map(item => item.id), ctrlGroup:Boolean(e.ctrlKey)};
-            document.body.classList.add('smart-node-drag');
-            capturePendingUndo();
-        };
-        el.querySelectorAll('.node-port').forEach(port => {
-            port.addEventListener('mousedown', e => {
-                if(e.button !== 0) return;
-                e.preventDefault(); e.stopPropagation();
-                const portType = port.dataset.port;
-                const p = screenToWorld(e);
-                portDragState = {
-                    fromId:id,
-                    fromPort:portType,
-                    currentWorld:p,
-                    hoverTargetId:'',
-                    hoverPort:'',
-                    moved:false
-                };
-                shell.classList.add('port-dragging');
-                capturePendingUndo();
-                ensurePortDragPathElement();
-                updatePortDragVisual();
-            });
-            port.addEventListener('click', e => { e.stopPropagation(); });
-            port.addEventListener('dblclick', e => { e.stopPropagation(); });
-        });
-        el.onmousedown = beginNodeDrag;
-        el.ondragover = e => setSmartDropCopyEffect(e);
-        el.ondrop = async e => {
-            e.preventDefault();
-            e.stopPropagation();
-            const payload = await resolveSmartImageDropPayload(e.dataTransfer);
-            if(payload.type === 'none') return;
-            await handleSmartImageDropPayload(payload, id);
-        };
+        bindNodeDragAndDrop(el, id);
     });
 }
 function rectOverlapNode(draggedId, x, y, w, h, excludeIds=[]){
