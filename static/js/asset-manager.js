@@ -753,9 +753,6 @@ function localObjectUrl(item){
     // 共享文件夹素材直接走后端 URL（局域网也可访问），不再用 createObjectURL
     return item?.url || '';
 }
-function localAssetThumb(item){
-    return assetThumb({url:localObjectUrl(item), name:item?.name || 'local', kind:item?.kind || localItemKind(item)});
-}
 function activeLocalFolder(){
     return localFolderMap.get(activeLocalFolderId) || localFolders[0] || null;
 }
@@ -1054,17 +1051,6 @@ function groupCanvasAssetItems(items){
         map.get(key).items.push(item);
     });
     return groups;
-}
-function assetMoveTargets(){
-    const currentKey = `${activeAssetLibraryId}::${activeAssetCategoryId}`;
-    const targets = [];
-    assetLibraries().forEach(lib => {
-        (lib.categories || []).filter(cat => (cat.type || 'image') === 'image').forEach(cat => {
-            const key = `${lib.id}::${cat.id}`;
-            if(key !== currentKey) targets.push({key, libraryId:lib.id, categoryId:cat.id, label:`${lib.name || '资产库'} / ${cat.name || '分组'}`});
-        });
-    });
-    return targets;
 }
 function currentPromptItems(){
     const lib = activePromptLibrary();
@@ -3961,16 +3947,6 @@ function endMarqueeSelection(){
     pendingBatchDelete = '';
     render();
 }
-async function createAssetLibrary(){
-    const name = window.prompt('资产库名称', '新资产库');
-    if(!String(name || '').trim()) return;
-    const data = await apiJson('/api/asset-library/libraries', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})});
-    assetLibrary = data.library || assetLibrary;
-    activeAssetLibraryId = data.asset_library?.id || activeAssetLibraryId;
-    activeAssetCategoryId = '';
-    selectedAssetId = '';
-    render();
-}
 async function saveAssetTreeEdit(){
     if(!assetTreeEdit) return;
     const name = document.getElementById('assetTreeEditInput')?.value || '';
@@ -4068,14 +4044,6 @@ async function deleteWorkflowCategory(){
     render();
     setStatus('工作流分组已删除');
 }
-async function renameAssetLibrary(){
-    const lib = activeAssetLibrary();
-    const name = window.prompt('资产库名称', lib?.name || '');
-    if(!lib || !String(name || '').trim()) return;
-    const data = await apiJson(`/api/asset-library/libraries/${encodeURIComponent(lib.id)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})});
-    assetLibrary = data.library || assetLibrary;
-    render();
-}
 async function deleteAssetLibrary(){
     const lib = activeAssetLibrary();
     if(!lib) return;
@@ -4095,24 +4063,6 @@ async function deleteAssetLibrary(){
     selectedAssetId = '';
     selectedAssetIds.clear();
     pendingTreeDelete = '';
-    render();
-}
-async function createAssetCategory(){
-    const name = window.prompt('分组名称', '新分组');
-    if(!String(name || '').trim()) return;
-    const data = await apiJson('/api/asset-library/categories', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({library_id:activeAssetLibraryId, name, type:'image'})});
-    assetLibrary = data.library || assetLibrary;
-    activeAssetCategoryId = data.category?.id || activeAssetCategoryId;
-    activeAssetClassFilter = '';
-    selectedAssetId = '';
-    render();
-}
-async function renameAssetCategory(){
-    const cat = activeAssetCategory();
-    const name = window.prompt('分组名称', cat?.name || '');
-    if(!cat || !String(name || '').trim()) return;
-    const data = await apiJson(`/api/asset-library/categories/${encodeURIComponent(cat.id)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})});
-    assetLibrary = data.library || assetLibrary;
     render();
 }
 async function deleteAssetCategory(){
@@ -4357,37 +4307,11 @@ async function pasteLocalClipboardToAssets(){
     render();
     setStatus(`已导入 ${imported} 个素材到图片资产`);
 }
-async function moveSelectedAssets(){
-    if(!selectedAssetIds.size || !assetMoveTarget) return;
-    const [targetLibraryId, targetCategoryId] = assetMoveTarget.split('::');
-    if(!targetLibraryId || !targetCategoryId) return;
-    const ids = [...selectedAssetIds];
-    const data = await apiJson('/api/asset-library/items/move', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({library_id:activeAssetLibraryId, target_library_id:targetLibraryId, target_category_id:targetCategoryId, ids})
-    });
-    assetLibrary = data.library || assetLibrary;
-    selectedAssetIds.clear();
-    if(ids.includes(selectedAssetId)) selectedAssetId = '';
-    render();
-    setStatus(`已移动 ${data.moved || 0} 个素材`);
-}
 function openLocalItem(id){
     const item = findLocalItem(id);
     if(!item) return;
     const url = localObjectUrl(item);
     if(url) window.open(url, '_blank', 'noopener');
-}
-async function createPromptLibrary(){
-    const name = window.prompt('提示词库名称', '新提示词库');
-    if(!String(name || '').trim()) return;
-    const data = await apiJson('/api/prompt-libraries', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})});
-    promptLibrary = data.library || promptLibrary;
-    activePromptLibraryId = data.prompt_library?.id || activePromptLibraryId;
-    activePromptCategory = 'all';
-    selectedPromptId = '';
-    render();
 }
 async function savePromptTreeEdit(){
     if(!promptTreeEdit) return;
@@ -4445,14 +4369,6 @@ async function deletePromptCategory(){
     render();
     setStatus('分组已删除');
 }
-async function renamePromptLibrary(){
-    const lib = activePromptLibrary();
-    const name = window.prompt('提示词库名称', lib?.name || '');
-    if(!lib || !String(name || '').trim()) return;
-    const data = await apiJson(`/api/prompt-libraries/${encodeURIComponent(lib.id)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})});
-    promptLibrary = data.library || promptLibrary;
-    render();
-}
 async function deletePromptLibrary(){
     const lib = activePromptLibrary();
     if(!lib) return;
@@ -4474,21 +4390,6 @@ async function deletePromptLibrary(){
     pendingTreeDelete = '';
     render();
     setStatus('提示词库已删除');
-}
-async function createPromptItem(){
-    const lib = activePromptLibrary();
-    if(!lib) return;
-    const name = window.prompt('提示词名称', '新提示词');
-    if(!String(name || '').trim()) return;
-    const scene = window.prompt('用途说明', '') || '';
-    const positive = window.prompt('正向提示词内容', '');
-    if(!String(positive || '').trim()) return;
-    const negative = window.prompt('负向提示词内容', '') || '';
-    const category = activePromptCategory === 'all' ? 'custom' : activePromptCategory;
-    const data = await apiJson('/api/prompt-libraries/items', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({library_id:lib.id, name, positive, negative, category, scene})});
-    promptLibrary = data.library || promptLibrary;
-    selectedPromptId = data.item?.id || selectedPromptId;
-    render();
 }
 async function savePromptCreate(){
     const lib = activePromptLibrary();
