@@ -3493,12 +3493,16 @@ async function handleWorkflowClick(event, target){
 }
 
 
-async function handleAssetClick(event, target){
+async function handleAssetEditActions(event, target){
     const assetEditSave = target.closest?.('[data-asset-edit-save]');
     if(assetEditSave){ await saveAssetEdit(assetEditSave.dataset.assetEditSave || ''); return true; }
     if(target.closest?.('[data-asset-edit-cancel]')){ assetEditMode = false; render(); return true; }
     const assetEditStart = target.closest?.('[data-asset-edit-start]');
     if(assetEditStart){ selectedAssetId = assetEditStart.dataset.assetEditStart || selectedAssetId; assetEditMode = true; pendingDeleteAssetId = ''; render(); return true; }
+    return false;
+}
+
+async function handleAssetSelectionActions(event, target){
     if(target.closest?.('[data-asset-manage]')){
         assetManageMode = !assetManageMode;
         pendingBatchDelete = '';
@@ -3512,6 +3516,10 @@ async function handleAssetClick(event, target){
     if(target.closest?.('[data-asset-copy-selected]')){ setAssetClipboard('copy'); return true; }
     if(target.closest?.('[data-asset-paste-clipboard]')){ await pasteAssetClipboard(); return true; }
     if(target.closest?.('[data-asset-clear-clipboard]')){ assetClipboard = null; render(); return true; }
+    return false;
+}
+
+async function handleAssetItemActions(event, target){
     const assetRename = target.closest?.('[data-asset-rename]');
     if(assetRename){ await renameAssetItem(assetRename.dataset.assetRename || ''); return true; }
     const assetDelete = target.closest?.('[data-asset-delete]');
@@ -3535,6 +3543,10 @@ async function handleAssetClick(event, target){
     if(target.closest?.('[data-asset-download-selected]')){ await downloadSelectedAssets(); return true; }
     if(target.closest?.('[data-asset-copy-to-canvas]')){ copySelectedAssetsToCanvas(); return true; }
     if(target.closest?.('[data-asset-delete-selected]')){ await deleteSelectedAssets(); return true; }
+    return false;
+}
+
+async function handleAssetUploadTreeActions(event, target){
     if(target.closest?.('[data-asset-upload]')){
         if(uploadInput) uploadInput.accept = 'image/*,video/*,audio/*';
         uploadInput?.click();
@@ -3576,6 +3588,10 @@ async function handleAssetClick(event, target){
         if(row){ activeAssetLibraryId = row.dataset.assetCatLib || activeAssetLibraryId; activeAssetCategoryId = row.dataset.assetCat || activeAssetCategoryId; }
         await deleteAssetCategory(); return true;
     }
+    return false;
+}
+
+async function handleAssetNavigationActions(event, target){
     const assetLib = target.closest?.('[data-asset-lib]');
     if(assetLib){ activeAssetLibraryId = assetLib.dataset.assetLib || ''; assetTreeFocus = 'library'; activeAssetClassFilter = ''; activeAssetCategoryId = assetCategories()[0]?.id || ''; selectedAssetId = ''; selectedAssetIds.clear(); render(); return true; }
     const assetClassRoot = target.closest?.('[data-asset-class-root]');
@@ -3608,6 +3624,10 @@ async function handleAssetClick(event, target){
     }
     const assetCat = target.closest?.('[data-asset-cat]');
     if(assetCat){ activeAssetLibraryId = assetCat.dataset.assetCatLib || activeAssetLibraryId; activeAssetCategoryId = assetCat.dataset.assetCat || ''; activeAssetClassFilter = ''; assetTreeFocus = 'category'; selectedAssetId = ''; selectedAssetIds.clear(); render(); return true; }
+    return false;
+}
+
+async function handleAssetCheckCardActions(event, target){
     const assetCheck = target.closest?.('[data-asset-check]');
     if(assetCheck){
         event.preventDefault();
@@ -3636,7 +3656,16 @@ async function handleAssetClick(event, target){
         render();
         return true;
     }
+    return false;
+}
 
+async function handleAssetClick(event, target){
+    if(await handleAssetEditActions(event, target)) return true;
+    if(await handleAssetSelectionActions(event, target)) return true;
+    if(await handleAssetItemActions(event, target)) return true;
+    if(await handleAssetUploadTreeActions(event, target)) return true;
+    if(await handleAssetNavigationActions(event, target)) return true;
+    if(await handleAssetCheckCardActions(event, target)) return true;
     return false;
 }
 
