@@ -992,16 +992,6 @@ function renderPreviewField(f){
     return `<div class="pfield">${label}<input class="pfield-input" type="text" value="${escapeAttr(v)}" oninput="setPreviewValue('${f.id}',this.value)"></div>`;
 }
 
-function miniLine(aKey, bKey){
-    const a = miniCards[aKey] || defaultMiniCards()[aKey];
-    const b = miniCards[bKey] || defaultMiniCards()[bKey];
-    const x1 = a.x + 210, y1 = a.y + 70, x2 = b.x, y2 = b.y + 70;
-    const dx = x2 - x1, dy = y2 - y1;
-    const len = Math.sqrt(dx*dx + dy*dy);
-    const deg = Math.atan2(dy, dx) * 180 / Math.PI;
-    return `<div class="mini-line" style="left:${x1}px;top:${y1}px;width:${len}px;transform:rotate(${deg}deg)"></div>`;
-}
-
 function renderWorkspaceView(){
     const graphWrap = document.querySelector('.graph-svg-wrap');
     const nodesToggle = document.getElementById('nodesToggle');
