@@ -9489,6 +9489,54 @@ function pickMediaForSmartNode(nodeId){
     document.body.appendChild(input);
     input.click();
 }
+
+function bindNodeToolbarControls(el, id){
+        el.querySelectorAll('.node-delete').forEach(btn => {
+            btn.addEventListener('click', e => {
+                e.preventDefault(); e.stopPropagation();
+                deleteNodeFromButton(id);
+            });
+        });
+        el.querySelectorAll('[data-smart-node-action]').forEach(btn => {
+            btn.addEventListener('mousedown', e => {
+                e.preventDefault();
+                e.stopPropagation();
+            }, true);
+            btn.addEventListener('click', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                runSmartNodeToolbarAction(btn.dataset.nodeId || id, btn.dataset.smartNodeAction);
+            });
+        });
+        el.querySelectorAll('[data-smart-group-action]').forEach(btn => {
+            btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); }, true);
+            btn.addEventListener('click', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                runSmartGroupToolbarAction(btn.dataset.nodeId || id, btn.dataset.smartGroupAction);
+            });
+        });
+        el.querySelectorAll('[data-jimeng-query]').forEach(btn => {
+            btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); }, true);
+            btn.addEventListener('click', e => {
+                e.preventDefault(); e.stopPropagation();
+                queryJimengNow(btn.dataset.jimengQuery);
+            });
+        });
+        el.querySelectorAll('[data-image-task-query]').forEach(btn => {
+            btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); }, true);
+            btn.addEventListener('click', e => {
+                e.preventDefault(); e.stopPropagation();
+                querySmartImageTaskNow(btn.dataset.imageTaskQuery, btn.dataset.taskId);
+            });
+        });
+        el.querySelectorAll('[data-thumb-scroll]').forEach(scroller => {
+            scroller.addEventListener('wheel', e => {
+                e.stopPropagation();
+            }, {passive:false});
+        });
+}
+
 function bindNodeEvents(){
     world.querySelectorAll('.image-node').forEach(el => {
         const id = el.dataset.id;
@@ -9542,50 +9590,7 @@ function bindNodeEvents(){
             updateComposer();
             pickMediaForSmartNode(id);
         });
-        el.querySelectorAll('.node-delete').forEach(btn => {
-            btn.addEventListener('click', e => {
-                e.preventDefault(); e.stopPropagation();
-                deleteNodeFromButton(id);
-            });
-        });
-        el.querySelectorAll('[data-smart-node-action]').forEach(btn => {
-            btn.addEventListener('mousedown', e => {
-                e.preventDefault();
-                e.stopPropagation();
-            }, true);
-            btn.addEventListener('click', e => {
-                e.preventDefault();
-                e.stopPropagation();
-                runSmartNodeToolbarAction(btn.dataset.nodeId || id, btn.dataset.smartNodeAction);
-            });
-        });
-        el.querySelectorAll('[data-smart-group-action]').forEach(btn => {
-            btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); }, true);
-            btn.addEventListener('click', e => {
-                e.preventDefault();
-                e.stopPropagation();
-                runSmartGroupToolbarAction(btn.dataset.nodeId || id, btn.dataset.smartGroupAction);
-            });
-        });
-        el.querySelectorAll('[data-jimeng-query]').forEach(btn => {
-            btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); }, true);
-            btn.addEventListener('click', e => {
-                e.preventDefault(); e.stopPropagation();
-                queryJimengNow(btn.dataset.jimengQuery);
-            });
-        });
-        el.querySelectorAll('[data-image-task-query]').forEach(btn => {
-            btn.addEventListener('mousedown', e => { e.preventDefault(); e.stopPropagation(); }, true);
-            btn.addEventListener('click', e => {
-                e.preventDefault(); e.stopPropagation();
-                querySmartImageTaskNow(btn.dataset.imageTaskQuery, btn.dataset.taskId);
-            });
-        });
-        el.querySelectorAll('[data-thumb-scroll]').forEach(scroller => {
-            scroller.addEventListener('wheel', e => {
-                e.stopPropagation();
-            }, {passive:false});
-        });
+        bindNodeToolbarControls(el, id);
         el.querySelectorAll('.image-delete').forEach(btn => {
             btn.addEventListener('click', e => {
                 e.preventDefault(); e.stopPropagation();
