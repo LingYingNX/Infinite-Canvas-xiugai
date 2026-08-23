@@ -3657,6 +3657,90 @@ async function handleAssetClick(event, target){
     return false;
 }
 
+
+async function handlePromptClick(event, target){
+    const promptEditSave = target.closest?.('[data-prompt-edit-save]');
+    if(promptEditSave){ await savePromptEdit(promptEditSave.dataset.promptEditSave || ''); return true; }
+    if(target.closest?.('[data-prompt-create-save]')){ await savePromptCreate(); return true; }
+    if(target.closest?.('[data-prompt-edit-cancel]')){ promptEditMode = false; promptCreateMode = false; render(); return true; }
+    const promptEditStart = target.closest?.('[data-prompt-edit-start]');
+    if(promptEditStart){ selectedPromptId = promptEditStart.dataset.promptEditStart || selectedPromptId; promptEditMode = true; promptCreateMode = false; pendingDeletePromptId = ''; render(); return true; }
+    if(target.closest?.('[data-prompt-manage]')){
+        promptManageMode = !promptManageMode;
+        pendingBatchDelete = '';
+        if(!promptManageMode) selectedPromptIds.clear();
+        render();
+        return true;
+    }
+    if(target.closest?.('[data-prompt-select-all]')){ currentPromptItems().forEach(item => selectedPromptIds.add(item.id)); pendingBatchDelete = ''; render(); return true; }
+    if(target.closest?.('[data-prompt-clear-selection]')){ selectedPromptIds.clear(); pendingBatchDelete = ''; render(); return true; }
+    const promptEdit = target.closest?.('[data-prompt-edit]');
+    if(promptEdit){ await editPromptItem(promptEdit.dataset.promptEdit || ''); return true; }
+    const promptDelete = target.closest?.('[data-prompt-delete]');
+    if(promptDelete){ await deletePromptItem(promptDelete.dataset.promptDelete || ''); return true; }
+    if(target.closest?.('[data-prompt-delete-selected]')){ await deleteSelectedPrompts(); return true; }
+    const promptNewBtn = target.closest?.('[data-prompt-new]');
+    if(promptNewBtn){
+        const libId = promptNewBtn.dataset.libId || target.closest('[data-prompt-lib]')?.dataset.promptLib;
+        const catRow = target.closest('[data-prompt-cat]');
+        if(libId){ activePromptLibraryId = libId; activePromptCategory = 'all'; }
+        if(catRow){ activePromptLibraryId = catRow.dataset.promptCatLib || activePromptLibraryId; activePromptCategory = catRow.dataset.promptCat || activePromptCategory; }
+        promptCreateMode = true; promptEditMode = false; pendingDeletePromptId = ''; render(); return true;
+    }
+    if(target.closest?.('[data-prompt-lib-new]')){ promptTreeFocus = 'library'; promptTreeEdit = {kind:'library-new', placement:'head', value:'新提示词库', label:'提示词库名称'}; render(); focusTreeEditInput('promptTreeEditInput'); return true; }
+    if(target.closest?.('[data-prompt-cat-new]')){
+        const libRow = target.closest('[data-prompt-lib]');
+        if(libRow) activePromptLibraryId = libRow.dataset.promptLib || activePromptLibraryId;
+        promptTreeFocus = 'library';
+        promptTreeEdit = {kind:'category-new', value:'新分组', label:'分组名称'};
+        pendingTreeDelete = '';
+        render(); return true;
+    }
+    if(target.closest?.('[data-prompt-cat-rename]')){
+        promptTreeFocus = 'category';
+        const cat = activePromptCategories().find(c => c.id === activePromptCategory);
+        promptTreeEdit = {kind:'category-rename', value:cat?.name || '', label:'分组名称'};
+        pendingTreeDelete = '';
+        render(); return true;
+    }
+    if(target.closest?.('[data-prompt-cat-delete]')){ await deletePromptCategory(); return true; }
+    const promptLibRenameBtn = target.closest?.('[data-prompt-lib-rename]');
+    if(promptLibRenameBtn){
+        const libRow = target.closest('[data-prompt-lib]');
+        if(promptLibRenameBtn.dataset.libId) activePromptLibraryId = promptLibRenameBtn.dataset.libId;
+        if(libRow) activePromptLibraryId = libRow.dataset.promptLib || activePromptLibraryId;
+        promptTreeFocus = 'library';
+        promptTreeEdit = {kind:'library-rename', value:activePromptLibrary()?.name || '', label:'提示词库名称'};
+        render(); return true;
+    }
+    const promptLibDeleteBtn = target.closest?.('[data-prompt-lib-delete]');
+    if(promptLibDeleteBtn){
+        if(promptLibDeleteBtn.dataset.libId) activePromptLibraryId = promptLibDeleteBtn.dataset.libId;
+        await deletePromptLibrary(); return true;
+    }
+    const promptLib = target.closest?.('[data-prompt-lib]');
+    if(promptLib){ activePromptLibraryId = promptLib.dataset.promptLib || ''; activePromptCategory = 'all'; promptTreeFocus = 'library'; selectedPromptId = ''; promptCreateMode = false; promptEditMode = false; selectedPromptIds.clear(); render(); return true; }
+    const promptCat = target.closest?.('[data-prompt-cat]');
+    if(promptCat){ activePromptLibraryId = promptCat.dataset.promptCatLib || activePromptLibraryId; activePromptCategory = promptCat.dataset.promptCat || 'all'; promptTreeFocus = 'category'; selectedPromptId = ''; promptCreateMode = false; promptEditMode = false; selectedPromptIds.clear(); render(); return true; }
+    const promptRow = target.closest?.('[data-prompt-row]');
+    if(promptRow){
+        const id = promptRow.dataset.promptRow || '';
+        if(promptManageMode){
+            const selected = toggleSelectionSet(selectedPromptIds, id);
+            selectedPromptId = selected ? id : (selectedPromptId === id ? '' : selectedPromptId);
+        } else {
+            selectedPromptId = id;
+        }
+        promptEditMode = false;
+        promptCreateMode = false;
+        pendingDeletePromptId = '';
+        pendingBatchDelete = '';
+        render();
+        return true;
+    }
+    return false;
+}
+
 async function handleClick(event){
     const target = event.target;
     if(await handleStorageSettingsClick(event, target)) return;
@@ -3693,85 +3777,7 @@ async function handleClick(event){
     if(target.closest?.('[data-prompt-tree-edit-save]')){ await savePromptTreeEdit(); return; }
     if(target.closest?.('[data-prompt-tree-edit-cancel]')){ promptTreeEdit = null; render(); return; }
     if(await handleAssetClick(event, target)) return;
-    const promptEditSave = target.closest?.('[data-prompt-edit-save]');
-    if(promptEditSave){ await savePromptEdit(promptEditSave.dataset.promptEditSave || ''); return; }
-    if(target.closest?.('[data-prompt-create-save]')){ await savePromptCreate(); return; }
-    if(target.closest?.('[data-prompt-edit-cancel]')){ promptEditMode = false; promptCreateMode = false; render(); return; }
-    const promptEditStart = target.closest?.('[data-prompt-edit-start]');
-    if(promptEditStart){ selectedPromptId = promptEditStart.dataset.promptEditStart || selectedPromptId; promptEditMode = true; promptCreateMode = false; pendingDeletePromptId = ''; render(); return; }
-    if(target.closest?.('[data-prompt-manage]')){
-        promptManageMode = !promptManageMode;
-        pendingBatchDelete = '';
-        if(!promptManageMode) selectedPromptIds.clear();
-        render();
-        return;
-    }
-    if(target.closest?.('[data-prompt-select-all]')){ currentPromptItems().forEach(item => selectedPromptIds.add(item.id)); pendingBatchDelete = ''; render(); return; }
-    if(target.closest?.('[data-prompt-clear-selection]')){ selectedPromptIds.clear(); pendingBatchDelete = ''; render(); return; }
-    const promptEdit = target.closest?.('[data-prompt-edit]');
-    if(promptEdit){ await editPromptItem(promptEdit.dataset.promptEdit || ''); return; }
-    const promptDelete = target.closest?.('[data-prompt-delete]');
-    if(promptDelete){ await deletePromptItem(promptDelete.dataset.promptDelete || ''); return; }
-    if(target.closest?.('[data-prompt-delete-selected]')){ await deleteSelectedPrompts(); return; }
-    const promptNewBtn = target.closest?.('[data-prompt-new]');
-    if(promptNewBtn){
-        const libId = promptNewBtn.dataset.libId || target.closest('[data-prompt-lib]')?.dataset.promptLib;
-        const catRow = target.closest('[data-prompt-cat]');
-        if(libId){ activePromptLibraryId = libId; activePromptCategory = 'all'; }
-        if(catRow){ activePromptLibraryId = catRow.dataset.promptCatLib || activePromptLibraryId; activePromptCategory = catRow.dataset.promptCat || activePromptCategory; }
-        promptCreateMode = true; promptEditMode = false; pendingDeletePromptId = ''; render(); return;
-    }
-    if(target.closest?.('[data-prompt-lib-new]')){ promptTreeFocus = 'library'; promptTreeEdit = {kind:'library-new', placement:'head', value:'新提示词库', label:'提示词库名称'}; render(); focusTreeEditInput('promptTreeEditInput'); return; }
-    if(target.closest?.('[data-prompt-cat-new]')){
-        const libRow = target.closest('[data-prompt-lib]');
-        if(libRow) activePromptLibraryId = libRow.dataset.promptLib || activePromptLibraryId;
-        promptTreeFocus = 'library';
-        promptTreeEdit = {kind:'category-new', value:'新分组', label:'分组名称'};
-        pendingTreeDelete = '';
-        render(); return;
-    }
-    if(target.closest?.('[data-prompt-cat-rename]')){
-        promptTreeFocus = 'category';
-        const cat = activePromptCategories().find(c => c.id === activePromptCategory);
-        promptTreeEdit = {kind:'category-rename', value:cat?.name || '', label:'分组名称'};
-        pendingTreeDelete = '';
-        render(); return;
-    }
-    if(target.closest?.('[data-prompt-cat-delete]')){ await deletePromptCategory(); return; }
-    const promptLibRenameBtn = target.closest?.('[data-prompt-lib-rename]');
-    if(promptLibRenameBtn){
-        const libRow = target.closest('[data-prompt-lib]');
-        if(promptLibRenameBtn.dataset.libId) activePromptLibraryId = promptLibRenameBtn.dataset.libId;
-        if(libRow) activePromptLibraryId = libRow.dataset.promptLib || activePromptLibraryId;
-        promptTreeFocus = 'library';
-        promptTreeEdit = {kind:'library-rename', value:activePromptLibrary()?.name || '', label:'提示词库名称'};
-        render(); return;
-    }
-    const promptLibDeleteBtn = target.closest?.('[data-prompt-lib-delete]');
-    if(promptLibDeleteBtn){
-        if(promptLibDeleteBtn.dataset.libId) activePromptLibraryId = promptLibDeleteBtn.dataset.libId;
-        await deletePromptLibrary(); return;
-    }
-    const promptLib = target.closest?.('[data-prompt-lib]');
-    if(promptLib){ activePromptLibraryId = promptLib.dataset.promptLib || ''; activePromptCategory = 'all'; promptTreeFocus = 'library'; selectedPromptId = ''; promptCreateMode = false; promptEditMode = false; selectedPromptIds.clear(); render(); return; }
-    const promptCat = target.closest?.('[data-prompt-cat]');
-    if(promptCat){ activePromptLibraryId = promptCat.dataset.promptCatLib || activePromptLibraryId; activePromptCategory = promptCat.dataset.promptCat || 'all'; promptTreeFocus = 'category'; selectedPromptId = ''; promptCreateMode = false; promptEditMode = false; selectedPromptIds.clear(); render(); return; }
-    const promptRow = target.closest?.('[data-prompt-row]');
-    if(promptRow){
-        const id = promptRow.dataset.promptRow || '';
-        if(promptManageMode){
-            const selected = toggleSelectionSet(selectedPromptIds, id);
-            selectedPromptId = selected ? id : (selectedPromptId === id ? '' : selectedPromptId);
-        } else {
-            selectedPromptId = id;
-        }
-        promptEditMode = false;
-        promptCreateMode = false;
-        pendingDeletePromptId = '';
-        pendingBatchDelete = '';
-        render();
-        return;
-    }
+    if(await handlePromptClick(event, target)) return;
 }
 function openAssetItem(id){
     const item = findAssetItem(id);
