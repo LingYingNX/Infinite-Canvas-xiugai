@@ -2697,9 +2697,6 @@ function renderVideoTrustedAssetControl(){
     </div>`;
     return html;
 }
-function optionHtml(value, label, selected){
-    return `<option value="${escapeHtml(value)}" ${String(value) === String(selected) ? 'selected' : ''}>${escapeHtml(label ?? value)}</option>`;
-}
 function parseSizeValue(value){
     const match = String(value || '').trim().match(/^(\d+)\s*[xX*]\s*(\d+)$/);
     return match ? {width:match[1], height:match[2]} : null;
@@ -3163,17 +3160,6 @@ function resolutionLabel(prefix=''){
     const value = settings[resKey] || ((!prefix && settings.engine === 'api') ? defaultSmartApiResolution(settings.model) : '1k');
     if(value === 'auto') return '自动';
     return value === 'custom' ? (settings[sizeKey] || tr('smart.custom')) : value.toUpperCase();
-}
-function ratioIconClass(value){
-    if(value === 'portrait') return 'r-portrait';
-    if(value === 'portrait43') return 'r-portrait43';
-    if(value === 'landscape') return 'r-landscape';
-    if(value === 'landscape43') return 'r-landscape43';
-    if(value === 'wide' || value === 'ultrawide') return 'r-wide';
-    if(value === 'story' || value === 'ultratall') return 'r-story';
-    if(value === 'source') return 'r-source';
-    if(value === 'custom') return 'r-custom';
-    return '';
 }
 function videoAspectIconClass(value){
     if(value === '16:9' || value === '21:9') return 'r-wide';
@@ -9996,9 +9982,6 @@ function deleteNodeFromButton(id){
     if(clearNodeMediaBeforeDelete(id)) return;
     deleteNode(id);
 }
-function disconnectConnection(index){
-    disconnectConnections([index]);
-}
 // 断开一条或多条连线（合并到分组的连线会一次性断开其下所有成员连线）。spec 可为索引数组或逗号分隔字符串。
 function disconnectConnections(spec){
     if(!canvas || !Array.isArray(canvas.connections)) return;
@@ -13808,14 +13791,6 @@ function nodeHasReferenceContent(node){
 function isSelfReferenceForNode(node, img){
     return Boolean(node?.id && img?.nodeId === node.id);
 }
-function candidateInputImagesFor(node, consume=false, ctx=smartLoopContext){
-    const inputs = (smartImageUsesWorkflowInput(node, ctx) ? workflowInputImagesFor(node, consume, ctx) : inputImagesFor(node, consume, ctx))
-        .filter(img => img?.url);
-    if(!inputs.length) return [];
-    if(smartImageUsesWorkflowInput(node, ctx)) return inputs;
-    if(nodeHasReferenceContent(node)) return [];
-    return inputs;
-}
 function splitSmartPromptItems(text){
     const trimmed = String(text || '').trim();
     if(!trimmed) return [];
@@ -13989,10 +13964,6 @@ function manualReferenceImagesFor(node){
         imageIndex:Number.isFinite(Number(img.imageIndex)) ? Number(img.imageIndex) : index,
         manualAdded:true
     }));
-}
-function isInputRefBlocked(node, img){
-    if(!node || !img?.url) return false;
-    return blockedInputRefKeys(node).has(inputRefKey(img));
 }
 function defaultReferenceImagesFor(node, consume=false, ctx=smartLoopContext){
     if(!node) return [];
