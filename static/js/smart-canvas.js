@@ -9003,6 +9003,57 @@ function bindMinimaxMaterialCards(el, node, focusMinimaxNode){
     });
 }
 
+
+function bindMinimaxDropTargets(el, node, focusMinimaxNode){
+    el.querySelectorAll('[data-minimax-drop-segment], [data-minimax-drop-result], [data-minimax-scrub-track], [data-minimax-ref-track], [data-minimax-player-stage], [data-minimax-asset-library]').forEach(target => {
+        target.addEventListener('dragover', e => {
+            const types = smartDropDataTypes(e.dataTransfer);
+            if(hasSmartImageDropData(e.dataTransfer) || hasSmartAssetDrag(e.dataTransfer) || types.includes('application/x-minimax-material') || types.includes('application/x-minimax-asset') || types.includes('application/x-minimax-ref')){
+                e.preventDefault();
+                e.dataTransfer.dropEffect = types.includes('application/x-minimax-ref') && !e.altKey ? 'move' : 'copy';
+            }
+        });
+        target.addEventListener('drop', async e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            const dropTarget = e.target?.closest?.('[data-minimax-drop-segment]') || target;
+            const intoRefTrack = Boolean(target.closest?.('[data-minimax-ref-track],.minimax-ref-clip,.minimax-ref-label,.minimax-ref-gutter') || target.matches?.('[data-minimax-ref-track],.minimax-ref-label,.minimax-ref-gutter') || target.classList?.contains('minimax-ref-clip'));
+            const seg = smartMinimaxSegmentFromDropTarget(node, dropTarget, e) || (intoRefTrack ? smartMinimaxSelectedSegment(node) : null);
+            const items = await smartMinimaxDropItemsFromEvent(e);
+            const item = items.find(entry => ['video','image','audio'].includes(mediaKindForItem(entry))) || items[0];
+            if(!seg || !item?.url) return;
+            pushUndo();
+            node.selectedSegmentId = seg.id;
+            const types = smartDropDataTypes(e.dataTransfer);
+            const intoAssetLibrary = Boolean(target.closest?.('[data-minimax-asset-library]') || target.matches?.('[data-minimax-asset-library]'));
+            const intoVideoTrack = Boolean(target.closest?.('.minimax-video-track,.minimax-tl-clip') || target.classList?.contains('minimax-video-track') || target.classList?.contains('minimax-tl-clip'));
+            if(intoAssetLibrary){
+                smartMinimaxAddLibraryRefs(node, [item]);
+            } else if(types.includes('application/x-minimax-material') && !intoRefTrack && intoVideoTrack) {
+                smartMinimaxSetSegmentResult(node, seg, item);
+            } else {
+                const added = smartMinimaxAddSegmentRefs(node, seg, [item]);
+                const drag = item.__minimaxDrag;
+                const copyRef = e.altKey || Boolean(drag?.copy);
+                if(added && drag && !copyRef && drag.segmentId !== seg.id){
+                    const source = nodes.find(n => n.id === drag.nodeId && n.type === 'smart-minimax');
+                    const sourceSeg = source?.segments?.find(entry => entry.id === drag.segmentId);
+                    const existing = sourceSeg?.refItems?.[Number(drag.index)];
+                    if(existing?.url === item.url) {
+                        sourceSeg.refItems.splice(Number(drag.index), 1);
+                        ['image','video','audio'].forEach(kind => {
+                            if(Array.isArray(sourceSeg.refs?.[kind])) sourceSeg.refs[kind] = sourceSeg.refs[kind].filter(ref => ref?.url !== item.url);
+                        });
+                    }
+                }
+            }
+            render();
+            scheduleSave();
+        });
+    });
+}
+
 function bindMinimaxNodeControls(el, node){
     const focusMinimaxNode = () => {
         if(selectedId === node.id && selectedIds.length === 0 && selectedImage.nodeId === '') return;
@@ -9259,53 +9310,7 @@ function bindMinimaxNodeControls(el, node){
             e.stopPropagation();
         });
     });
-    el.querySelectorAll('[data-minimax-drop-segment], [data-minimax-drop-result], [data-minimax-scrub-track], [data-minimax-ref-track], [data-minimax-player-stage], [data-minimax-asset-library]').forEach(target => {
-        target.addEventListener('dragover', e => {
-            const types = smartDropDataTypes(e.dataTransfer);
-            if(hasSmartImageDropData(e.dataTransfer) || hasSmartAssetDrag(e.dataTransfer) || types.includes('application/x-minimax-material') || types.includes('application/x-minimax-asset') || types.includes('application/x-minimax-ref')){
-                e.preventDefault();
-                e.dataTransfer.dropEffect = types.includes('application/x-minimax-ref') && !e.altKey ? 'move' : 'copy';
-            }
-        });
-        target.addEventListener('drop', async e => {
-            e.preventDefault();
-            e.stopPropagation();
-            focusMinimaxNode();
-            const dropTarget = e.target?.closest?.('[data-minimax-drop-segment]') || target;
-            const intoRefTrack = Boolean(target.closest?.('[data-minimax-ref-track],.minimax-ref-clip,.minimax-ref-label,.minimax-ref-gutter') || target.matches?.('[data-minimax-ref-track],.minimax-ref-label,.minimax-ref-gutter') || target.classList?.contains('minimax-ref-clip'));
-            const seg = smartMinimaxSegmentFromDropTarget(node, dropTarget, e) || (intoRefTrack ? smartMinimaxSelectedSegment(node) : null);
-            const items = await smartMinimaxDropItemsFromEvent(e);
-            const item = items.find(entry => ['video','image','audio'].includes(mediaKindForItem(entry))) || items[0];
-            if(!seg || !item?.url) return;
-            pushUndo();
-            node.selectedSegmentId = seg.id;
-            const types = smartDropDataTypes(e.dataTransfer);
-            const intoAssetLibrary = Boolean(target.closest?.('[data-minimax-asset-library]') || target.matches?.('[data-minimax-asset-library]'));
-            const intoVideoTrack = Boolean(target.closest?.('.minimax-video-track,.minimax-tl-clip') || target.classList?.contains('minimax-video-track') || target.classList?.contains('minimax-tl-clip'));
-            if(intoAssetLibrary){
-                smartMinimaxAddLibraryRefs(node, [item]);
-            } else if(types.includes('application/x-minimax-material') && !intoRefTrack && intoVideoTrack) {
-                smartMinimaxSetSegmentResult(node, seg, item);
-            } else {
-                const added = smartMinimaxAddSegmentRefs(node, seg, [item]);
-                const drag = item.__minimaxDrag;
-                const copyRef = e.altKey || Boolean(drag?.copy);
-                if(added && drag && !copyRef && drag.segmentId !== seg.id){
-                    const source = nodes.find(n => n.id === drag.nodeId && n.type === 'smart-minimax');
-                    const sourceSeg = source?.segments?.find(entry => entry.id === drag.segmentId);
-                    const existing = sourceSeg?.refItems?.[Number(drag.index)];
-                    if(existing?.url === item.url) {
-                        sourceSeg.refItems.splice(Number(drag.index), 1);
-                        ['image','video','audio'].forEach(kind => {
-                            if(Array.isArray(sourceSeg.refs?.[kind])) sourceSeg.refs[kind] = sourceSeg.refs[kind].filter(ref => ref?.url !== item.url);
-                        });
-                    }
-                }
-            }
-            render();
-            scheduleSave();
-        });
-    });
+    bindMinimaxDropTargets(el, node, focusMinimaxNode);
 }
 
 function bindScrollableText(el){
