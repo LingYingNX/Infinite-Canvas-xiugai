@@ -11090,6 +11090,18 @@ function refreshComparePanel(){
     const curUrl = editing.image?.url || '';
     const isVideoPreview = mediaKindForItem(editing.image || {}) === 'video';
     const isPreviewMode = imageEditMode === 'preview';
+    if(handlePreviewPanorama({ stage, currentImg, compareLayer, compareHandle, thumbsEl, toggle, panoramaToggle }, isPreviewMode, isVideoPreview)) return;
+    const onCurrentLoaded = () => {
+        if(currentImg.dataset.previewQuick !== '1') rememberPreviewImageResolution();
+        syncPreviewFrameSize();
+        updatePreviewMetaHint();
+    };
+    if(renderPreviewMedia({ stage, currentImg, currentVideo, compareLayer, compareHandle, thumbsEl, toggle, panoramaToggle }, editing, curUrl, isVideoPreview, onCurrentLoaded)) return;
+    renderPreviewCompareState({ stage, compareLayer, compareHandle, thumbsEl, toggle }, editing);
+}
+
+function handlePreviewPanorama(elements, isPreviewMode, isVideoPreview){
+    const { stage, currentImg, compareLayer, compareHandle, thumbsEl, toggle, panoramaToggle } = elements;
     if(panoramaToggle){
         panoramaToggle.style.display = isPreviewMode && !isVideoPreview ? 'inline-flex' : 'none';
         panoramaToggle.classList.toggle('active', panoramaState.enabled);
@@ -11105,13 +11117,13 @@ function refreshComparePanel(){
         if(thumbsEl){ thumbsEl.style.display = 'none'; thumbsEl.innerHTML = ''; }
         if(toggle) toggle.classList.remove('active');
         updatePreviewMetaHint(tr('smart.panoramaHint'));
-        return;
+        return true;
     }
-    const onCurrentLoaded = () => {
-        if(currentImg.dataset.previewQuick !== '1') rememberPreviewImageResolution();
-        syncPreviewFrameSize();
-        updatePreviewMetaHint();
-    };
+    return false;
+}
+
+function renderPreviewMedia(elements, editing, curUrl, isVideoPreview, onCurrentLoaded){
+    const { stage, currentImg, currentVideo, compareLayer, compareHandle, thumbsEl, toggle, panoramaToggle } = elements;
     if(isVideoPreview){
         currentImg.onload = null;
         currentImg.onerror = null;
@@ -11142,7 +11154,7 @@ function refreshComparePanel(){
         }
         if(panoramaToggle) panoramaToggle.style.display = 'none';
         updatePreviewMetaHint(editing.node?.runPrompt ? `${tr('smart.runPromptPrefix')}${editing.node.runPrompt.slice(0, 60)}` : '');
-        return;
+        return true;
     }
     if(currentVideo){
         currentVideo.pause?.();
@@ -11184,6 +11196,11 @@ function refreshComparePanel(){
         currentImg.dataset.previewQuick = '';
     }
     if(currentImg.complete && currentImg.naturalWidth) requestAnimationFrame(onCurrentLoaded);
+    return false;
+}
+
+function renderPreviewCompareState(elements, editing){
+    const { stage, compareLayer, compareHandle, thumbsEl, toggle } = elements;
     const sources = previewCompareSources();
     const hasSource = sources.length > 0;
     if(toggle){
