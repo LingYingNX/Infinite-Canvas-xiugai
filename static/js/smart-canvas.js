@@ -9694,6 +9694,37 @@ function bindNodeThumbSelection(el, id){
         });
 }
 
+
+function bindNodeResizeHandle(el, id){
+        el.querySelector('.node-resize-handle')?.addEventListener('mousedown', e => {
+            if(e.button !== 0) return;
+            e.preventDefault(); e.stopPropagation();
+            const node = nodes.find(n => n.id === id);
+            if(!node) return;
+            const rect = nodeRect(node);
+            resizeState = {id, startX:e.clientX, startY:e.clientY, startW:rect.width, startH:rect.height};
+            // 分组缩放：记录本次手势开始时所有成员的位置/尺寸快照与起始缩放，缩放过程按相对快照的比例实时计算，
+            // 整体等比缩放+重排。用快照而非持久基准，移动成员后再缩放也不会回退到旧位置。
+            if(isSmartGroupNode(node)){
+                resizeState.startZoom = smartGroupZoom(node);
+                const gx0 = Number(node.x) || 0, gy0 = Number(node.y) || 0;
+                let maxR = gx0, maxB = gy0, hasM = false;
+                resizeState.members = smartGroupMembers(node).map(m => {
+                    const r = nodeRect(m);
+                    const sx = Number(m.x) || 0, sy = Number(m.y) || 0, sw = Number(r.width) || 0, sh = Number(r.height) || 0;
+                    hasM = true; maxR = Math.max(maxR, sx + sw); maxB = Math.max(maxB, sy + sh);
+                    return {id:m.id, sx, sy, sw, sh, isImage:isSmartImageNode(m)};
+                });
+                // 记录“贴合内容时的框尺寸”作为缩放映射基准（而不是当前可能含留白的框宽），
+                // 这样从放大很多的框往回缩时，框是线性跟随手柄缩小、而不是一下子跳到内容边缘。
+                resizeState.contentFitW = hasM ? Math.max(1, maxR - gx0 + 16) : (rect.width || 1);
+                resizeState.contentFitH = hasM ? Math.max(1, maxB - gy0 + 16) : (rect.height || 1);
+            }
+            document.body.classList.add('smart-node-resize');
+            capturePendingUndo();
+        });
+}
+
 function bindNodeEvents(){
     world.querySelectorAll('.image-node').forEach(el => {
         const id = el.dataset.id;
@@ -9757,33 +9788,7 @@ function bindNodeEvents(){
         bindNodeThumbBadges(el, id);
 
         bindNodeThumbSelection(el, id);
-        el.querySelector('.node-resize-handle')?.addEventListener('mousedown', e => {
-            if(e.button !== 0) return;
-            e.preventDefault(); e.stopPropagation();
-            const node = nodes.find(n => n.id === id);
-            if(!node) return;
-            const rect = nodeRect(node);
-            resizeState = {id, startX:e.clientX, startY:e.clientY, startW:rect.width, startH:rect.height};
-            // 分组缩放：记录本次手势开始时所有成员的位置/尺寸快照与起始缩放，缩放过程按相对快照的比例实时计算，
-            // 整体等比缩放+重排。用快照而非持久基准，移动成员后再缩放也不会回退到旧位置。
-            if(isSmartGroupNode(node)){
-                resizeState.startZoom = smartGroupZoom(node);
-                const gx0 = Number(node.x) || 0, gy0 = Number(node.y) || 0;
-                let maxR = gx0, maxB = gy0, hasM = false;
-                resizeState.members = smartGroupMembers(node).map(m => {
-                    const r = nodeRect(m);
-                    const sx = Number(m.x) || 0, sy = Number(m.y) || 0, sw = Number(r.width) || 0, sh = Number(r.height) || 0;
-                    hasM = true; maxR = Math.max(maxR, sx + sw); maxB = Math.max(maxB, sy + sh);
-                    return {id:m.id, sx, sy, sw, sh, isImage:isSmartImageNode(m)};
-                });
-                // 记录“贴合内容时的框尺寸”作为缩放映射基准（而不是当前可能含留白的框宽），
-                // 这样从放大很多的框往回缩时，框是线性跟随手柄缩小、而不是一下子跳到内容边缘。
-                resizeState.contentFitW = hasM ? Math.max(1, maxR - gx0 + 16) : (rect.width || 1);
-                resizeState.contentFitH = hasM ? Math.max(1, maxB - gy0 + 16) : (rect.height || 1);
-            }
-            document.body.classList.add('smart-node-resize');
-            capturePendingUndo();
-        });
+        bindNodeResizeHandle(el, id);
         const beginNodeDrag = e => {
             if(e.button !== 0 || e.target.closest('.mini-x, .smart-node-floating-menu, .node-resize-handle, .thumb-item, .node-port, .prompt-node-control, select, input, textarea, button')) return;
             if(e.target.closest('.prompt-node-pill, textarea:not(.prompt-node-text)')) return;
