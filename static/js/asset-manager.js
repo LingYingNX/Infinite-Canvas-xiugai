@@ -3336,6 +3336,69 @@ async function handleLocalUploadClick(event, target){
     return false;
 }
 
+
+async function handleCanvasAssetClick(event, target){
+    const canvasAssetCat = target.closest?.('[data-canvas-asset-cat]');
+    if(canvasAssetCat){
+        activeCanvasAssetCategory = canvasAssetCat.dataset.canvasAssetCat || defaultCanvasAssetCategory();
+        activeCanvasAssetCanvasId = '';
+        selectedCanvasAssetId = '';
+        selectedCanvasAssetIds.clear();
+        render();
+        return true;
+    }
+    const canvasAssetCanvas = target.closest?.('[data-canvas-asset-canvas]');
+    if(canvasAssetCanvas){
+        activeCanvasAssetCategory = canvasAssetCanvas.dataset.canvasAssetCanvasCat || activeCanvasAssetCategory || 'all';
+        activeCanvasAssetCanvasId = canvasAssetCanvas.dataset.canvasAssetCanvas || '';
+        selectedCanvasAssetId = '';
+        selectedCanvasAssetIds.clear();
+        render();
+        return true;
+    }
+    if(target.closest?.('[data-canvas-asset-manage]')){
+        canvasAssetManageMode = !canvasAssetManageMode;
+        if(!canvasAssetManageMode) selectedCanvasAssetIds.clear();
+        render();
+        return true;
+    }
+    if(target.closest?.('[data-canvas-asset-refresh]')){ await refreshCanvasAssets(); return true; }
+    if(target.closest?.('[data-canvas-asset-select-all]')){ currentCanvasAssetItems().forEach(item => selectedCanvasAssetIds.add(item.id)); render(); return true; }
+    if(target.closest?.('[data-canvas-asset-clear-selection]')){ selectedCanvasAssetIds.clear(); render(); return true; }
+    if(target.closest?.('[data-canvas-asset-download-selected]')){ await downloadCanvasAssetItems([...selectedCanvasAssetIds]); return true; }
+    const canvasAssetDownload = target.closest?.('[data-canvas-asset-download]');
+    if(canvasAssetDownload){ await downloadCanvasAssetItems([canvasAssetDownload.dataset.canvasAssetDownload || '']); return true; }
+    const canvasAssetOpen = target.closest?.('[data-canvas-asset-open]');
+    if(canvasAssetOpen){ const it = findCanvasAssetItem(canvasAssetOpen.dataset.canvasAssetOpen || ''); if(it?.url) window.open(it.url, '_blank', 'noopener'); return true; }
+    const canvasAssetCopy = target.closest?.('[data-canvas-asset-copy]');
+    if(canvasAssetCopy){ const it = findCanvasAssetItem(canvasAssetCopy.dataset.canvasAssetCopy || ''); const ok = await copyTextToClipboard(it?.url || ''); setStatus(ok ? '已复制画布资产链接' : '复制失败'); return true; }
+    const canvasAssetCheck = target.closest?.('[data-canvas-asset-check]');
+    if(canvasAssetCheck){
+        event.preventDefault();
+        event.stopPropagation();
+        if(canvasAssetManageMode){
+            const id = canvasAssetCheck.dataset.canvasAssetCheck || '';
+            const selected = toggleSelectionSet(selectedCanvasAssetIds, id);
+            selectedCanvasAssetId = selected ? id : (selectedCanvasAssetId === id ? '' : selectedCanvasAssetId);
+            refreshCanvasAssetSelectionOnly();
+        }
+        return true;
+    }
+    const canvasAssetCard = target.closest?.('[data-canvas-asset-card]');
+    if(canvasAssetCard){
+        const id = canvasAssetCard.dataset.canvasAssetCard || '';
+        if(canvasAssetManageMode){
+            const selected = toggleSelectionSet(selectedCanvasAssetIds, id);
+            selectedCanvasAssetId = selected ? id : (selectedCanvasAssetId === id ? '' : selectedCanvasAssetId);
+        } else {
+            selectedCanvasAssetId = id;
+        }
+        refreshCanvasAssetSelectionOnly();
+        return true;
+    }
+    return false;
+}
+
 async function handleClick(event){
     const target = event.target;
     if(await handleStorageSettingsClick(event, target)) return;
@@ -3358,64 +3421,7 @@ async function handleClick(event){
     if(localPreview){ showDetailPreview('local', localPreview.dataset.localPreview || ''); return; }
     if(await handleLocalUploadClick(event, target)) return;
     if(target.closest?.('[data-local-pick-folder]')){ await registerSharedFolder(); return; }
-    const canvasAssetCat = target.closest?.('[data-canvas-asset-cat]');
-    if(canvasAssetCat){
-        activeCanvasAssetCategory = canvasAssetCat.dataset.canvasAssetCat || defaultCanvasAssetCategory();
-        activeCanvasAssetCanvasId = '';
-        selectedCanvasAssetId = '';
-        selectedCanvasAssetIds.clear();
-        render();
-        return;
-    }
-    const canvasAssetCanvas = target.closest?.('[data-canvas-asset-canvas]');
-    if(canvasAssetCanvas){
-        activeCanvasAssetCategory = canvasAssetCanvas.dataset.canvasAssetCanvasCat || activeCanvasAssetCategory || 'all';
-        activeCanvasAssetCanvasId = canvasAssetCanvas.dataset.canvasAssetCanvas || '';
-        selectedCanvasAssetId = '';
-        selectedCanvasAssetIds.clear();
-        render();
-        return;
-    }
-    if(target.closest?.('[data-canvas-asset-manage]')){
-        canvasAssetManageMode = !canvasAssetManageMode;
-        if(!canvasAssetManageMode) selectedCanvasAssetIds.clear();
-        render();
-        return;
-    }
-    if(target.closest?.('[data-canvas-asset-refresh]')){ await refreshCanvasAssets(); return; }
-    if(target.closest?.('[data-canvas-asset-select-all]')){ currentCanvasAssetItems().forEach(item => selectedCanvasAssetIds.add(item.id)); render(); return; }
-    if(target.closest?.('[data-canvas-asset-clear-selection]')){ selectedCanvasAssetIds.clear(); render(); return; }
-    if(target.closest?.('[data-canvas-asset-download-selected]')){ await downloadCanvasAssetItems([...selectedCanvasAssetIds]); return; }
-    const canvasAssetDownload = target.closest?.('[data-canvas-asset-download]');
-    if(canvasAssetDownload){ await downloadCanvasAssetItems([canvasAssetDownload.dataset.canvasAssetDownload || '']); return; }
-    const canvasAssetOpen = target.closest?.('[data-canvas-asset-open]');
-    if(canvasAssetOpen){ const it = findCanvasAssetItem(canvasAssetOpen.dataset.canvasAssetOpen || ''); if(it?.url) window.open(it.url, '_blank', 'noopener'); return; }
-    const canvasAssetCopy = target.closest?.('[data-canvas-asset-copy]');
-    if(canvasAssetCopy){ const it = findCanvasAssetItem(canvasAssetCopy.dataset.canvasAssetCopy || ''); const ok = await copyTextToClipboard(it?.url || ''); setStatus(ok ? '已复制画布资产链接' : '复制失败'); return; }
-    const canvasAssetCheck = target.closest?.('[data-canvas-asset-check]');
-    if(canvasAssetCheck){
-        event.preventDefault();
-        event.stopPropagation();
-        if(canvasAssetManageMode){
-            const id = canvasAssetCheck.dataset.canvasAssetCheck || '';
-            const selected = toggleSelectionSet(selectedCanvasAssetIds, id);
-            selectedCanvasAssetId = selected ? id : (selectedCanvasAssetId === id ? '' : selectedCanvasAssetId);
-            refreshCanvasAssetSelectionOnly();
-        }
-        return;
-    }
-    const canvasAssetCard = target.closest?.('[data-canvas-asset-card]');
-    if(canvasAssetCard){
-        const id = canvasAssetCard.dataset.canvasAssetCard || '';
-        if(canvasAssetManageMode){
-            const selected = toggleSelectionSet(selectedCanvasAssetIds, id);
-            selectedCanvasAssetId = selected ? id : (selectedCanvasAssetId === id ? '' : selectedCanvasAssetId);
-        } else {
-            selectedCanvasAssetId = id;
-        }
-        refreshCanvasAssetSelectionOnly();
-        return;
-    }
+    if(await handleCanvasAssetClick(event, target)) return;
     const sharedRemove = target.closest?.('[data-shared-remove]');
     if(sharedRemove){ event.stopPropagation(); await unregisterSharedFolder(sharedRemove.dataset.sharedRemove || ''); return; }
     const sharedOpen = target.closest?.('[data-shared-open]');
