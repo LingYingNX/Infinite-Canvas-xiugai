@@ -9144,6 +9144,24 @@ function bindMinimaxResultControls(el, node, focusMinimaxNode, bindFastMinimaxBu
     });
 }
 
+
+function bindMinimaxToggleMute(el, node, focusMinimaxNode){
+    el.querySelectorAll('[data-minimax-toggle-mute]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            node.minimaxMuted = !Boolean(node.minimaxMuted);
+            const media = el.querySelector('[data-minimax-player]');
+            if(media) media.muted = node.minimaxMuted;
+            btn.title = node.minimaxMuted ? 'Unmute' : 'Mute';
+            btn.innerHTML = `<i data-lucide="${node.minimaxMuted ? 'volume-x' : 'volume-2'}"></i>`;
+            if(window.lucide) lucide.createIcons();
+            scheduleSave();
+        };
+    });
+}
+
 function bindMinimaxNodeControls(el, node){
     const focusMinimaxNode = () => {
         if(selectedId === node.id && selectedIds.length === 0 && selectedImage.nodeId === '') return;
@@ -9305,20 +9323,7 @@ function bindMinimaxNodeControls(el, node){
     bindMinimaxPaneResize(el, node, focusMinimaxNode);
     bindMinimaxResultControls(el, node, focusMinimaxNode, bindFastMinimaxButton, renderAfterMinimaxDelete);
     bindMinimaxMaterialCards(el, node, focusMinimaxNode);
-    el.querySelectorAll('[data-minimax-toggle-mute]').forEach(btn => {
-        btn.onclick = e => {
-            e.preventDefault();
-            e.stopPropagation();
-            focusMinimaxNode();
-            node.minimaxMuted = !Boolean(node.minimaxMuted);
-            const media = el.querySelector('[data-minimax-player]');
-            if(media) media.muted = node.minimaxMuted;
-            btn.title = node.minimaxMuted ? 'Unmute' : 'Mute';
-            btn.innerHTML = `<i data-lucide="${node.minimaxMuted ? 'volume-x' : 'volume-2'}"></i>`;
-            if(window.lucide) lucide.createIcons();
-            scheduleSave();
-        };
-    });
+    bindMinimaxToggleMute(el, node, focusMinimaxNode);
     bindMinimaxRefDrag(el, node, focusMinimaxNode);
     bindMinimaxDropTargets(el, node, focusMinimaxNode);
 }
