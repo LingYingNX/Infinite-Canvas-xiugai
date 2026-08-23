@@ -9081,6 +9081,69 @@ function bindMinimaxRefDrag(el, node, focusMinimaxNode){
     });
 }
 
+
+function bindMinimaxResultControls(el, node, focusMinimaxNode, bindFastMinimaxButton, renderAfterMinimaxDelete){
+    el.querySelectorAll('[data-minimax-result-delete]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            const seg = smartMinimaxSelectedSegment(node);
+            if(!seg?.result) return;
+            pushUndo();
+            seg.result = null;
+            render();
+            scheduleSave();
+        };
+    });
+    el.querySelectorAll('[data-minimax-ref-thumb-delete]').forEach(btn => {
+        bindFastMinimaxButton(btn, () => {
+            const [segId, rawIndex] = String(btn.dataset.minimaxRefThumbDelete || '').split(':');
+            const index = Number(rawIndex);
+            const seg = node.segments.find(item => item.id === segId);
+            if(!seg || !Array.isArray(seg.refItems) || !Number.isFinite(index)) return;
+            const removed = seg.refItems[index];
+            pushUndo();
+            node.selectedSegmentId = seg.id;
+            seg.refItems.splice(index, 1);
+            if(removed?.url) {
+                ['image','video','audio'].forEach(kind => {
+                    if(Array.isArray(seg.refs?.[kind])) seg.refs[kind] = seg.refs[kind].filter(ref => ref?.url !== removed.url);
+                });
+            }
+            const clip = btn.closest('.minimax-ref-clip');
+            if(clip) {
+                clip.classList.remove('has-ref');
+                clip.classList.add('is-empty');
+                clip.style.opacity = '.32';
+            }
+            renderAfterMinimaxDelete();
+        });
+    });
+    el.querySelectorAll('[data-minimax-export-selected]').forEach(btn => {
+        btn.onclick = async e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            const seg = smartMinimaxSelectedSegment(node);
+            if(!seg?.result?.url) return;
+            const duration = Number(seg.duration || 0) || 0;
+            const start = Number(seg.trimIn || 0) || 0;
+            const end = Number(seg.trimOut || duration) || duration;
+            if(start <= 0 && (!end || end >= duration)) downloadPreviewFile(seg.result);
+            else await exportMinimaxTimeline(node, {selectedOnly:true});
+        };
+    });
+    el.querySelectorAll('[data-minimax-export-full]').forEach(btn => {
+        btn.onclick = async e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            await exportMinimaxTimeline(node);
+        };
+    });
+}
+
 function bindMinimaxNodeControls(el, node){
     const focusMinimaxNode = () => {
         if(selectedId === node.id && selectedIds.length === 0 && selectedImage.nodeId === '') return;
@@ -9240,65 +9303,7 @@ function bindMinimaxNodeControls(el, node){
     bindMinimaxTimelinePlay(el, node, focusMinimaxNode);
     bindMinimaxScrubTrack(el, node, focusMinimaxNode);
     bindMinimaxPaneResize(el, node, focusMinimaxNode);
-    el.querySelectorAll('[data-minimax-result-delete]').forEach(btn => {
-        btn.onclick = e => {
-            e.preventDefault();
-            e.stopPropagation();
-            focusMinimaxNode();
-            const seg = smartMinimaxSelectedSegment(node);
-            if(!seg?.result) return;
-            pushUndo();
-            seg.result = null;
-            render();
-            scheduleSave();
-        };
-    });
-    el.querySelectorAll('[data-minimax-ref-thumb-delete]').forEach(btn => {
-        bindFastMinimaxButton(btn, () => {
-            const [segId, rawIndex] = String(btn.dataset.minimaxRefThumbDelete || '').split(':');
-            const index = Number(rawIndex);
-            const seg = node.segments.find(item => item.id === segId);
-            if(!seg || !Array.isArray(seg.refItems) || !Number.isFinite(index)) return;
-            const removed = seg.refItems[index];
-            pushUndo();
-            node.selectedSegmentId = seg.id;
-            seg.refItems.splice(index, 1);
-            if(removed?.url) {
-                ['image','video','audio'].forEach(kind => {
-                    if(Array.isArray(seg.refs?.[kind])) seg.refs[kind] = seg.refs[kind].filter(ref => ref?.url !== removed.url);
-                });
-            }
-            const clip = btn.closest('.minimax-ref-clip');
-            if(clip) {
-                clip.classList.remove('has-ref');
-                clip.classList.add('is-empty');
-                clip.style.opacity = '.32';
-            }
-            renderAfterMinimaxDelete();
-        });
-    });
-    el.querySelectorAll('[data-minimax-export-selected]').forEach(btn => {
-        btn.onclick = async e => {
-            e.preventDefault();
-            e.stopPropagation();
-            focusMinimaxNode();
-            const seg = smartMinimaxSelectedSegment(node);
-            if(!seg?.result?.url) return;
-            const duration = Number(seg.duration || 0) || 0;
-            const start = Number(seg.trimIn || 0) || 0;
-            const end = Number(seg.trimOut || duration) || duration;
-            if(start <= 0 && (!end || end >= duration)) downloadPreviewFile(seg.result);
-            else await exportMinimaxTimeline(node, {selectedOnly:true});
-        };
-    });
-    el.querySelectorAll('[data-minimax-export-full]').forEach(btn => {
-        btn.onclick = async e => {
-            e.preventDefault();
-            e.stopPropagation();
-            focusMinimaxNode();
-            await exportMinimaxTimeline(node);
-        };
-    });
+    bindMinimaxResultControls(el, node, focusMinimaxNode, bindFastMinimaxButton, renderAfterMinimaxDelete);
     bindMinimaxMaterialCards(el, node, focusMinimaxNode);
     el.querySelectorAll('[data-minimax-toggle-mute]').forEach(btn => {
         btn.onclick = e => {
