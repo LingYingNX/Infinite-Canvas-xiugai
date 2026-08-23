@@ -2844,7 +2844,7 @@ function renderDynamicParams(){
     restoreDynamicParamsScroll(scrollState);
     updatePromptPlaceholder();
     persistActiveSmartSettings();
-    if(window.lucide) lucide.createIcons();
+    refreshIcons();
 }
 function renderApiParams(){
     const providers = imageProviders();
@@ -8336,7 +8336,7 @@ function render(){
     bindConnectionEvents();
     updateComposer();
     renderMinimap();
-    if(window.lucide) lucide.createIcons();
+    refreshIcons();
     bindSmartPreviewImageFallbacks(world);
     syncSmartSelectedImageResolution(world);
     measureSmartNodeImages();
@@ -8872,12 +8872,12 @@ function bindMinimaxTimelinePlay(el, node, focusMinimaxNode){
                 node.timelinePlaying = false;
                 btn.innerHTML = '<i data-lucide="play"></i>';
                 smartMinimaxSyncPlayerDom(el, smartMinimaxSelectedSegment(node), Number(node.playhead || 0), false);
-                if(window.lucide) lucide.createIcons();
+                refreshIcons();
                 return;
             }
             node.timelinePlaying = true;
             btn.innerHTML = '<i data-lucide="pause"></i>';
-            if(window.lucide) lucide.createIcons();
+            refreshIcons();
             const total = smartMinimaxTimelineTotal(node);
             const startTime = Math.min(Number(node.playhead || 0) || 0, Math.max(0, total - 0.01)) >= total - 0.01 ? 0 : (Number(node.playhead || 0) || 0);
             const startedAt = performance.now();
@@ -8890,7 +8890,7 @@ function bindMinimaxTimelinePlay(el, node, focusMinimaxNode){
                     time = total;
                     node.timelinePlaying = false;
                     btn.innerHTML = '<i data-lucide="play"></i>';
-                    if(window.lucide) lucide.createIcons();
+                    refreshIcons();
                 }
                 smartMinimaxApplyTimelineTime(el, node, time, {syncPlayer:true, play:node.timelinePlaying});
                 if(node.timelinePlaying) requestAnimationFrame(tick);
@@ -9200,7 +9200,7 @@ function bindMinimaxToggleMute(el, node, focusMinimaxNode){
             if(media) media.muted = node.minimaxMuted;
             btn.title = node.minimaxMuted ? 'Unmute' : 'Mute';
             btn.innerHTML = `<i data-lucide="${node.minimaxMuted ? 'volume-x' : 'volume-2'}"></i>`;
-            if(window.lucide) lucide.createIcons();
+            refreshIcons();
             scheduleSave();
         };
     });
@@ -18824,7 +18824,7 @@ window.onload = async () => {
     loadPromptTemplateOverrides();
     await loadPromptTemplates();
     if(window.StudioI18n) window.StudioI18n.apply();
-    if(window.lucide) lucide.createIcons();
+    refreshIcons();
     connectAssetLibrarySyncSocket();
     await loadConfig();
     await loadAssetLibrary();
