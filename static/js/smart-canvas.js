@@ -4869,7 +4869,7 @@ async function createPromptTemplateGroup(){
             promptLibraries = data.library?.libraries || promptLibraries;
             promptTemplateCategory = data.category?.id || promptTemplateCategory;
             renderPromptTemplatePanel({preserveScroll:false});
-        } catch(err){ if(typeof setStatus === 'function') setStatus(err.message || '新增分组失败'); }
+        } catch(err){ toast(err.message || '新增分组失败'); }
         return;
     }
     const group = {id:uid('tpl_group'), name:String(name).trim().slice(0, 24)};
@@ -4893,7 +4893,7 @@ async function renamePromptTemplateGroup(groupId){
             }, '重命名失败');
             promptLibraries = data.library?.libraries || promptLibraries;
             renderPromptTemplatePanel();
-        } catch(err){ if(typeof setStatus === 'function') setStatus(err.message || '重命名失败'); }
+        } catch(err){ toast(err.message || '重命名失败'); }
         return;
     }
     group.name = String(name).trim().slice(0, 24);
@@ -4910,7 +4910,7 @@ async function deletePromptTemplateGroup(groupId){
             promptLibraries = data.library?.libraries || promptLibraries;
             if(promptTemplateCategory === groupId) promptTemplateCategory = 'all';
             renderPromptTemplatePanel({preserveScroll:false});
-        } catch(err){ if(typeof setStatus === 'function') setStatus(err.message || '删除失败'); }
+        } catch(err){ toast(err.message || '删除失败'); }
         return;
     }
     if(!window.confirm(tr('smart.tplDeleteGroupConfirm'))) return;
