@@ -8497,12 +8497,8 @@ function bindPromptLlmControls(el, node){
     });
 }
 
-function bindPromptNodeControls(el, node){
-    el.querySelectorAll('.prompt-node-control, .prompt-node-pill').forEach(control => {
-        control.addEventListener('mousedown', e => e.stopPropagation());
-        control.addEventListener('click', e => e.stopPropagation());
-        control.addEventListener('dblclick', e => e.stopPropagation());
-    });
+
+function bindPromptTextControls(el, node){
     const textEl = el.querySelector('.prompt-node-text');
     if(textEl) {
         bindScrollableText(textEl);
@@ -8547,6 +8543,15 @@ function bindPromptNodeControls(el, node){
         e.stopPropagation();
         editPromptPresetForNode(node);
     };
+}
+
+function bindPromptNodeControls(el, node){
+    el.querySelectorAll('.prompt-node-control, .prompt-node-pill').forEach(control => {
+        control.addEventListener('mousedown', e => e.stopPropagation());
+        control.addEventListener('click', e => e.stopPropagation());
+        control.addEventListener('dblclick', e => e.stopPropagation());
+    });
+    bindPromptTextControls(el, node);
     bindPromptLlmControls(el, node);
     const runEl = el.querySelector('.prompt-node-run');
     if(runEl) runEl.onclick = e => { e.preventDefault(); e.stopPropagation(); runPromptLLMNode(node.id); };
