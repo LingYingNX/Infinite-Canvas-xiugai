@@ -175,7 +175,7 @@ async function openStorageSettings(){
         storageSettingsState.defaultClassificationPrompt = promptData.default_prompt || '';
         await loadStorageFiles(storageSettingsState.kind || 'generated');
     } catch(err){
-        setStatus(err.message || '加载存储设置失败');
+        showRequestError(err, '加载存储设置失败');
         renderStorageSettingsModal();
     }
 }
@@ -872,7 +872,7 @@ async function registerSharedFolder(){
         else render();
         setStatus(`已登记「${folder?.name || '共享文件夹'}」`);
     } catch(err) {
-        setStatus(err.message || '登记共享文件夹失败');
+        showRequestError(err, '登记共享文件夹失败');
     }
 }
 async function unregisterSharedFolder(folderId){
@@ -894,7 +894,7 @@ async function unregisterSharedFolder(folderId){
         render();
         setStatus('已移除共享文件夹登记（不会删除磁盘文件）');
     } catch(err) {
-        setStatus(err.message || '移除共享文件夹失败');
+        showRequestError(err, '移除共享文件夹失败');
     }
 }
 function indexSharedTree(node){
@@ -923,7 +923,7 @@ async function openSharedFolder(folderId){
         render();
         setStatus(`已读取「${activeSharedFolderName}」`);
     } catch(err) {
-        setStatus(err.message || '读取共享文件夹失败');
+        showRequestError(err, '读取共享文件夹失败');
     }
 }
 function currentAssetItems(){
@@ -1299,7 +1299,7 @@ async function refreshCanvasAssets(){
         render();
         setStatus('画布资产已刷新');
     } catch(err) {
-        setStatus(err.message || '刷新画布资产失败');
+        showRequestError(err, '刷新画布资产失败');
     }
 }
 async function loadAll(){
@@ -2646,7 +2646,7 @@ async function downloadSelectedAssets(){
         setTimeout(() => URL.revokeObjectURL(link.href), 1200);
         setStatus(`已下载 ${items.length} 个素材`);
     } catch(err){
-        setStatus(err.message || '下载失败');
+        showRequestError(err, '下载失败');
     }
 }
 function downloadLocalUpload(id){
@@ -2678,7 +2678,7 @@ async function downloadSelectedLocalUploads(){
         setTimeout(() => URL.revokeObjectURL(link.href), 1200);
         setStatus(`已下载 ${items.length} 个素材`);
     } catch(err){
-        setStatus(err.message || '下载失败');
+        showRequestError(err, '下载失败');
     }
 }
 function copySelectedLocalUploadsToCanvas(){
@@ -2729,7 +2729,7 @@ async function pasteLocalUploadClipboard(){
         render();
         setStatus(`已移动 ${data?.moved ?? names.length} 个素材`);
     } catch(err){
-        setStatus(err.message || '移动失败');
+        showRequestError(err, '移动失败');
     }
 }
 async function renameWorkflowItem(id){
@@ -2804,7 +2804,7 @@ async function deleteLocalAssets(ids){
         render();
         setStatus(`已删除 ${names.length} 个素材`);
     } catch(err) {
-        setStatus(err.message || '删除失败');
+        showRequestError(err, '删除失败');
     }
 }
 async function saveLocalUploadInlineName(id, name){
@@ -2828,7 +2828,7 @@ async function saveLocalUploadInlineName(id, name){
         render();
         setStatus('已重命名素材，反推提示词和分类索引已同步');
     } catch(err) {
-        setStatus(err.message || '重命名失败');
+        showRequestError(err, '重命名失败');
     }
 }
 function beginLocalUploadInlineRename(id){
@@ -2893,7 +2893,7 @@ async function createLocalUploadFolder(){
         render();
         setStatus('已新建本地素材文件夹');
     } catch(err) {
-        setStatus(err.message || '新建文件夹失败');
+        showRequestError(err, '新建文件夹失败');
     }
 }
 async function renameLocalUploadFolder(){
@@ -2919,7 +2919,7 @@ async function renameLocalUploadFolder(){
         render();
         setStatus('已重命名本地素材文件夹');
     } catch(err) {
-        setStatus(err.message || '重命名文件夹失败');
+        showRequestError(err, '重命名文件夹失败');
     }
 }
 async function runLocalUploadCaptionSelected(){
@@ -2951,7 +2951,7 @@ async function runLocalUploadCaptionSelected(){
         const failed = (data.items || []).filter(item => !item.ok);
         setStatus(failed.length ? `已完成 ${data.count || 0} 张，${failed.length} 张失败：${failed[0].error || '反推失败'}` : `已反推并保存 ${data.count || images.length} 张图片提示词`);
     } catch(err) {
-        setStatus(err.message || '提示词反推失败');
+        showRequestError(err, '提示词反推失败');
     } finally {
         localCaptionBusy = false;
         render();
@@ -2987,7 +2987,7 @@ async function runLocalUploadCaptionOne(id){
         render();
         setStatus('已反推并保存当前图片提示词');
     } catch(err) {
-        setStatus(err.message || '提示词反推失败');
+        showRequestError(err, '提示词反推失败');
     } finally {
         localCaptionBusy = false;
         render();
@@ -3033,7 +3033,7 @@ async function runLocalUploadClassifySelected(){
         const failed = (data.items || []).filter(item => !item.ok);
         setStatus(failed.length ? `处理完成 ${data.count || 0} 张，${failed.length} 张失败：${failed[0].error || '分类失败'}` : `处理完成 ${data.count || images.length} 张图片`);
     } catch(err) {
-        setStatus(err.message || '智能分类失败');
+        showRequestError(err, '智能分类失败');
     } finally {
         localClassifyBusy = false;
         render();
@@ -3068,7 +3068,7 @@ async function runAssetClassifySelected(){
         const failed = (data.items || []).filter(item => !item.ok);
         setStatus(failed.length ? `处理完成 ${data.count || 0} 张，${failed.length} 张失败：${failed[0].error || '分类失败'}` : `处理完成 ${data.count || images.length} 张资产图片`);
     } catch(err) {
-        setStatus(err.message || '智能分类失败');
+        showRequestError(err, '智能分类失败');
     } finally {
         assetClassifyBusy = false;
         render();
@@ -3090,7 +3090,7 @@ async function saveLocalUploadCaption(id){
         render();
         setStatus('已保存反推提示词');
     } catch(err) {
-        setStatus(err.message || '保存提示词失败');
+        showRequestError(err, '保存提示词失败');
     }
 }
 async function handleStorageSettingsClick(event, target){
@@ -3111,7 +3111,7 @@ async function handleStorageSettingsClick(event, target){
             storageSettingsState.editor = '';
             renderStorageSettingsModal();
         } catch(err){
-            setStatus(err.message || '保存偏好设置失败');
+            showRequestError(err, '保存偏好设置失败');
         }
         return true;
     }
@@ -3125,7 +3125,7 @@ async function handleStorageSettingsClick(event, target){
     }
     if(target.closest?.('[data-storage-save]')){
         try { await saveStorageSettings({saveDirs:true, saveClassification:false}); }
-        catch(err){ setStatus(err.message || '保存存储设置失败'); }
+        catch(err){ showRequestError(err, '保存存储设置失败'); }
         return true;
     }
     const storageKindBtn = target.closest?.('[data-storage-kind]');
@@ -3148,7 +3148,7 @@ async function handleStorageSettingsClick(event, target){
     }
     if(target.closest?.('[data-storage-delete]')){
         try { await deleteSelectedStorageFiles(); }
-        catch(err){ setStatus(err.message || '删除文件失败'); }
+        catch(err){ showRequestError(err, '删除文件失败'); }
         return true;
     }
     if(target.closest?.('[data-class-rule-reset]')){
@@ -4206,7 +4206,7 @@ async function registerAssetAvatar(id, providerId=''){
         setStatus(`已提交审核，正在等待 ${avatarPlatformLabel(providerAvatarPlatform(provider))} 通过…`);
         scheduleAvatarPoll(id, provider.id);
     } catch(err) {
-        setStatus(err.message || '数字人提交失败');
+        showRequestError(err, '数字人提交失败');
     } finally {
         avatarBusyId = '';
         render();
@@ -4238,7 +4238,7 @@ async function checkAssetAvatarStatus(id, silent=false, providerId=''){
         else if(status === 'Failed') setStatus(newReg.detail || '审核未通过');
         else { setStatus('仍在审核中，稍后会自动刷新…'); scheduleAvatarPoll(id, provider.id); }
     } catch(err) {
-        if(!silent) setStatus(err.message || '查询审核状态失败');
+        if(!silent) showRequestError(err, '查询审核状态失败');
     } finally {
         avatarBusyId = '';
         render();
@@ -4363,7 +4363,7 @@ async function pasteLocalClipboardToAssets(){
             imported += (data.items?.length || 0);
         }
     } catch(err) {
-        setStatus(err.message || '导入共享素材失败');
+        showRequestError(err, '导入共享素材失败');
         return;
     }
     localClipboard = null;
