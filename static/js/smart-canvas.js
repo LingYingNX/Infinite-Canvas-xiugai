@@ -8737,6 +8737,58 @@ function bindMinimaxEngineSelect(el, node, focusMinimaxNode){
     });
 }
 
+
+function bindMinimaxParamInputs(el, node, focusMinimaxNode){
+    el.querySelectorAll('[data-minimax-number]').forEach(input => {
+        const key = input.dataset.minimaxNumber;
+        input.oninput = input.onchange = e => {
+            e.stopPropagation();
+            focusMinimaxNode();
+            const value = Number(input.value);
+            if(key === 'duration') node.duration = Math.max(0.5, Math.min(60, value || 8));
+            if(key === 'megapixels') node.megapixels = Math.max(0.1, Math.min(2, value || 0.4));
+            renderDynamicParams();
+            scheduleSave();
+        };
+    });
+    el.querySelectorAll('[data-minimax-select]').forEach(select => {
+        select.onchange = e => {
+            e.stopPropagation();
+            focusMinimaxNode();
+            const seg = smartMinimaxSelectedSegment(node);
+            if(seg) seg[select.dataset.minimaxSelect] = select.value;
+            node[select.dataset.minimaxSelect] = select.value;
+            renderDynamicParams();
+            scheduleSave();
+        };
+    });
+    el.querySelectorAll('[data-minimax-seg-number]').forEach(input => {
+        const key = input.dataset.minimaxSegNumber;
+        input.oninput = input.onchange = e => {
+            e.stopPropagation();
+            focusMinimaxNode();
+            const seg = smartMinimaxSelectedSegment(node);
+            if(!seg) return;
+            const value = Number(input.value);
+            if(key === 'start') seg.start = Math.max(0, value || 0);
+            if(key === 'duration'){
+                seg.duration = Math.max(0.5, value || 0.5);
+                seg.trimOut = Math.min(Math.max(Number(seg.trimOut || seg.duration), Number(seg.trimIn || 0) + 0.1), seg.duration);
+            }
+            if(key === 'trimIn') seg.trimIn = Math.max(0, Math.min(value || 0, Math.max(0, Number(seg.trimOut || seg.duration) - 0.1)));
+            if(key === 'trimOut') seg.trimOut = Math.max(Number(seg.trimIn || 0) + 0.1, Math.min(Number(seg.duration || 0.5), value || Number(seg.duration || 0.5)));
+            if(key === 'megapixels'){
+                seg.megapixels = Math.max(0.1, Math.min(2, value || 0.4));
+                node.megapixels = seg.megapixels;
+            }
+            node.duration = Math.max(Number(node.duration || 0), seg.start + seg.duration);
+            renderDynamicParams();
+            scheduleSave();
+            if(e.type === 'change') render();
+        };
+    });
+}
+
 function bindMinimaxNodeControls(el, node){
     const focusMinimaxNode = () => {
         if(selectedId === node.id && selectedIds.length === 0 && selectedImage.nodeId === '') return;
@@ -8891,54 +8943,7 @@ function bindMinimaxNodeControls(el, node){
             renderAfterMinimaxDelete();
         });
     });
-    el.querySelectorAll('[data-minimax-number]').forEach(input => {
-        const key = input.dataset.minimaxNumber;
-        input.oninput = input.onchange = e => {
-            e.stopPropagation();
-            focusMinimaxNode();
-            const value = Number(input.value);
-            if(key === 'duration') node.duration = Math.max(0.5, Math.min(60, value || 8));
-            if(key === 'megapixels') node.megapixels = Math.max(0.1, Math.min(2, value || 0.4));
-            renderDynamicParams();
-            scheduleSave();
-        };
-    });
-    el.querySelectorAll('[data-minimax-select]').forEach(select => {
-        select.onchange = e => {
-            e.stopPropagation();
-            focusMinimaxNode();
-            const seg = smartMinimaxSelectedSegment(node);
-            if(seg) seg[select.dataset.minimaxSelect] = select.value;
-            node[select.dataset.minimaxSelect] = select.value;
-            renderDynamicParams();
-            scheduleSave();
-        };
-    });
-    el.querySelectorAll('[data-minimax-seg-number]').forEach(input => {
-        const key = input.dataset.minimaxSegNumber;
-        input.oninput = input.onchange = e => {
-            e.stopPropagation();
-            focusMinimaxNode();
-            const seg = smartMinimaxSelectedSegment(node);
-            if(!seg) return;
-            const value = Number(input.value);
-            if(key === 'start') seg.start = Math.max(0, value || 0);
-            if(key === 'duration'){
-                seg.duration = Math.max(0.5, value || 0.5);
-                seg.trimOut = Math.min(Math.max(Number(seg.trimOut || seg.duration), Number(seg.trimIn || 0) + 0.1), seg.duration);
-            }
-            if(key === 'trimIn') seg.trimIn = Math.max(0, Math.min(value || 0, Math.max(0, Number(seg.trimOut || seg.duration) - 0.1)));
-            if(key === 'trimOut') seg.trimOut = Math.max(Number(seg.trimIn || 0) + 0.1, Math.min(Number(seg.duration || 0.5), value || Number(seg.duration || 0.5)));
-            if(key === 'megapixels'){
-                seg.megapixels = Math.max(0.1, Math.min(2, value || 0.4));
-                node.megapixels = seg.megapixels;
-            }
-            node.duration = Math.max(Number(node.duration || 0), seg.start + seg.duration);
-            renderDynamicParams();
-            scheduleSave();
-            if(e.type === 'change') render();
-        };
-    });
+    bindMinimaxParamInputs(el, node, focusMinimaxNode);
     const prompt = el.querySelector('[data-minimax-prompt]');
     if(prompt){
         bindScrollableText(prompt);
