@@ -9162,58 +9162,8 @@ function bindMinimaxToggleMute(el, node, focusMinimaxNode){
     });
 }
 
-function bindMinimaxNodeControls(el, node){
-    const focusMinimaxNode = () => {
-        if(selectedId === node.id && selectedIds.length === 0 && selectedImage.nodeId === '') return;
-        hideRunTimerForNode(node);
-        selectedId = node.id;
-        selectedIds = [];
-        selectedImage = {nodeId:'', index:-1};
-        if(smartCascadeAnyRunning()) smartCascadeSilentSelection = false;
-        syncSelectionUi();
-        updateComposer();
-    };
-    el.querySelectorAll('.minimax-library-list').forEach(scroller => {
-        scroller.addEventListener('wheel', e => e.stopPropagation(), {passive:true});
-    });
-    bindMinimaxDropHandlers(el, node, focusMinimaxNode);
-    let minimaxDeleteRenderQueued = false;
-    const renderAfterMinimaxDelete = () => {
-        if(minimaxDeleteRenderQueued) return;
-        minimaxDeleteRenderQueued = true;
-        setTimeout(() => {
-            render();
-            scheduleSave();
-        }, 16);
-    };
-    const stopFastMinimaxButton = e => {
-        if(e.button !== undefined && e.button !== 0) return false;
-        e.preventDefault();
-        e.stopPropagation();
-        if(e.stopImmediatePropagation) e.stopImmediatePropagation();
-        focusMinimaxNode();
-        return true;
-    };
-    const bindFastMinimaxButton = (btn, action) => {
-        btn.addEventListener('pointerdown', stopFastMinimaxButton, true);
-        btn.addEventListener('mousedown', stopFastMinimaxButton, true);
-        btn.addEventListener('click', e => {
-            if(!stopFastMinimaxButton(e)) return;
-            action(e);
-        }, true);
-    };
-    el.querySelectorAll('button,input,select,textarea,video,audio').forEach(control => {
-        control.addEventListener('mousedown', e => {
-            focusMinimaxNode();
-            e.stopPropagation();
-        });
-        control.addEventListener('click', e => {
-            focusMinimaxNode();
-            e.stopPropagation();
-        });
-        control.addEventListener('dblclick', e => e.stopPropagation());
-    });
-    bindMinimaxEngineSelect(el, node, focusMinimaxNode);
+
+function bindMinimaxSegmentControls(el, node, focusMinimaxNode, bindFastMinimaxButton, renderAfterMinimaxDelete){
     el.querySelectorAll('[data-minimax-segment]').forEach(btn => {
         btn.addEventListener('mousedown', e => {
             if(e.target.closest('[data-minimax-trim]')) return;
@@ -9316,6 +9266,61 @@ function bindMinimaxNodeControls(el, node){
             renderAfterMinimaxDelete();
         });
     });
+}
+
+function bindMinimaxNodeControls(el, node){
+    const focusMinimaxNode = () => {
+        if(selectedId === node.id && selectedIds.length === 0 && selectedImage.nodeId === '') return;
+        hideRunTimerForNode(node);
+        selectedId = node.id;
+        selectedIds = [];
+        selectedImage = {nodeId:'', index:-1};
+        if(smartCascadeAnyRunning()) smartCascadeSilentSelection = false;
+        syncSelectionUi();
+        updateComposer();
+    };
+    el.querySelectorAll('.minimax-library-list').forEach(scroller => {
+        scroller.addEventListener('wheel', e => e.stopPropagation(), {passive:true});
+    });
+    bindMinimaxDropHandlers(el, node, focusMinimaxNode);
+    let minimaxDeleteRenderQueued = false;
+    const renderAfterMinimaxDelete = () => {
+        if(minimaxDeleteRenderQueued) return;
+        minimaxDeleteRenderQueued = true;
+        setTimeout(() => {
+            render();
+            scheduleSave();
+        }, 16);
+    };
+    const stopFastMinimaxButton = e => {
+        if(e.button !== undefined && e.button !== 0) return false;
+        e.preventDefault();
+        e.stopPropagation();
+        if(e.stopImmediatePropagation) e.stopImmediatePropagation();
+        focusMinimaxNode();
+        return true;
+    };
+    const bindFastMinimaxButton = (btn, action) => {
+        btn.addEventListener('pointerdown', stopFastMinimaxButton, true);
+        btn.addEventListener('mousedown', stopFastMinimaxButton, true);
+        btn.addEventListener('click', e => {
+            if(!stopFastMinimaxButton(e)) return;
+            action(e);
+        }, true);
+    };
+    el.querySelectorAll('button,input,select,textarea,video,audio').forEach(control => {
+        control.addEventListener('mousedown', e => {
+            focusMinimaxNode();
+            e.stopPropagation();
+        });
+        control.addEventListener('click', e => {
+            focusMinimaxNode();
+            e.stopPropagation();
+        });
+        control.addEventListener('dblclick', e => e.stopPropagation());
+    });
+    bindMinimaxEngineSelect(el, node, focusMinimaxNode);
+    bindMinimaxSegmentControls(el, node, focusMinimaxNode, bindFastMinimaxButton, renderAfterMinimaxDelete);
     bindMinimaxParamInputs(el, node, focusMinimaxNode);
     bindMinimaxPromptAndRun(el, node, focusMinimaxNode);
     bindMinimaxTimelinePlay(el, node, focusMinimaxNode);
