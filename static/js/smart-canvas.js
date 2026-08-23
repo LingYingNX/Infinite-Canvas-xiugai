@@ -8327,44 +8327,6 @@ function render(){
     measureSmartNodeImages();
     refreshRunTimerPills();
     return;
-    world.innerHTML = '';
-    if(composerEl) world.appendChild(composerEl);
-    world.insertAdjacentHTML('beforeend', renderConnections());
-    const nodesHtml = nodes.map(node => {
-        const imgs = node.images || [];
-        const title = node.type === 'smart-prompt' ? 'Prompt' : node.type === 'smart-loop' ? 'Loop' : (imgs.length > 1 ? 'Group' : 'Image');
-        const scale = nodeScale(node);
-        const layout = imageLayout(imgs, scale, node);
-        const isPrompt = node.type === 'smart-prompt';
-        const isLoop = node.type === 'smart-loop';
-        const isMinimax = node.type === 'smart-minimax';
-        const isImageNode = node.type === 'smart-image' || !node.type;
-        const isQueued = Boolean(node.queued && imgs.length === 0 && !node.pending);
-        const isEmpty = isImageNode && imgs.length === 0 && !node.pending && !isQueued;
-        const isGroup = isImageNode && imgs.length > 1;
-        const isPending = (node.pending || isQueued) && imgs.length === 0;
-        const body = nodeBodyHtml(node, layout);
-        const deleteBtn = (isGroup || isMinimax) ? '' : `<button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button>`;
-        return `<div class="image-node ${isEmpty ? 'empty-node' : ''} ${isGroup ? 'group-node' : ''} ${isPrompt ? 'prompt-smart-node' : ''} ${isLoop ? 'loop-smart-node' : ''} ${isNodeSelected(node.id) ? 'selected' : ''} ${(dragState?.groupIds?.includes(node.id) || dragState?.id === node.id) ? 'dragging' : ''} ${node.running ? 'node-running' : ''} ${isPending ? 'node-pending' : ''}" data-id="${escapeHtml(node.id)}" style="left:${node.x || 0}px;top:${node.y || 0}px;width:${layout.width}px;height:${layout.height}px">
-            <div class="node-head"><div class="node-title">${title}</div><div class="node-actions">${deleteBtn}</div></div>
-            ${!isEmpty && !isGroup && !isMinimax ? `<div class="floating-node-actions"><button class="mini-x node-delete" type="button" title="${escapeHtml(tr('smart.deleteNode'))}"><i data-lucide="trash-2"></i></button></div>` : ''}
-            ${smartNodeToolbarHtml(node)}
-            ${runTimePillHtml(node)}
-            <div class="node-body">${body}</div>
-            <div class="node-hint">${isPending ? escapeHtml(tr('smart.hintPending')) : (imgs.length > 1 ? escapeHtml(tr('smart.hintMulti')) : imgs.length ? escapeHtml(tr('smart.hintSingle')) : escapeHtml(tr('smart.hintEmpty')))}</div>
-            ${imgs.length || node.pending || isQueued || isPrompt || isLoop ? '<div class="node-resize-handle" data-resize="1"></div>' : ''}
-            <div class="node-port port-in" data-port="in" title="输入"></div>
-            <div class="node-port port-out" data-port="out" title="输出"></div>
-        </div>`;
-    }).join('');
-    world.insertAdjacentHTML('beforeend', nodesHtml);
-    bindNodeEvents();
-    bindConnectionEvents();
-    updateComposer();
-    renderMinimap();
-    if(window.lucide) lucide.createIcons();
-    measureSmartNodeImages();
-    refreshRunTimerPills();
 }
 function measureSmartNodeImages(){
     world.querySelectorAll('.image-node img,.image-node video').forEach(imgEl => {
