@@ -8545,14 +8545,8 @@ function bindPromptTextControls(el, node){
     };
 }
 
-function bindPromptNodeControls(el, node){
-    el.querySelectorAll('.prompt-node-control, .prompt-node-pill').forEach(control => {
-        control.addEventListener('mousedown', e => e.stopPropagation());
-        control.addEventListener('click', e => e.stopPropagation());
-        control.addEventListener('dblclick', e => e.stopPropagation());
-    });
-    bindPromptTextControls(el, node);
-    bindPromptLlmControls(el, node);
+
+function bindPromptRunButton(el, node){
     const runEl = el.querySelector('.prompt-node-run');
     if(runEl) runEl.onclick = e => { e.preventDefault(); e.stopPropagation(); runPromptLLMNode(node.id); };
 }
@@ -8695,6 +8689,17 @@ function bindLoopNumberControls(el, node){
             setLoopNumber(input.dataset.loopNumberInput, input.value, true);
         };
     });
+}
+
+function bindPromptNodeControls(el, node){
+    el.querySelectorAll('.prompt-node-control, .prompt-node-pill').forEach(control => {
+        control.addEventListener('mousedown', e => e.stopPropagation());
+        control.addEventListener('click', e => e.stopPropagation());
+        control.addEventListener('dblclick', e => e.stopPropagation());
+    });
+    bindPromptTextControls(el, node);
+    bindPromptLlmControls(el, node);
+    bindPromptRunButton(el, node);
 }
 
 function bindLoopNodeControls(el, node){
