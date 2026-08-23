@@ -8856,6 +8856,52 @@ function bindMinimaxTimelinePlay(el, node, focusMinimaxNode){
     });
 }
 
+
+function bindMinimaxScrubTrack(el, node, focusMinimaxNode){
+    el.querySelectorAll('[data-minimax-scrub-track]').forEach(track => {
+        track.addEventListener('wheel', e => {
+            if(!e.ctrlKey) return;
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            const current = Math.max(1, Math.min(8, Number(node.timelineZoom || 1)));
+            const next = Math.max(1, Math.min(8, current * (e.deltaY < 0 ? 1.12 : 0.89)));
+            if(Math.abs(next - current) < 0.01) return;
+            node.timelineZoom = next;
+            render();
+            scheduleSave();
+        }, {passive:false});
+        track.addEventListener('mousedown', e => {
+            if(e.target.closest('[data-minimax-segment],button,input,select,textarea,[data-minimax-trim]')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            const seek = event => {
+                const ruler = track.querySelector('.minimax-ruler') || track;
+                const content = ruler.querySelector('.minimax-track-content') || ruler;
+                const rect = ruler.getBoundingClientRect();
+                const x = (event.clientX - rect.left) + Number(ruler.scrollLeft || 0);
+                const ratio = Math.max(0, Math.min(1, x / Math.max(1, Number(content.scrollWidth || rect.width))));
+                const total = smartMinimaxTimelineTotal(node);
+                const time = ratio * total;
+                smartMinimaxApplyTimelineTime(el, node, time, {syncPlayer:true, play:false});
+            };
+            const onMove = event => {
+                event.preventDefault();
+                seek(event);
+            };
+            const onUp = () => {
+                window.removeEventListener('mousemove', onMove, true);
+                window.removeEventListener('mouseup', onUp, true);
+                scheduleSave();
+            };
+            seek(e);
+            window.addEventListener('mousemove', onMove, true);
+            window.addEventListener('mouseup', onUp, true);
+        });
+    });
+}
+
 function bindMinimaxNodeControls(el, node){
     const focusMinimaxNode = () => {
         if(selectedId === node.id && selectedIds.length === 0 && selectedImage.nodeId === '') return;
@@ -9013,48 +9059,7 @@ function bindMinimaxNodeControls(el, node){
     bindMinimaxParamInputs(el, node, focusMinimaxNode);
     bindMinimaxPromptAndRun(el, node, focusMinimaxNode);
     bindMinimaxTimelinePlay(el, node, focusMinimaxNode);
-    el.querySelectorAll('[data-minimax-scrub-track]').forEach(track => {
-        track.addEventListener('wheel', e => {
-            if(!e.ctrlKey) return;
-            e.preventDefault();
-            e.stopPropagation();
-            focusMinimaxNode();
-            const current = Math.max(1, Math.min(8, Number(node.timelineZoom || 1)));
-            const next = Math.max(1, Math.min(8, current * (e.deltaY < 0 ? 1.12 : 0.89)));
-            if(Math.abs(next - current) < 0.01) return;
-            node.timelineZoom = next;
-            render();
-            scheduleSave();
-        }, {passive:false});
-        track.addEventListener('mousedown', e => {
-            if(e.target.closest('[data-minimax-segment],button,input,select,textarea,[data-minimax-trim]')) return;
-            e.preventDefault();
-            e.stopPropagation();
-            focusMinimaxNode();
-            const seek = event => {
-                const ruler = track.querySelector('.minimax-ruler') || track;
-                const content = ruler.querySelector('.minimax-track-content') || ruler;
-                const rect = ruler.getBoundingClientRect();
-                const x = (event.clientX - rect.left) + Number(ruler.scrollLeft || 0);
-                const ratio = Math.max(0, Math.min(1, x / Math.max(1, Number(content.scrollWidth || rect.width))));
-                const total = smartMinimaxTimelineTotal(node);
-                const time = ratio * total;
-                smartMinimaxApplyTimelineTime(el, node, time, {syncPlayer:true, play:false});
-            };
-            const onMove = event => {
-                event.preventDefault();
-                seek(event);
-            };
-            const onUp = () => {
-                window.removeEventListener('mousemove', onMove, true);
-                window.removeEventListener('mouseup', onUp, true);
-                scheduleSave();
-            };
-            seek(e);
-            window.addEventListener('mousemove', onMove, true);
-            window.addEventListener('mouseup', onUp, true);
-        });
-    });
+    bindMinimaxScrubTrack(el, node, focusMinimaxNode);
     el.querySelectorAll('[data-minimax-pane-resize]').forEach(handle => {
         handle.addEventListener('mousedown', e => {
             e.preventDefault();
