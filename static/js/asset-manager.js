@@ -3448,6 +3448,67 @@ async function handleLocalClick(event, target){
     return false;
 }
 
+
+async function handleWorkflowClick(event, target){
+    if(target.closest?.('[data-workflow-manage]')){
+        workflowManageMode = !workflowManageMode;
+        if(!workflowManageMode) selectedWorkflowIds.clear();
+        pendingDeleteAssetId = '';
+        render();
+        return true;
+    }
+    if(target.closest?.('[data-workflow-select-all]')){ currentWorkflowItems().forEach(item => selectedWorkflowIds.add(item.id)); render(); return true; }
+    if(target.closest?.('[data-workflow-clear-selection]')){ selectedWorkflowIds.clear(); render(); return true; }
+    if(target.closest?.('[data-workflow-export-selected]')){ await exportWorkflowItems([...selectedWorkflowIds]); return true; }
+    if(target.closest?.('[data-workflow-delete-selected]')){ await deleteSelectedWorkflows(); return true; }
+    if(target.closest?.('[data-workflow-upload]')){
+        if(uploadInput) uploadInput.accept = '.json,.zip,application/json,application/zip,application/x-zip-compressed';
+        uploadInput?.click();
+        return true;
+    }
+    const workflowDownload = target.closest?.('[data-workflow-download]');
+    if(workflowDownload){ await exportWorkflowItems([workflowDownload.dataset.workflowDownload || '']); return true; }
+    const workflowRename = target.closest?.('[data-workflow-rename]');
+    if(workflowRename){ await renameWorkflowItem(workflowRename.dataset.workflowRename || ''); return true; }
+    const workflowDelete = target.closest?.('[data-workflow-delete]');
+    if(workflowDelete){ await deleteWorkflowItem(workflowDelete.dataset.workflowDelete || ''); return true; }
+    if(target.closest?.('[data-workflow-cat-new]')){
+        workflowTreeEdit = {kind:'category-new', placement:'head', value:'新工作流分组', label:'工作流分组名称'};
+        pendingTreeDelete = '';
+        render();
+        focusTreeEditInput('workflowTreeEditInput');
+        return true;
+    }
+    if(target.closest?.('[data-workflow-cat-rename]')){
+        const cat = activeWorkflowCategory();
+        if(!cat) return true;
+        workflowTreeEdit = {kind:'category-rename', value:cat.name || '', label:'工作流分组名称', categoryId:cat.id};
+        pendingTreeDelete = '';
+        render();
+        focusTreeEditInput('workflowTreeEditInput');
+        return true;
+    }
+    if(target.closest?.('[data-workflow-cat-delete]')){ await deleteWorkflowCategory(); return true; }
+    const workflowLib = target.closest?.('[data-workflow-lib]');
+    if(workflowLib){ activeWorkflowLibraryId = workflowLib.dataset.workflowLib || ''; activeWorkflowCategoryId = ''; selectedWorkflowId = ''; selectedWorkflowIds.clear(); render(); return true; }
+    const workflowCat = target.closest?.('[data-workflow-cat]');
+    if(workflowCat){ activeWorkflowLibraryId = workflowCat.dataset.workflowCatLib || activeWorkflowLibraryId; activeWorkflowCategoryId = workflowCat.dataset.workflowCat || ''; selectedWorkflowId = ''; selectedWorkflowIds.clear(); render(); return true; }
+    const workflowCard = target.closest?.('[data-workflow-card]');
+    if(workflowCard){
+        const id = workflowCard.dataset.workflowCard || '';
+        if(workflowManageMode){
+            const selected = toggleSelectionSet(selectedWorkflowIds, id);
+            selectedWorkflowId = selected ? id : (selectedWorkflowId === id ? '' : selectedWorkflowId);
+        } else {
+            selectedWorkflowId = id;
+        }
+        pendingDeleteAssetId = '';
+        render();
+        return true;
+    }
+    return false;
+}
+
 async function handleClick(event){
     const target = event.target;
     if(await handleStorageSettingsClick(event, target)) return;
@@ -3476,62 +3537,7 @@ async function handleClick(event){
     const sharedOpen = target.closest?.('[data-shared-open]');
     if(sharedOpen){ await openSharedFolder(sharedOpen.dataset.sharedOpen || ''); return; }
     if(await handleLocalClick(event, target)) return;
-    if(target.closest?.('[data-workflow-manage]')){
-        workflowManageMode = !workflowManageMode;
-        if(!workflowManageMode) selectedWorkflowIds.clear();
-        pendingDeleteAssetId = '';
-        render();
-        return;
-    }
-    if(target.closest?.('[data-workflow-select-all]')){ currentWorkflowItems().forEach(item => selectedWorkflowIds.add(item.id)); render(); return; }
-    if(target.closest?.('[data-workflow-clear-selection]')){ selectedWorkflowIds.clear(); render(); return; }
-    if(target.closest?.('[data-workflow-export-selected]')){ await exportWorkflowItems([...selectedWorkflowIds]); return; }
-    if(target.closest?.('[data-workflow-delete-selected]')){ await deleteSelectedWorkflows(); return; }
-    if(target.closest?.('[data-workflow-upload]')){
-        if(uploadInput) uploadInput.accept = '.json,.zip,application/json,application/zip,application/x-zip-compressed';
-        uploadInput?.click();
-        return;
-    }
-    const workflowDownload = target.closest?.('[data-workflow-download]');
-    if(workflowDownload){ await exportWorkflowItems([workflowDownload.dataset.workflowDownload || '']); return; }
-    const workflowRename = target.closest?.('[data-workflow-rename]');
-    if(workflowRename){ await renameWorkflowItem(workflowRename.dataset.workflowRename || ''); return; }
-    const workflowDelete = target.closest?.('[data-workflow-delete]');
-    if(workflowDelete){ await deleteWorkflowItem(workflowDelete.dataset.workflowDelete || ''); return; }
-    if(target.closest?.('[data-workflow-cat-new]')){
-        workflowTreeEdit = {kind:'category-new', placement:'head', value:'新工作流分组', label:'工作流分组名称'};
-        pendingTreeDelete = '';
-        render();
-        focusTreeEditInput('workflowTreeEditInput');
-        return;
-    }
-    if(target.closest?.('[data-workflow-cat-rename]')){
-        const cat = activeWorkflowCategory();
-        if(!cat) return;
-        workflowTreeEdit = {kind:'category-rename', value:cat.name || '', label:'工作流分组名称', categoryId:cat.id};
-        pendingTreeDelete = '';
-        render();
-        focusTreeEditInput('workflowTreeEditInput');
-        return;
-    }
-    if(target.closest?.('[data-workflow-cat-delete]')){ await deleteWorkflowCategory(); return; }
-    const workflowLib = target.closest?.('[data-workflow-lib]');
-    if(workflowLib){ activeWorkflowLibraryId = workflowLib.dataset.workflowLib || ''; activeWorkflowCategoryId = ''; selectedWorkflowId = ''; selectedWorkflowIds.clear(); render(); return; }
-    const workflowCat = target.closest?.('[data-workflow-cat]');
-    if(workflowCat){ activeWorkflowLibraryId = workflowCat.dataset.workflowCatLib || activeWorkflowLibraryId; activeWorkflowCategoryId = workflowCat.dataset.workflowCat || ''; selectedWorkflowId = ''; selectedWorkflowIds.clear(); render(); return; }
-    const workflowCard = target.closest?.('[data-workflow-card]');
-    if(workflowCard){
-        const id = workflowCard.dataset.workflowCard || '';
-        if(workflowManageMode){
-            const selected = toggleSelectionSet(selectedWorkflowIds, id);
-            selectedWorkflowId = selected ? id : (selectedWorkflowId === id ? '' : selectedWorkflowId);
-        } else {
-            selectedWorkflowId = id;
-        }
-        pendingDeleteAssetId = '';
-        render();
-        return;
-    }
+    if(await handleWorkflowClick(event, target)) return;
     if(target.closest?.('[data-asset-tree-edit-save]')){ await saveAssetTreeEdit(); return; }
     if(target.closest?.('[data-asset-tree-edit-cancel]')){ assetTreeEdit = null; render(); return; }
     if(target.closest?.('[data-workflow-tree-edit-save]')){ await saveWorkflowTreeEdit(); return; }
