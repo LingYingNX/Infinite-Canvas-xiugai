@@ -9054,6 +9054,33 @@ function bindMinimaxDropTargets(el, node, focusMinimaxNode){
     });
 }
 
+
+function bindMinimaxRefDrag(el, node, focusMinimaxNode){
+    el.querySelectorAll('[data-minimax-ref-drag]').forEach(card => {
+        card.addEventListener('mousedown', e => {
+            if(e.target.closest('[data-minimax-ref-thumb-delete]')) return;
+            focusMinimaxNode();
+            e.stopPropagation();
+        });
+        card.addEventListener('dragstart', e => {
+            focusMinimaxNode();
+            const [segmentId, rawIndex] = String(card.dataset.minimaxRefDrag || '').split(':');
+            const index = Number(rawIndex);
+            const seg = node.segments.find(item => item.id === segmentId);
+            const item = seg?.refItems?.[index];
+            if(!item?.url) return;
+            e.dataTransfer.effectAllowed = 'copyMove';
+            e.dataTransfer.setData('application/x-minimax-ref', JSON.stringify({nodeId:node.id, segmentId, index, copy:Boolean(e.altKey)}));
+            e.dataTransfer.setData('text/plain', item.url);
+        });
+    });
+    el.querySelectorAll('[data-minimax-add-segment]').forEach(btn => {
+        btn.addEventListener('mousedown', e => {
+            e.stopPropagation();
+        });
+    });
+}
+
 function bindMinimaxNodeControls(el, node){
     const focusMinimaxNode = () => {
         if(selectedId === node.id && selectedIds.length === 0 && selectedImage.nodeId === '') return;
@@ -9287,29 +9314,7 @@ function bindMinimaxNodeControls(el, node){
             scheduleSave();
         };
     });
-    el.querySelectorAll('[data-minimax-ref-drag]').forEach(card => {
-        card.addEventListener('mousedown', e => {
-            if(e.target.closest('[data-minimax-ref-thumb-delete]')) return;
-            focusMinimaxNode();
-            e.stopPropagation();
-        });
-        card.addEventListener('dragstart', e => {
-            focusMinimaxNode();
-            const [segmentId, rawIndex] = String(card.dataset.minimaxRefDrag || '').split(':');
-            const index = Number(rawIndex);
-            const seg = node.segments.find(item => item.id === segmentId);
-            const item = seg?.refItems?.[index];
-            if(!item?.url) return;
-            e.dataTransfer.effectAllowed = 'copyMove';
-            e.dataTransfer.setData('application/x-minimax-ref', JSON.stringify({nodeId:node.id, segmentId, index, copy:Boolean(e.altKey)}));
-            e.dataTransfer.setData('text/plain', item.url);
-        });
-    });
-    el.querySelectorAll('[data-minimax-add-segment]').forEach(btn => {
-        btn.addEventListener('mousedown', e => {
-            e.stopPropagation();
-        });
-    });
+    bindMinimaxRefDrag(el, node, focusMinimaxNode);
     bindMinimaxDropTargets(el, node, focusMinimaxNode);
 }
 
