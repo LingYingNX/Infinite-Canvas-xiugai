@@ -13785,9 +13785,6 @@ function imagesForNode(node){
     }
     return (node?.images || []).map((img, index) => ({...imageForDisplay(img), nodeId:node.id, imageIndex:index}));
 }
-function nodeHasReferenceContent(node){
-    return imagesForNode(node).some(img => img?.url);
-}
 function isSelfReferenceForNode(node, img){
     return Boolean(node?.id && img?.nodeId === node.id);
 }
