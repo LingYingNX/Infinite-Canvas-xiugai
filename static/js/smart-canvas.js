@@ -8546,6 +8546,72 @@ function bindPromptNodeControls(el, node){
     const runEl = el.querySelector('.prompt-node-run');
     if(runEl) runEl.onclick = e => { e.preventDefault(); e.stopPropagation(); runPromptLLMNode(node.id); };
 }
+
+function bindLoopPromptControls(el, node){
+    const syncPromptFieldsFromDom = () => {
+        const values = [...el.querySelectorAll('[data-loop-prompt-index]')]
+            .sort((a, b) => Number(a.dataset.loopPromptIndex) - Number(b.dataset.loopPromptIndex))
+            .map(input => smartLoopEditorText(input));
+        setSmartLoopPromptFieldValues(node, values);
+    };
+    let activePromptEditor = null;
+    el.querySelectorAll('.loop-smart-text').forEach(text => {
+        bindScrollableText(text);
+        text.onfocus = () => { activePromptEditor = text; };
+        text.oninput = () => { syncPromptFieldsFromDom(); scheduleSave(); };
+        text.addEventListener('click', e => {
+            const remove = e.target.closest?.('.loop-smart-token-chip button');
+            if(!remove) return;
+            e.preventDefault();
+            e.stopPropagation();
+            remove.closest('.loop-smart-token-chip')?.remove();
+            syncPromptFieldsFromDom();
+            scheduleSave();
+        });
+    });
+    el.querySelectorAll('[data-loop-prompt-add]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            syncPromptFieldsFromDom();
+            const values = smartLoopPromptFieldValues(node);
+            setSmartLoopPromptFieldValues(node, [...values, '']);
+            fitSmartLoopNode(node);
+            render();
+            scheduleSave();
+        };
+    });
+    el.querySelectorAll('[data-loop-prompt-delete]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            syncPromptFieldsFromDom();
+            const removeIndex = Number(btn.dataset.loopPromptDelete);
+            const values = smartLoopPromptFieldValues(node);
+            if(values.length <= 1) return;
+            values.splice(removeIndex, 1);
+            setSmartLoopPromptFieldValues(node, values);
+            fitSmartLoopNode(node);
+            render();
+            scheduleSave();
+        };
+    });
+    const firstText = el.querySelector('.loop-smart-text');
+    const targetPromptEditor = () => activePromptEditor && el.contains(activePromptEditor) ? activePromptEditor : firstText;
+    el.querySelectorAll('[data-loop-token]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            const text = targetPromptEditor();
+            if(!text) return;
+            const token = btn.dataset.loopToken || '《计数》';
+            insertSmartLoopToken(text, token);
+            syncPromptFieldsFromDom();
+            scheduleSave();
+        };
+    });
+}
+
 function bindLoopNodeControls(el, node){
     el.querySelectorAll('.loop-smart-control').forEach(control => {
         control.addEventListener('mousedown', e => e.stopPropagation());
@@ -8619,68 +8685,7 @@ function bindLoopNodeControls(el, node){
             scheduleSave();
         };
     });
-    const syncPromptFieldsFromDom = () => {
-        const values = [...el.querySelectorAll('[data-loop-prompt-index]')]
-            .sort((a, b) => Number(a.dataset.loopPromptIndex) - Number(b.dataset.loopPromptIndex))
-            .map(input => smartLoopEditorText(input));
-        setSmartLoopPromptFieldValues(node, values);
-    };
-    let activePromptEditor = null;
-    el.querySelectorAll('.loop-smart-text').forEach(text => {
-        bindScrollableText(text);
-        text.onfocus = () => { activePromptEditor = text; };
-        text.oninput = () => { syncPromptFieldsFromDom(); scheduleSave(); };
-        text.addEventListener('click', e => {
-            const remove = e.target.closest?.('.loop-smart-token-chip button');
-            if(!remove) return;
-            e.preventDefault();
-            e.stopPropagation();
-            remove.closest('.loop-smart-token-chip')?.remove();
-            syncPromptFieldsFromDom();
-            scheduleSave();
-        });
-    });
-    el.querySelectorAll('[data-loop-prompt-add]').forEach(btn => {
-        btn.onclick = e => {
-            e.preventDefault();
-            e.stopPropagation();
-            syncPromptFieldsFromDom();
-            const values = smartLoopPromptFieldValues(node);
-            setSmartLoopPromptFieldValues(node, [...values, '']);
-            fitSmartLoopNode(node);
-            render();
-            scheduleSave();
-        };
-    });
-    el.querySelectorAll('[data-loop-prompt-delete]').forEach(btn => {
-        btn.onclick = e => {
-            e.preventDefault();
-            e.stopPropagation();
-            syncPromptFieldsFromDom();
-            const removeIndex = Number(btn.dataset.loopPromptDelete);
-            const values = smartLoopPromptFieldValues(node);
-            if(values.length <= 1) return;
-            values.splice(removeIndex, 1);
-            setSmartLoopPromptFieldValues(node, values);
-            fitSmartLoopNode(node);
-            render();
-            scheduleSave();
-        };
-    });
-    const firstText = el.querySelector('.loop-smart-text');
-    const targetPromptEditor = () => activePromptEditor && el.contains(activePromptEditor) ? activePromptEditor : firstText;
-    el.querySelectorAll('[data-loop-token]').forEach(btn => {
-        btn.onclick = e => {
-            e.preventDefault();
-            e.stopPropagation();
-            const text = targetPromptEditor();
-            if(!text) return;
-            const token = btn.dataset.loopToken || '《计数》';
-            insertSmartLoopToken(text, token);
-            syncPromptFieldsFromDom();
-            scheduleSave();
-        };
-    });
+    bindLoopPromptControls(el, node);
     el.querySelectorAll('[data-loop-run]').forEach(btn => {
         btn.onclick = e => {
             e.preventDefault();
