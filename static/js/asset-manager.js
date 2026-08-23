@@ -3,6 +3,9 @@ const statusEl = document.getElementById('assetStatus');
 const refreshBtn = document.getElementById('refreshBtn');
 const storageSettingsBtn = document.getElementById('storageSettingsBtn');
 const uploadInput = document.getElementById('assetUploadInput');
+function showRequestError(err, fallback='操作失败'){
+    setStatus(err?.message || fallback);
+}
 
 const LOCAL_CAPTION_SETTINGS_KEY = 'asset_manager_local_caption_settings_v1';
 function readLocalCaptionSettings(){
@@ -274,7 +277,7 @@ function handleStorageFileGridScroll(event){
     const grid = event.currentTarget;
     if(!grid || storageSettingsState.loading || storageSettingsState.loadingMore || !storageSettingsState.hasMore) return;
     if(grid.scrollTop + grid.clientHeight >= grid.scrollHeight - 260){
-        loadStorageFiles(storageSettingsState.kind, {append:true}).catch(err => setStatus(err.message || '加载更多图片失败'));
+        loadStorageFiles(storageSettingsState.kind, {append:true}).catch(err => showRequestError(err, '加载更多图片失败'));
     }
 }
 function renderStorageSettingsModal(){
@@ -2781,7 +2784,7 @@ async function uploadLocalAssets(files){
         render();
         setStatus(`已上传 ${uploaded.length} 个素材`);
     } catch(err) {
-        setStatus(err.message || '上传失败');
+        showRequestError(err, '上传失败');
     }
 }
 async function deleteLocalAssets(ids){
@@ -4593,11 +4596,11 @@ root.addEventListener('pointerdown', event => {
     render();
 }, true);
 root.addEventListener('click', event => {
-    handleClick(event).catch(err => setStatus(err.message || '操作失败'));
+    handleClick(event).catch(err => showRequestError(err, '操作失败'));
 });
 document.addEventListener('click', event => {
     if(event.target.closest?.('#storageSettingsOverlay')){
-        handleClick(event).catch(err => setStatus(err.message || '操作失败'));
+        handleClick(event).catch(err => showRequestError(err, '操作失败'));
         return;
     }
     if(event.target.closest?.('.asset-lightbox') && !event.target.closest?.('.asset-lightbox-image,.asset-lightbox-video')) closeDetailPreview();
@@ -4605,15 +4608,15 @@ document.addEventListener('click', event => {
 document.addEventListener('keydown', event => {
     if(event.key === 'Escape') closeDetailPreview();
     if(event.target?.id === 'assetTreeEditInput'){
-        if(event.key === 'Enter'){ event.preventDefault(); saveAssetTreeEdit().catch(err => setStatus(err.message || '保存失败')); }
+        if(event.key === 'Enter'){ event.preventDefault(); saveAssetTreeEdit().catch(err => showRequestError(err, '保存失败')); }
         if(event.key === 'Escape'){ event.preventDefault(); assetTreeEdit = null; render(); }
     }
     if(event.target?.id === 'workflowTreeEditInput'){
-        if(event.key === 'Enter'){ event.preventDefault(); saveWorkflowTreeEdit().catch(err => setStatus(err.message || '保存失败')); }
+        if(event.key === 'Enter'){ event.preventDefault(); saveWorkflowTreeEdit().catch(err => showRequestError(err, '保存失败')); }
         if(event.key === 'Escape'){ event.preventDefault(); workflowTreeEdit = null; render(); }
     }
     if(event.target?.id === 'promptTreeEditInput'){
-        if(event.key === 'Enter'){ event.preventDefault(); savePromptTreeEdit().catch(err => setStatus(err.message || '保存失败')); }
+        if(event.key === 'Enter'){ event.preventDefault(); savePromptTreeEdit().catch(err => showRequestError(err, '保存失败')); }
         if(event.key === 'Escape'){ event.preventDefault(); promptTreeEdit = null; render(); }
     }
 });
@@ -4660,12 +4663,12 @@ root.addEventListener('input', event => {
 root.addEventListener('change', event => {
     const inlineLocalUploadName = event.target.closest?.('[data-localup-inline-name]');
     if(inlineLocalUploadName){
-        saveLocalUploadInlineName(inlineLocalUploadName.dataset.localupInlineName || '', inlineLocalUploadName.value || '').catch(err => setStatus(err.message || '保存失败'));
+        saveLocalUploadInlineName(inlineLocalUploadName.dataset.localupInlineName || '', inlineLocalUploadName.value || '').catch(err => showRequestError(err, '保存失败'));
         return;
     }
     const inlineAssetName = event.target.closest?.('[data-asset-inline-name]');
     if(inlineAssetName){
-        saveAssetInlineName(inlineAssetName.dataset.assetInlineName || '', inlineAssetName.value || '').catch(err => setStatus(err.message || '保存失败'));
+        saveAssetInlineName(inlineAssetName.dataset.assetInlineName || '', inlineAssetName.value || '').catch(err => showRequestError(err, '保存失败'));
         return;
     }
     const inlineWorkflowName = event.target.closest?.('[data-workflow-inline-name]');
@@ -4678,7 +4681,7 @@ root.addEventListener('change', event => {
             assetLibrary = data.library || assetLibrary;
             render();
             setStatus('已保存工作流名称');
-        }).catch(err => setStatus(err.message || '保存失败'));
+        }).catch(err => showRequestError(err, '保存失败'));
         return;
     }
     if(event.target?.id === 'canvasAssetSort'){
@@ -4736,15 +4739,15 @@ root.addEventListener('drop', event => {
     event.preventDefault();
     drop.classList.remove('drag-over');
     if(drop.id === 'localUploadDrop') uploadLocalAssets(event.dataTransfer.files);
-    else if(drop.id === 'workflowDrop') uploadWorkflowFiles(event.dataTransfer.files).catch(err => setStatus(err.message || '上传失败'));
-    else uploadFiles(event.dataTransfer.files).catch(err => setStatus(err.message || '上传失败'));
+    else if(drop.id === 'workflowDrop') uploadWorkflowFiles(event.dataTransfer.files).catch(err => showRequestError(err, '上传失败'));
+    else uploadFiles(event.dataTransfer.files).catch(err => showRequestError(err, '上传失败'));
 });
 uploadInput?.addEventListener('change', event => {
     const files = event.target.files;
     if(files?.length){
         if(activeTab === 'local') uploadLocalAssets(files);
-        else if(activeTab === 'workflows') uploadWorkflowFiles(files).catch(err => setStatus(err.message || '上传失败'));
-        else uploadFiles(files).catch(err => setStatus(err.message || '上传失败'));
+        else if(activeTab === 'workflows') uploadWorkflowFiles(files).catch(err => showRequestError(err, '上传失败'));
+        else uploadFiles(files).catch(err => showRequestError(err, '上传失败'));
     }
     event.target.value = '';
 });
@@ -4755,9 +4758,9 @@ document.querySelectorAll('[data-tab]').forEach(btn => {
         render();
     });
 });
-refreshBtn?.addEventListener('click', () => loadAll().catch(err => setStatus(err.message || '加载失败')));
-storageSettingsBtn?.addEventListener('click', () => openStorageSettings().catch(err => setStatus(err.message || '打开偏好设置失败')));
+refreshBtn?.addEventListener('click', () => loadAll().catch(err => showRequestError(err, '加载失败')));
+storageSettingsBtn?.addEventListener('click', () => openStorageSettings().catch(err => showRequestError(err, '打开偏好设置失败')));
 window.addEventListener('message', event => {
     if(event.data?.type === 'studio-theme') window.StudioTheme?.apply?.(event.data.theme);
 });
-document.addEventListener('DOMContentLoaded', () => loadAll().catch(err => setStatus(err.message || '加载失败')));
+document.addEventListener('DOMContentLoaded', () => loadAll().catch(err => showRequestError(err, '加载失败')));
