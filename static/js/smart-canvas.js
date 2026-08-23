@@ -9782,9 +9782,8 @@ function bindNodeDragAndDrop(el, id){
         };
 }
 
-function bindNodeEvents(){
-    world.querySelectorAll('.image-node').forEach(el => {
-        const id = el.dataset.id;
+
+function bindNodeBaseEvents(el, id){
         const nodeForControls = nodes.find(n => n.id === id);
         if(nodeForControls?.type === 'smart-prompt') bindPromptNodeControls(el, nodeForControls);
         if(nodeForControls?.type === 'smart-loop') bindLoopNodeControls(el, nodeForControls);
@@ -9835,6 +9834,12 @@ function bindNodeEvents(){
             updateComposer();
             pickMediaForSmartNode(id);
         });
+}
+
+function bindNodeEvents(){
+    world.querySelectorAll('.image-node').forEach(el => {
+        const id = el.dataset.id;
+        bindNodeBaseEvents(el, id);
         bindNodeToolbarControls(el, id);
         el.querySelectorAll('.image-delete').forEach(btn => {
             btn.addEventListener('click', e => {
