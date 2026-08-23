@@ -3082,16 +3082,15 @@ async function saveLocalUploadCaption(id){
         setStatus(err.message || '保存提示词失败');
     }
 }
-async function handleClick(event){
-    const target = event.target;
-    if(target.closest?.('[data-storage-close]')){ closeStorageSettings(); return; }
+async function handleStorageSettingsClick(event, target){
+    if(target.closest?.('[data-storage-close]')){ closeStorageSettings(); return true; }
     const prefTabBtn = target.closest?.('[data-pref-tab]');
     if(prefTabBtn){
         syncStorageSettingsInputsToState();
         storageSettingsState.tab = prefTabBtn.dataset.prefTab || 'prefs';
         storageSettingsState.editor = '';
         renderStorageSettingsModal();
-        return;
+        return true;
     }
     const prefEditorSaveBtn = target.closest?.('[data-pref-editor-save]');
     if(prefEditorSaveBtn){
@@ -3103,7 +3102,7 @@ async function handleClick(event){
         } catch(err){
             setStatus(err.message || '保存偏好设置失败');
         }
-        return;
+        return true;
     }
     const prefEditorBtn = target.closest?.('[data-pref-editor]');
     if(prefEditorBtn){
@@ -3111,17 +3110,17 @@ async function handleClick(event){
         const editor = prefEditorBtn.dataset.prefEditor || '';
         storageSettingsState.editor = storageSettingsState.editor === editor ? '' : editor;
         renderStorageSettingsModal();
-        return;
+        return true;
     }
     if(target.closest?.('[data-storage-save]')){
         try { await saveStorageSettings({saveDirs:true, saveClassification:false}); }
         catch(err){ setStatus(err.message || '保存存储设置失败'); }
-        return;
+        return true;
     }
     const storageKindBtn = target.closest?.('[data-storage-kind]');
     if(storageKindBtn){
         await loadStorageFiles(storageKindBtn.dataset.storageKind || 'generated');
-        return;
+        return true;
     }
     const storageFileInput = target.closest?.('[data-storage-file]');
     if(storageFileInput){
@@ -3129,23 +3128,30 @@ async function handleClick(event){
         if(storageFileInput.checked) storageSettingsState.selected.add(id);
         else storageSettingsState.selected.delete(id);
         renderStorageSettingsModal();
-        return;
+        return true;
     }
     if(target.closest?.('[data-storage-select-all]')){
         storageSettingsState.items.forEach(item => storageSettingsState.selected.add(item.id));
         renderStorageSettingsModal();
-        return;
+        return true;
     }
     if(target.closest?.('[data-storage-delete]')){
         try { await deleteSelectedStorageFiles(); }
         catch(err){ setStatus(err.message || '删除文件失败'); }
-        return;
+        return true;
     }
     if(target.closest?.('[data-class-rule-reset]')){
         const ta = document.getElementById('prefClassificationRulePrompt');
         if(ta) ta.value = storageSettingsState.defaultClassificationPrompt || '';
-        return;
+        return true;
     }
+    return false;
+}
+
+async function handleClick(event){
+    const target = event.target;
+    if(await handleStorageSettingsClick(event, target)) return;
+
     if(guardMatchesManagedSelection(target)){
         event.preventDefault();
         event.stopPropagation();
