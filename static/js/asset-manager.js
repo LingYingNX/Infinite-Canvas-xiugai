@@ -3399,6 +3399,55 @@ async function handleCanvasAssetClick(event, target){
     return false;
 }
 
+
+async function handleLocalClick(event, target){
+    if(target.closest?.('[data-local-manage]')){
+        localManageMode = !localManageMode;
+        pendingBatchDelete = '';
+        if(!localManageMode) selectedLocalIds.clear();
+        render();
+        return true;
+    }
+    if(target.closest?.('[data-local-select-all]')){ localItemsForFolder().forEach(item => selectedLocalIds.add(item.id)); pendingBatchDelete = ''; render(); return true; }
+    if(target.closest?.('[data-local-clear-selection]')){ selectedLocalIds.clear(); pendingBatchDelete = ''; render(); return true; }
+    if(target.closest?.('[data-local-copy-selected]')){ setLocalClipboard('copy'); return true; }
+    if(target.closest?.('[data-local-import-clipboard]')){ await pasteLocalClipboardToAssets(); return true; }
+    if(target.closest?.('[data-local-clear-clipboard]')){ localClipboard = null; render(); return true; }
+    const localImportOne = target.closest?.('[data-local-import-one]');
+    if(localImportOne){ setLocalClipboard('copy', [localImportOne.dataset.localImportOne || '']); await pasteLocalClipboardToAssets(); return true; }
+    const localOpen = target.closest?.('[data-local-open]');
+    if(localOpen){ openLocalItem(localOpen.dataset.localOpen || ''); return true; }
+    const localFolder = target.closest?.('[data-local-folder]');
+    if(localFolder){ activeLocalFolderId = localFolder.dataset.localFolder || ''; selectedLocalId = ''; selectedLocalIds.clear(); pendingBatchDelete = ''; render(); return true; }
+    const localCheck = target.closest?.('[data-local-check]');
+    if(localCheck){
+        event.preventDefault();
+        event.stopPropagation();
+        if(localManageMode){
+            const id = localCheck.dataset.localCheck || '';
+            const selected = toggleSelectionSet(selectedLocalIds, id);
+            selectedLocalId = selected ? id : (selectedLocalId === id ? '' : selectedLocalId);
+            pendingBatchDelete = '';
+            render();
+        }
+        return true;
+    }
+    const localCard = target.closest?.('[data-local-card]');
+    if(localCard){
+        const id = localCard.dataset.localCard || '';
+        if(localManageMode){
+            const selected = toggleSelectionSet(selectedLocalIds, id);
+            selectedLocalId = selected ? id : (selectedLocalId === id ? '' : selectedLocalId);
+        } else {
+            selectedLocalId = id;
+        }
+        pendingBatchDelete = '';
+        render();
+        return true;
+    }
+    return false;
+}
+
 async function handleClick(event){
     const target = event.target;
     if(await handleStorageSettingsClick(event, target)) return;
@@ -3426,50 +3475,7 @@ async function handleClick(event){
     if(sharedRemove){ event.stopPropagation(); await unregisterSharedFolder(sharedRemove.dataset.sharedRemove || ''); return; }
     const sharedOpen = target.closest?.('[data-shared-open]');
     if(sharedOpen){ await openSharedFolder(sharedOpen.dataset.sharedOpen || ''); return; }
-    if(target.closest?.('[data-local-manage]')){
-        localManageMode = !localManageMode;
-        pendingBatchDelete = '';
-        if(!localManageMode) selectedLocalIds.clear();
-        render();
-        return;
-    }
-    if(target.closest?.('[data-local-select-all]')){ localItemsForFolder().forEach(item => selectedLocalIds.add(item.id)); pendingBatchDelete = ''; render(); return; }
-    if(target.closest?.('[data-local-clear-selection]')){ selectedLocalIds.clear(); pendingBatchDelete = ''; render(); return; }
-    if(target.closest?.('[data-local-copy-selected]')){ setLocalClipboard('copy'); return; }
-    if(target.closest?.('[data-local-import-clipboard]')){ await pasteLocalClipboardToAssets(); return; }
-    if(target.closest?.('[data-local-clear-clipboard]')){ localClipboard = null; render(); return; }
-    const localImportOne = target.closest?.('[data-local-import-one]');
-    if(localImportOne){ setLocalClipboard('copy', [localImportOne.dataset.localImportOne || '']); await pasteLocalClipboardToAssets(); return; }
-    const localOpen = target.closest?.('[data-local-open]');
-    if(localOpen){ openLocalItem(localOpen.dataset.localOpen || ''); return; }
-    const localFolder = target.closest?.('[data-local-folder]');
-    if(localFolder){ activeLocalFolderId = localFolder.dataset.localFolder || ''; selectedLocalId = ''; selectedLocalIds.clear(); pendingBatchDelete = ''; render(); return; }
-    const localCheck = target.closest?.('[data-local-check]');
-    if(localCheck){
-        event.preventDefault();
-        event.stopPropagation();
-        if(localManageMode){
-            const id = localCheck.dataset.localCheck || '';
-            const selected = toggleSelectionSet(selectedLocalIds, id);
-            selectedLocalId = selected ? id : (selectedLocalId === id ? '' : selectedLocalId);
-            pendingBatchDelete = '';
-            render();
-        }
-        return;
-    }
-    const localCard = target.closest?.('[data-local-card]');
-    if(localCard){
-        const id = localCard.dataset.localCard || '';
-        if(localManageMode){
-            const selected = toggleSelectionSet(selectedLocalIds, id);
-            selectedLocalId = selected ? id : (selectedLocalId === id ? '' : selectedLocalId);
-        } else {
-            selectedLocalId = id;
-        }
-        pendingBatchDelete = '';
-        render();
-        return;
-    }
+    if(await handleLocalClick(event, target)) return;
     if(target.closest?.('[data-workflow-manage]')){
         workflowManageMode = !workflowManageMode;
         if(!workflowManageMode) selectedWorkflowIds.clear();
