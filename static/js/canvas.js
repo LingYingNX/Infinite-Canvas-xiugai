@@ -2699,6 +2699,234 @@ async function urlToBase64(url){
         reader.readAsDataURL(blob);
     });
 }
+function bindMsModelTabs(wrap, node){
+    wrap.querySelectorAll('.ms-model-tabs button').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            if(node.msgenModel !== btn.dataset.model){
+                node.msLoraId = '';
+                delete node.msLoraStrength;
+                node.msLoraEnabled = false;
+            }
+            node.msgenModel = btn.dataset.model;
+            render();
+            scheduleSave();
+        };
+    });
+}
+
+function bindMsCustomModelSelect(wrap, node){
+    const msCustomModelSelect = wrap.querySelector('.ms-custom-model-select');
+    if(msCustomModelSelect){
+        msCustomModelSelect.onmousedown = e => e.stopPropagation();
+        msCustomModelSelect.onclick = e => e.stopPropagation();
+        msCustomModelSelect.onchange = e => {
+            e.stopPropagation();
+            node.msCustomModel = e.target.value;
+            node.msLoraId = '';
+            delete node.msLoraStrength;
+            node.msLoraEnabled = false;
+            scheduleSave();
+            render();
+        };
+    }
+}
+
+function bindMsRatioResolutionControls(wrap, node, referenceImages){
+    const msRatioSelect = wrap.querySelector('[data-field="msRatio"]');
+    const msResolutionSelect = wrap.querySelector('[data-field="msResolution"]');
+    if(msRatioSelect && msResolutionSelect){
+        const msCustomRatioRow = wrap.querySelector('.ms-custom-ratio-row');
+        const msCustomSizeRow = wrap.querySelector('.ms-custom-size-row');
+        const msCustomRatioWInput = wrap.querySelector('.ms-custom-ratio-w-input');
+        const msCustomRatioHInput = wrap.querySelector('.ms-custom-ratio-h-input');
+        const msCustomWInput = wrap.querySelector('.ms-custom-w-input');
+        const msCustomHInput = wrap.querySelector('.ms-custom-h-input');
+        const msFitSizeBtn = wrap.querySelector('.ms-fit-size-btn');
+        if((!node.msCustomRatioWidth || !node.msCustomRatioHeight) && node.msCustomRatio) {
+            const raw = String(node.msCustomRatio || '');
+            if(raw.includes(':')){
+                const [w,h] = raw.split(':');
+                node.msCustomRatioWidth = node.msCustomRatioWidth || w;
+                node.msCustomRatioHeight = node.msCustomRatioHeight || h;
+            }
+        }
+        if((!node.msCustomWidth || !node.msCustomHeight) && node.msCustomSize) {
+            const parsed = parseSizeValue(node.msCustomSize);
+            node.msCustomWidth = node.msCustomWidth || parsed?.width || '';
+            node.msCustomHeight = node.msCustomHeight || parsed?.height || '';
+        }
+        const syncMsCustomSizeControls = () => {
+            const ratioValue = node.msRatio && [...msRatioSelect.options].some(opt => opt.value === node.msRatio) ? node.msRatio : 'square';
+            msRatioSelect.value = ratioValue;
+            msResolutionSelect.value = node.msResolution || '1k';
+            msRatioSelect.disabled = node.msResolution === 'custom';
+            msCustomRatioRow.style.display = node.msRatio === 'custom' ? 'flex' : 'none';
+            msCustomSizeRow.style.display = node.msResolution === 'custom' ? 'flex' : 'none';
+            msCustomRatioWInput.value = node.msCustomRatioWidth || '';
+            msCustomRatioHInput.value = node.msCustomRatioHeight || '';
+            msCustomWInput.value = node.msCustomWidth || '';
+            msCustomHInput.value = node.msCustomHeight || '';
+            if(msFitSizeBtn) msFitSizeBtn.disabled = !referenceImages.some(ref => ref.url);
+        };
+        msRatioSelect.onmousedown = e => e.stopPropagation();
+        msRatioSelect.onclick = e => e.stopPropagation();
+        msRatioSelect.onchange = e => {
+            e.stopPropagation();
+            node.msRatio = e.target.value;
+            if(node.msRatio !== 'custom') {
+                node.msCustomRatio = '';
+                node.msCustomRatioWidth = '';
+                node.msCustomRatioHeight = '';
+            }
+            syncMsCustomSizeControls();
+            scheduleSave();
+        };
+        msResolutionSelect.onmousedown = e => e.stopPropagation();
+        msResolutionSelect.onclick = e => e.stopPropagation();
+        msResolutionSelect.onchange = e => {
+            e.stopPropagation();
+            node.msResolution = e.target.value;
+            if(node.msResolution === 'custom') {
+                node.msRatio = '';
+            } else if(!node.msRatio) {
+                node.msRatio = 'square';
+                node.msCustomSize = '';
+                node.msCustomWidth = '';
+                node.msCustomHeight = '';
+            } else {
+                node.msCustomSize = '';
+                node.msCustomWidth = '';
+                node.msCustomHeight = '';
+            }
+            syncMsCustomSizeControls();
+            scheduleSave();
+        };
+        [msCustomRatioWInput, msCustomRatioHInput].forEach(input => {
+            input.onmousedown = e => e.stopPropagation();
+            input.onclick = e => e.stopPropagation();
+            input.oninput = () => {
+                node.msCustomRatioWidth = msCustomRatioWInput.value;
+                node.msCustomRatioHeight = msCustomRatioHInput.value;
+                node.msCustomRatio = node.msCustomRatioWidth && node.msCustomRatioHeight ? `${node.msCustomRatioWidth}:${node.msCustomRatioHeight}` : '';
+                node.msRatio = 'custom';
+                syncMsCustomSizeControls();
+                scheduleSave();
+            };
+        });
+        [msCustomWInput, msCustomHInput].forEach(input => {
+            input.onmousedown = e => e.stopPropagation();
+            input.onclick = e => e.stopPropagation();
+            input.oninput = () => {
+                node.msCustomWidth = msCustomWInput.value;
+                node.msCustomHeight = msCustomHInput.value;
+                node.msCustomSize = node.msCustomWidth && node.msCustomHeight ? `${node.msCustomWidth}x${node.msCustomHeight}` : '';
+                node.msResolution = 'custom';
+                node.msRatio = '';
+                syncMsCustomSizeControls();
+                scheduleSave();
+            };
+        });
+        if(msFitSizeBtn){
+            msFitSizeBtn.onmousedown = e => e.stopPropagation();
+            msFitSizeBtn.onclick = async e => {
+                e.stopPropagation();
+                const ref = referenceImages.find(item => item.url);
+                if(!ref) return;
+                try {
+                    const dims = await getImageDimensions(ref.url);
+                    node.msCustomWidth = dims.width;
+                    node.msCustomHeight = dims.height;
+                    node.msCustomSize = `${dims.width}x${dims.height}`;
+                    node.msResolution = 'custom';
+                    node.msRatio = '';
+                    syncMsCustomSizeControls();
+                    scheduleSave();
+                } catch(err) {
+                    showErrorModal(tr('canvas.imageReadFailed'));
+                }
+            };
+        }
+        syncMsCustomSizeControls();
+    }
+}
+
+function bindMsCountInput(wrap, node){
+    const msCountInput = wrap.querySelector('.ms-count-input');
+    if(msCountInput){
+        msCountInput.onmousedown = e => e.stopPropagation();
+        msCountInput.onclick = e => e.stopPropagation();
+        msCountInput.oninput = e => {
+            node.count = Math.max(1, Math.min(8, Number(e.target.value) || 1));
+            scheduleSave();
+        };
+        msCountInput.onblur = e => { e.target.value = String(Math.max(1, Math.min(8, Number(node.count || 1)))); };
+        wrap.querySelectorAll('[data-ms-step]').forEach(btn => {
+            btn.onclick = e => {
+                e.stopPropagation();
+                const next = Math.max(1, Math.min(8, Number(node.count || 1) + Number(btn.dataset.msStep || 0)));
+                node.count = next;
+                msCountInput.value = String(next);
+                scheduleSave();
+            };
+        });
+    }
+}
+
+function bindMsLoraControls(wrap, node, msLoras){
+    const msLoraCheck = wrap.querySelector('.ms-lora-check');
+    if(msLoraCheck){
+        msLoraCheck.onchange = e => {
+            node.msLoraEnabled = e.target.checked;
+            if(node.msLoraEnabled && !node.msLoraId && msLoras[0]){
+                node.msLoraId = String(msLoras[0].id || '').trim();
+                node.msLoraStrength = Number(msLoras[0].strength ?? 0.8);
+            }
+            scheduleSave();
+            render();
+        };
+    }
+    const msLoraSelect = wrap.querySelector('.ms-lora-select');
+    if(msLoraSelect){
+        msLoraSelect.onmousedown = e => e.stopPropagation();
+        msLoraSelect.onclick = e => e.stopPropagation();
+        msLoraSelect.onchange = e => {
+            node.msLoraId = e.target.value;
+            const picked = msLoras.find(lora => String(lora.id || '').trim() === node.msLoraId);
+            node.msLoraStrength = Number(picked?.strength ?? node.msLoraStrength ?? 0.8);
+            scheduleSave();
+            render();
+        };
+    }
+    const msLoraSlider = wrap.querySelector('.ms-lora-strength-slider');
+    if(msLoraSlider){
+        msLoraSlider.onmousedown = e => e.stopPropagation();
+        msLoraSlider.onclick = e => e.stopPropagation();
+        msLoraSlider.oninput = e => {
+            node.msLoraStrength = parseFloat(e.target.value);
+            const val = wrap.querySelector('.ms-lora-strength-val');
+            if(val) val.textContent = node.msLoraStrength.toFixed(2);
+            scheduleSave();
+        };
+    }
+}
+
+function bindMsSettingChecks(wrap){
+    // Make entire setting-check pill clickable (not just the checkbox square)
+    wrap.querySelectorAll('.setting-check').forEach(pill => {
+        pill.onmousedown = e => e.stopPropagation();
+        const cb = pill.querySelector('input[type="checkbox"]');
+        if(!cb) return;
+        pill.onclick = e => {
+            e.stopPropagation();
+            e.preventDefault(); // prevent native label activation; we handle it
+            cb.checked = !cb.checked;
+            cb.dispatchEvent(new Event('change'));
+        };
+        cb.onclick = e => e.stopPropagation(); // prevent bubble → pill.onclick
+    });
+}
+
 function renderMsGenBody(node){
     const wrap = document.createElement('div');
     wrap.className = 'generator-body';
@@ -2819,216 +3047,12 @@ function renderMsGenBody(node){
             ${retryBarHtml(node)}
         </div>
     `;
-    wrap.querySelectorAll('.ms-model-tabs button').forEach(btn => {
-        btn.onclick = e => {
-            e.stopPropagation();
-            if(node.msgenModel !== btn.dataset.model){
-                node.msLoraId = '';
-                delete node.msLoraStrength;
-                node.msLoraEnabled = false;
-            }
-            node.msgenModel = btn.dataset.model;
-            render();
-            scheduleSave();
-        };
-    });
-    const msCustomModelSelect = wrap.querySelector('.ms-custom-model-select');
-    if(msCustomModelSelect){
-        msCustomModelSelect.onmousedown = e => e.stopPropagation();
-        msCustomModelSelect.onclick = e => e.stopPropagation();
-        msCustomModelSelect.onchange = e => {
-            e.stopPropagation();
-            node.msCustomModel = e.target.value;
-            node.msLoraId = '';
-            delete node.msLoraStrength;
-            node.msLoraEnabled = false;
-            scheduleSave();
-            render();
-        };
-    }
-    const msRatioSelect = wrap.querySelector('[data-field="msRatio"]');
-    const msResolutionSelect = wrap.querySelector('[data-field="msResolution"]');
-    if(msRatioSelect && msResolutionSelect){
-        const msCustomRatioRow = wrap.querySelector('.ms-custom-ratio-row');
-        const msCustomSizeRow = wrap.querySelector('.ms-custom-size-row');
-        const msCustomRatioWInput = wrap.querySelector('.ms-custom-ratio-w-input');
-        const msCustomRatioHInput = wrap.querySelector('.ms-custom-ratio-h-input');
-        const msCustomWInput = wrap.querySelector('.ms-custom-w-input');
-        const msCustomHInput = wrap.querySelector('.ms-custom-h-input');
-        const msFitSizeBtn = wrap.querySelector('.ms-fit-size-btn');
-        if((!node.msCustomRatioWidth || !node.msCustomRatioHeight) && node.msCustomRatio) {
-            const raw = String(node.msCustomRatio || '');
-            if(raw.includes(':')){
-                const [w,h] = raw.split(':');
-                node.msCustomRatioWidth = node.msCustomRatioWidth || w;
-                node.msCustomRatioHeight = node.msCustomRatioHeight || h;
-            }
-        }
-        if((!node.msCustomWidth || !node.msCustomHeight) && node.msCustomSize) {
-            const parsed = parseSizeValue(node.msCustomSize);
-            node.msCustomWidth = node.msCustomWidth || parsed?.width || '';
-            node.msCustomHeight = node.msCustomHeight || parsed?.height || '';
-        }
-        const syncMsCustomSizeControls = () => {
-            const ratioValue = node.msRatio && [...msRatioSelect.options].some(opt => opt.value === node.msRatio) ? node.msRatio : 'square';
-            msRatioSelect.value = ratioValue;
-            msResolutionSelect.value = node.msResolution || '1k';
-            msRatioSelect.disabled = node.msResolution === 'custom';
-            msCustomRatioRow.style.display = node.msRatio === 'custom' ? 'flex' : 'none';
-            msCustomSizeRow.style.display = node.msResolution === 'custom' ? 'flex' : 'none';
-            msCustomRatioWInput.value = node.msCustomRatioWidth || '';
-            msCustomRatioHInput.value = node.msCustomRatioHeight || '';
-            msCustomWInput.value = node.msCustomWidth || '';
-            msCustomHInput.value = node.msCustomHeight || '';
-            if(msFitSizeBtn) msFitSizeBtn.disabled = !referenceImages.some(ref => ref.url);
-        };
-        msRatioSelect.onmousedown = e => e.stopPropagation();
-        msRatioSelect.onclick = e => e.stopPropagation();
-        msRatioSelect.onchange = e => {
-            e.stopPropagation();
-            node.msRatio = e.target.value;
-            if(node.msRatio !== 'custom') {
-                node.msCustomRatio = '';
-                node.msCustomRatioWidth = '';
-                node.msCustomRatioHeight = '';
-            }
-            syncMsCustomSizeControls();
-            scheduleSave();
-        };
-        msResolutionSelect.onmousedown = e => e.stopPropagation();
-        msResolutionSelect.onclick = e => e.stopPropagation();
-        msResolutionSelect.onchange = e => {
-            e.stopPropagation();
-            node.msResolution = e.target.value;
-            if(node.msResolution === 'custom') {
-                node.msRatio = '';
-            } else if(!node.msRatio) {
-                node.msRatio = 'square';
-                node.msCustomSize = '';
-                node.msCustomWidth = '';
-                node.msCustomHeight = '';
-            } else {
-                node.msCustomSize = '';
-                node.msCustomWidth = '';
-                node.msCustomHeight = '';
-            }
-            syncMsCustomSizeControls();
-            scheduleSave();
-        };
-        [msCustomRatioWInput, msCustomRatioHInput].forEach(input => {
-            input.onmousedown = e => e.stopPropagation();
-            input.onclick = e => e.stopPropagation();
-            input.oninput = () => {
-                node.msCustomRatioWidth = msCustomRatioWInput.value;
-                node.msCustomRatioHeight = msCustomRatioHInput.value;
-                node.msCustomRatio = node.msCustomRatioWidth && node.msCustomRatioHeight ? `${node.msCustomRatioWidth}:${node.msCustomRatioHeight}` : '';
-                node.msRatio = 'custom';
-                syncMsCustomSizeControls();
-                scheduleSave();
-            };
-        });
-        [msCustomWInput, msCustomHInput].forEach(input => {
-            input.onmousedown = e => e.stopPropagation();
-            input.onclick = e => e.stopPropagation();
-            input.oninput = () => {
-                node.msCustomWidth = msCustomWInput.value;
-                node.msCustomHeight = msCustomHInput.value;
-                node.msCustomSize = node.msCustomWidth && node.msCustomHeight ? `${node.msCustomWidth}x${node.msCustomHeight}` : '';
-                node.msResolution = 'custom';
-                node.msRatio = '';
-                syncMsCustomSizeControls();
-                scheduleSave();
-            };
-        });
-        if(msFitSizeBtn){
-            msFitSizeBtn.onmousedown = e => e.stopPropagation();
-            msFitSizeBtn.onclick = async e => {
-                e.stopPropagation();
-                const ref = referenceImages.find(item => item.url);
-                if(!ref) return;
-                try {
-                    const dims = await getImageDimensions(ref.url);
-                    node.msCustomWidth = dims.width;
-                    node.msCustomHeight = dims.height;
-                    node.msCustomSize = `${dims.width}x${dims.height}`;
-                    node.msResolution = 'custom';
-                    node.msRatio = '';
-                    syncMsCustomSizeControls();
-                    scheduleSave();
-                } catch(err) {
-                    showErrorModal(tr('canvas.imageReadFailed'));
-                }
-            };
-        }
-        syncMsCustomSizeControls();
-    }
-    const msCountInput = wrap.querySelector('.ms-count-input');
-    if(msCountInput){
-        msCountInput.onmousedown = e => e.stopPropagation();
-        msCountInput.onclick = e => e.stopPropagation();
-        msCountInput.oninput = e => {
-            node.count = Math.max(1, Math.min(8, Number(e.target.value) || 1));
-            scheduleSave();
-        };
-        msCountInput.onblur = e => { e.target.value = String(Math.max(1, Math.min(8, Number(node.count || 1)))); };
-        wrap.querySelectorAll('[data-ms-step]').forEach(btn => {
-            btn.onclick = e => {
-                e.stopPropagation();
-                const next = Math.max(1, Math.min(8, Number(node.count || 1) + Number(btn.dataset.msStep || 0)));
-                node.count = next;
-                msCountInput.value = String(next);
-                scheduleSave();
-            };
-        });
-    }
-    const msLoraCheck = wrap.querySelector('.ms-lora-check');
-    if(msLoraCheck){
-        msLoraCheck.onchange = e => {
-            node.msLoraEnabled = e.target.checked;
-            if(node.msLoraEnabled && !node.msLoraId && msLoras[0]){
-                node.msLoraId = String(msLoras[0].id || '').trim();
-                node.msLoraStrength = Number(msLoras[0].strength ?? 0.8);
-            }
-            scheduleSave();
-            render();
-        };
-    }
-    const msLoraSelect = wrap.querySelector('.ms-lora-select');
-    if(msLoraSelect){
-        msLoraSelect.onmousedown = e => e.stopPropagation();
-        msLoraSelect.onclick = e => e.stopPropagation();
-        msLoraSelect.onchange = e => {
-            node.msLoraId = e.target.value;
-            const picked = msLoras.find(lora => String(lora.id || '').trim() === node.msLoraId);
-            node.msLoraStrength = Number(picked?.strength ?? node.msLoraStrength ?? 0.8);
-            scheduleSave();
-            render();
-        };
-    }
-    const msLoraSlider = wrap.querySelector('.ms-lora-strength-slider');
-    if(msLoraSlider){
-        msLoraSlider.onmousedown = e => e.stopPropagation();
-        msLoraSlider.onclick = e => e.stopPropagation();
-        msLoraSlider.oninput = e => {
-            node.msLoraStrength = parseFloat(e.target.value);
-            const val = wrap.querySelector('.ms-lora-strength-val');
-            if(val) val.textContent = node.msLoraStrength.toFixed(2);
-            scheduleSave();
-        };
-    }
-    // Make entire setting-check pill clickable (not just the checkbox square)
-    wrap.querySelectorAll('.setting-check').forEach(pill => {
-        pill.onmousedown = e => e.stopPropagation();
-        const cb = pill.querySelector('input[type="checkbox"]');
-        if(!cb) return;
-        pill.onclick = e => {
-            e.stopPropagation();
-            e.preventDefault(); // prevent native label activation; we handle it
-            cb.checked = !cb.checked;
-            cb.dispatchEvent(new Event('change'));
-        };
-        cb.onclick = e => e.stopPropagation(); // prevent bubble → pill.onclick
-    });
+    bindMsModelTabs(wrap, node);
+    bindMsCustomModelSelect(wrap, node);
+    bindMsRatioResolutionControls(wrap, node, referenceImages);
+    bindMsCountInput(wrap, node);
+    bindMsLoraControls(wrap, node, msLoras);
+    bindMsSettingChecks(wrap);
     if(msUsesImages){
         const list = wrap.querySelector('.ms-img-list');
         renderImageInputList(list, node, mediaInputs);
