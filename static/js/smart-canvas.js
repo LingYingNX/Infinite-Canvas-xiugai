@@ -8902,6 +8902,53 @@ function bindMinimaxScrubTrack(el, node, focusMinimaxNode){
     });
 }
 
+
+function bindMinimaxPaneResize(el, node, focusMinimaxNode){
+    el.querySelectorAll('[data-minimax-pane-resize]').forEach(handle => {
+        handle.addEventListener('mousedown', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            const mode = handle.dataset.minimaxPaneResize;
+            const startY = e.clientY;
+            const startX = e.clientX;
+            const startPreview = Math.max(130, Math.min(760, Number(node.minimaxPreviewH || 190)));
+            const startVideo = Math.max(44, Math.min(160, Number(node.minimaxVideoTrackH || 70)));
+            const startRef = Math.max(28, Math.min(160, Number(node.minimaxRefLaneH || 42)));
+            const startLibraryW = Math.max(178, Math.min(420, Number(node.minimaxLibraryW || 178)));
+            const main = el.querySelector('.minimax-wb-main');
+            const body = el.querySelector('.minimax-wb-body');
+            const onMove = event => {
+                const dy = (event.clientY - startY) / Math.max(0.1, viewport.scale || 1);
+                const dx = (event.clientX - startX) / Math.max(0.1, viewport.scale || 1);
+                if(mode === 'library'){
+                    node.minimaxLibraryW = Math.max(178, Math.min(420, Math.round(startLibraryW + dx)));
+                    body?.style.setProperty('--minimax-library-w', `${node.minimaxLibraryW}px`);
+                } else if(mode === 'preview'){
+                    node.minimaxPreviewH = Math.max(130, Math.min(760, Math.round(startPreview + dy)));
+                    main?.style.setProperty('--minimax-preview-h', `${node.minimaxPreviewH}px`);
+                } else if(mode === 'video'){
+                    node.minimaxVideoTrackH = Math.max(44, Math.min(160, Math.round(startVideo + dy)));
+                    main?.style.setProperty('--minimax-video-h', `${node.minimaxVideoTrackH}px`);
+                } else if(mode === 'refs'){
+                    node.minimaxRefLaneH = Math.max(28, Math.min(160, Math.round(startRef + dy)));
+                    const lanes = Math.max(1, Number(el.querySelector('.minimax-ref-track')?.style.getPropertyValue('--ref-lanes')) || 1);
+                    const nextRefH = Math.max(72, lanes * node.minimaxRefLaneH);
+                    main?.style.setProperty('--minimax-ref-lane-h', `${node.minimaxRefLaneH}px`);
+                    main?.style.setProperty('--minimax-ref-h', `${nextRefH}px`);
+                }
+            };
+            const onUp = () => {
+                window.removeEventListener('mousemove', onMove, true);
+                window.removeEventListener('mouseup', onUp, true);
+                scheduleSave();
+            };
+            window.addEventListener('mousemove', onMove, true);
+            window.addEventListener('mouseup', onUp, true);
+        });
+    });
+}
+
 function bindMinimaxNodeControls(el, node){
     const focusMinimaxNode = () => {
         if(selectedId === node.id && selectedIds.length === 0 && selectedImage.nodeId === '') return;
@@ -9060,49 +9107,7 @@ function bindMinimaxNodeControls(el, node){
     bindMinimaxPromptAndRun(el, node, focusMinimaxNode);
     bindMinimaxTimelinePlay(el, node, focusMinimaxNode);
     bindMinimaxScrubTrack(el, node, focusMinimaxNode);
-    el.querySelectorAll('[data-minimax-pane-resize]').forEach(handle => {
-        handle.addEventListener('mousedown', e => {
-            e.preventDefault();
-            e.stopPropagation();
-            focusMinimaxNode();
-            const mode = handle.dataset.minimaxPaneResize;
-            const startY = e.clientY;
-            const startX = e.clientX;
-            const startPreview = Math.max(130, Math.min(760, Number(node.minimaxPreviewH || 190)));
-            const startVideo = Math.max(44, Math.min(160, Number(node.minimaxVideoTrackH || 70)));
-            const startRef = Math.max(28, Math.min(160, Number(node.minimaxRefLaneH || 42)));
-            const startLibraryW = Math.max(178, Math.min(420, Number(node.minimaxLibraryW || 178)));
-            const main = el.querySelector('.minimax-wb-main');
-            const body = el.querySelector('.minimax-wb-body');
-            const onMove = event => {
-                const dy = (event.clientY - startY) / Math.max(0.1, viewport.scale || 1);
-                const dx = (event.clientX - startX) / Math.max(0.1, viewport.scale || 1);
-                if(mode === 'library'){
-                    node.minimaxLibraryW = Math.max(178, Math.min(420, Math.round(startLibraryW + dx)));
-                    body?.style.setProperty('--minimax-library-w', `${node.minimaxLibraryW}px`);
-                } else if(mode === 'preview'){
-                    node.minimaxPreviewH = Math.max(130, Math.min(760, Math.round(startPreview + dy)));
-                    main?.style.setProperty('--minimax-preview-h', `${node.minimaxPreviewH}px`);
-                } else if(mode === 'video'){
-                    node.minimaxVideoTrackH = Math.max(44, Math.min(160, Math.round(startVideo + dy)));
-                    main?.style.setProperty('--minimax-video-h', `${node.minimaxVideoTrackH}px`);
-                } else if(mode === 'refs'){
-                    node.minimaxRefLaneH = Math.max(28, Math.min(160, Math.round(startRef + dy)));
-                    const lanes = Math.max(1, Number(el.querySelector('.minimax-ref-track')?.style.getPropertyValue('--ref-lanes')) || 1);
-                    const nextRefH = Math.max(72, lanes * node.minimaxRefLaneH);
-                    main?.style.setProperty('--minimax-ref-lane-h', `${node.minimaxRefLaneH}px`);
-                    main?.style.setProperty('--minimax-ref-h', `${nextRefH}px`);
-                }
-            };
-            const onUp = () => {
-                window.removeEventListener('mousemove', onMove, true);
-                window.removeEventListener('mouseup', onUp, true);
-                scheduleSave();
-            };
-            window.addEventListener('mousemove', onMove, true);
-            window.addEventListener('mouseup', onUp, true);
-        });
-    });
+    bindMinimaxPaneResize(el, node, focusMinimaxNode);
     el.querySelectorAll('[data-minimax-result-delete]').forEach(btn => {
         btn.onclick = e => {
             e.preventDefault();
