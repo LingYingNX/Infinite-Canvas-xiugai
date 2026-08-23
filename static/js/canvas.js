@@ -8654,6 +8654,72 @@ function renderMidjourneyBody(node){
     bindCascadeButtons(wrap, node.id);
     return wrap;
 }
+function bindVideoControls(wrap, node){
+    const providerSelect = wrap.querySelector('.video-provider');
+    const modelSelect = wrap.querySelector('.video-model');
+    const durationSelect = wrap.querySelector('.video-duration');
+    const aspectSelect = wrap.querySelector('.video-aspect');
+    const resolutionSelect = wrap.querySelector('.video-resolution');
+    providerSelect.value = node.apiProvider;
+    durationSelect.value = String(node.duration || 5);
+    aspectSelect.value = node.aspectRatio || '16:9';
+    resolutionSelect.value = node.resolution || '';
+    [providerSelect, modelSelect, durationSelect, aspectSelect, resolutionSelect].forEach(input => {
+        input.onmousedown = e => e.stopPropagation();
+        input.onclick = e => e.stopPropagation();
+    });
+    providerSelect.onchange = e => {
+        e.stopPropagation();
+        node.apiProvider = e.target.value;
+        const models = providerVideoModels(node.apiProvider);
+        if(!models.includes(node.model)) node.model = models[0] || node.model;
+        modelSelect.innerHTML = videoModelOptions(node.model, node.apiProvider);
+        scheduleSave();
+    };
+    modelSelect.onchange = e => { e.stopPropagation(); node.model = e.target.value; scheduleSave(); };
+    durationSelect.oninput = e => { e.stopPropagation(); node.duration = Math.max(1, Math.min(60, Number(e.target.value || 5))); scheduleSave(); };
+    durationSelect.onblur = e => { e.target.value = String(Math.max(1, Math.min(60, Number(node.duration || 5)))); };
+    aspectSelect.onchange = e => { e.stopPropagation(); node.aspectRatio = e.target.value; scheduleSave(); };
+    resolutionSelect.onchange = e => { e.stopPropagation(); node.resolution = e.target.value; scheduleSave(); };
+}
+
+function bindVideoActionButtons(wrap, node){
+    wrap.querySelectorAll('[data-video-toggle]').forEach(btn => {
+        btn.onmousedown = e => e.stopPropagation();
+        btn.onclick = e => {
+            e.stopPropagation();
+            const field = btn.dataset.videoToggle;
+            node[field] = !node[field];
+            if(field === 'multimodal' && node.multimodal) node.useFrameRoles = false;
+            if(field === 'useFrameRoles' && node.useFrameRoles) node.multimodal = false;
+            render();
+            scheduleSave();
+        };
+    });
+    wrap.querySelectorAll('[data-video-temp-sh]').forEach(btn => {
+        btn.onmousedown = e => e.stopPropagation();
+        btn.onclick = async e => {
+            e.stopPropagation();
+            try {
+                await uploadCanvasVideosToCloud(node.id);
+            } catch(err) {
+                showErrorModal(err.message || '云端上传失败', '上传云端');
+            }
+        };
+    });
+    wrap.querySelectorAll('[data-video-manual-url]').forEach(btn => {
+        btn.onmousedown = e => e.stopPropagation();
+        btn.onclick = async e => {
+            e.stopPropagation();
+            try {
+                await setCanvasManualVideoUrl(node.id);
+            } catch(err) {
+                showErrorModal(err.message || '设置视频网址失败', '输入网址');
+            }
+        };
+    });
+}
+
 function renderVideoBody(node){
     const wrap = document.createElement('div');
     wrap.className = 'generator-body';
@@ -8724,66 +8790,8 @@ function renderVideoBody(node){
         </div>
         ${retryBarHtml(node)}
     `;
-    const providerSelect = wrap.querySelector('.video-provider');
-    const modelSelect = wrap.querySelector('.video-model');
-    const durationSelect = wrap.querySelector('.video-duration');
-    const aspectSelect = wrap.querySelector('.video-aspect');
-    const resolutionSelect = wrap.querySelector('.video-resolution');
-    providerSelect.value = node.apiProvider;
-    durationSelect.value = String(node.duration || 5);
-    aspectSelect.value = node.aspectRatio || '16:9';
-    resolutionSelect.value = node.resolution || '';
-    [providerSelect, modelSelect, durationSelect, aspectSelect, resolutionSelect].forEach(input => {
-        input.onmousedown = e => e.stopPropagation();
-        input.onclick = e => e.stopPropagation();
-    });
-    providerSelect.onchange = e => {
-        e.stopPropagation();
-        node.apiProvider = e.target.value;
-        const models = providerVideoModels(node.apiProvider);
-        if(!models.includes(node.model)) node.model = models[0] || node.model;
-        modelSelect.innerHTML = videoModelOptions(node.model, node.apiProvider);
-        scheduleSave();
-    };
-    modelSelect.onchange = e => { e.stopPropagation(); node.model = e.target.value; scheduleSave(); };
-    durationSelect.oninput = e => { e.stopPropagation(); node.duration = Math.max(1, Math.min(60, Number(e.target.value || 5))); scheduleSave(); };
-    durationSelect.onblur = e => { e.target.value = String(Math.max(1, Math.min(60, Number(node.duration || 5)))); };
-    aspectSelect.onchange = e => { e.stopPropagation(); node.aspectRatio = e.target.value; scheduleSave(); };
-    resolutionSelect.onchange = e => { e.stopPropagation(); node.resolution = e.target.value; scheduleSave(); };
-    wrap.querySelectorAll('[data-video-toggle]').forEach(btn => {
-        btn.onmousedown = e => e.stopPropagation();
-        btn.onclick = e => {
-            e.stopPropagation();
-            const field = btn.dataset.videoToggle;
-            node[field] = !node[field];
-            if(field === 'multimodal' && node.multimodal) node.useFrameRoles = false;
-            if(field === 'useFrameRoles' && node.useFrameRoles) node.multimodal = false;
-            render();
-            scheduleSave();
-        };
-    });
-    wrap.querySelectorAll('[data-video-temp-sh]').forEach(btn => {
-        btn.onmousedown = e => e.stopPropagation();
-        btn.onclick = async e => {
-            e.stopPropagation();
-            try {
-                await uploadCanvasVideosToCloud(node.id);
-            } catch(err) {
-                showErrorModal(err.message || '云端上传失败', '上传云端');
-            }
-        };
-    });
-    wrap.querySelectorAll('[data-video-manual-url]').forEach(btn => {
-        btn.onmousedown = e => e.stopPropagation();
-        btn.onclick = async e => {
-            e.stopPropagation();
-            try {
-                await setCanvasManualVideoUrl(node.id);
-            } catch(err) {
-                showErrorModal(err.message || '设置视频网址失败', '输入网址');
-            }
-        };
-    });
+    bindVideoControls(wrap, node);
+    bindVideoActionButtons(wrap, node);
     const list = wrap.querySelector('.video-img-list');
     renderVideoImageInputs(list, node, mediaInputs);
     renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
