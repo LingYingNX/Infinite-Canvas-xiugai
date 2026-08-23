@@ -9537,6 +9537,54 @@ function bindNodeToolbarControls(el, id){
         });
 }
 
+
+function bindNodeThumbBadges(el, id){
+        el.querySelectorAll('.image-name-badge').forEach(badge => {
+            const item = badge.closest('[data-image-index]');
+            const targetNodeId = item?.dataset.refNodeId || id;
+            const imageIndex = Number(item?.dataset.refImageIndex ?? item?.dataset.imageIndex ?? 0);
+            badge.addEventListener('mousedown', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+            }, true);
+            badge.addEventListener('click', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+            }, true);
+            badge.addEventListener('dblclick', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                clearImageClickTimer();
+                suppressImageClickUntil = Date.now() + 260;
+                renameSmartNodeImage(targetNodeId, imageIndex);
+            }, true);
+        });
+        el.querySelectorAll('.smart-video-play').forEach(btn => {
+            btn.addEventListener('mousedown', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+            }, true);
+            btn.addEventListener('click', e => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                const item = btn.closest('[data-image-index]');
+                const targetNodeId = item?.dataset.refNodeId || id;
+                const imageIndex = Number(item?.dataset.refImageIndex ?? item?.dataset.imageIndex ?? 0);
+                const owner = nodes.find(n => n.id === targetNodeId);
+                if(mediaKindForItem(owner?.images?.[imageIndex] || {}) !== 'video') return;
+                clearImageClickTimer();
+                suppressImageClickUntil = Date.now() + 260;
+                hideRunTimerForNode(owner);
+                smartActivateVideoPreview(btn);
+            }, true);
+        });
+}
+
 function bindNodeEvents(){
     world.querySelectorAll('.image-node').forEach(el => {
         const id = el.dataset.id;
@@ -9597,50 +9645,8 @@ function bindNodeEvents(){
                 deleteImage(id, Number(btn.dataset.imageIndex));
             });
         });
-        el.querySelectorAll('.image-name-badge').forEach(badge => {
-            const item = badge.closest('[data-image-index]');
-            const targetNodeId = item?.dataset.refNodeId || id;
-            const imageIndex = Number(item?.dataset.refImageIndex ?? item?.dataset.imageIndex ?? 0);
-            badge.addEventListener('mousedown', e => {
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-            }, true);
-            badge.addEventListener('click', e => {
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-            }, true);
-            badge.addEventListener('dblclick', e => {
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-                clearImageClickTimer();
-                suppressImageClickUntil = Date.now() + 260;
-                renameSmartNodeImage(targetNodeId, imageIndex);
-            }, true);
-        });
-        el.querySelectorAll('.smart-video-play').forEach(btn => {
-            btn.addEventListener('mousedown', e => {
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-            }, true);
-            btn.addEventListener('click', e => {
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-                const item = btn.closest('[data-image-index]');
-                const targetNodeId = item?.dataset.refNodeId || id;
-                const imageIndex = Number(item?.dataset.refImageIndex ?? item?.dataset.imageIndex ?? 0);
-                const owner = nodes.find(n => n.id === targetNodeId);
-                if(mediaKindForItem(owner?.images?.[imageIndex] || {}) !== 'video') return;
-                clearImageClickTimer();
-                suppressImageClickUntil = Date.now() + 260;
-                hideRunTimerForNode(owner);
-                smartActivateVideoPreview(btn);
-            }, true);
-        });
+        bindNodeThumbBadges(el, id);
+
         el.querySelectorAll('.thumb-item,.image-wrap').forEach(item => {
             const thumbTarget = () => {
                 const targetNodeId = item.dataset.refNodeId || id;
