@@ -8714,6 +8714,29 @@ function bindMinimaxDropHandlers(el, node, focusMinimaxNode){
     }, true);
 }
 
+
+function bindMinimaxEngineSelect(el, node, focusMinimaxNode){
+    el.querySelectorAll('[data-minimax-engine]').forEach(select => {
+        select.onchange = e => {
+            e.stopPropagation();
+            focusMinimaxNode();
+            const nextEngine = select.value === 'runninghub' ? 'runninghub' : SMART_MINIMAX_DEFAULT_ENGINE;
+            if(nextEngine === 'runninghub'){
+                const entry = smartMinimaxRunningHubEntry(node);
+                if(!entry){
+                    select.value = smartMinimaxEngine(node);
+                    toast(`请先在 API 设置中添加「${SMART_MINIMAX_RUNNINGHUB_WORKFLOW_TITLE}」`);
+                    return;
+                }
+                node.minimaxRunningHubWorkflowId = runningHubEntryId(entry, 'workflow');
+            }
+            node.minimaxEngine = nextEngine;
+            render();
+            scheduleSave();
+        };
+    });
+}
+
 function bindMinimaxNodeControls(el, node){
     const focusMinimaxNode = () => {
         if(selectedId === node.id && selectedIds.length === 0 && selectedImage.nodeId === '') return;
@@ -8765,25 +8788,7 @@ function bindMinimaxNodeControls(el, node){
         });
         control.addEventListener('dblclick', e => e.stopPropagation());
     });
-    el.querySelectorAll('[data-minimax-engine]').forEach(select => {
-        select.onchange = e => {
-            e.stopPropagation();
-            focusMinimaxNode();
-            const nextEngine = select.value === 'runninghub' ? 'runninghub' : SMART_MINIMAX_DEFAULT_ENGINE;
-            if(nextEngine === 'runninghub'){
-                const entry = smartMinimaxRunningHubEntry(node);
-                if(!entry){
-                    select.value = smartMinimaxEngine(node);
-                    toast(`请先在 API 设置中添加「${SMART_MINIMAX_RUNNINGHUB_WORKFLOW_TITLE}」`);
-                    return;
-                }
-                node.minimaxRunningHubWorkflowId = runningHubEntryId(entry, 'workflow');
-            }
-            node.minimaxEngine = nextEngine;
-            render();
-            scheduleSave();
-        };
-    });
+    bindMinimaxEngineSelect(el, node, focusMinimaxNode);
     el.querySelectorAll('[data-minimax-segment]').forEach(btn => {
         btn.addEventListener('mousedown', e => {
             if(e.target.closest('[data-minimax-trim]')) return;
