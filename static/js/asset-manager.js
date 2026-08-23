@@ -3148,15 +3148,7 @@ async function handleStorageSettingsClick(event, target){
     return false;
 }
 
-async function handleClick(event){
-    const target = event.target;
-    if(await handleStorageSettingsClick(event, target)) return;
-
-    if(guardMatchesManagedSelection(target)){
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-    }
+async function handleSelectionManageClick(event, target){
     if(activeTab === 'assets' && assetManageMode){
         const assetCheck = target.closest?.('[data-asset-check]');
         const assetCard = target.closest?.('[data-asset-card]');
@@ -3168,7 +3160,7 @@ async function handleClick(event){
             selectedAssetId = selected ? id : (selectedAssetId === id ? '' : selectedAssetId);
             pendingBatchDelete = '';
             render();
-            return;
+            return true;
         }
     }
     if(activeTab === 'local' && localUploadManageMode){
@@ -3182,7 +3174,7 @@ async function handleClick(event){
             selectedLocalUploadId = selected ? id : (selectedLocalUploadId === id ? '' : selectedLocalUploadId);
             pendingBatchDelete = '';
             render();
-            return;
+            return true;
         }
     }
     if(activeTab === 'local' && localManageMode){
@@ -3196,7 +3188,7 @@ async function handleClick(event){
             selectedLocalId = selected ? id : (selectedLocalId === id ? '' : selectedLocalId);
             pendingBatchDelete = '';
             render();
-            return;
+            return true;
         }
     }
     if(activeTab === 'workflows' && workflowManageMode){
@@ -3210,7 +3202,7 @@ async function handleClick(event){
             selectedWorkflowId = selected ? id : (selectedWorkflowId === id ? '' : selectedWorkflowId);
             pendingBatchDelete = '';
             render();
-            return;
+            return true;
         }
     }
     if(activeTab === 'prompts' && promptManageMode){
@@ -3226,7 +3218,7 @@ async function handleClick(event){
             promptCreateMode = false;
             pendingBatchDelete = '';
             render();
-            return;
+            return true;
         }
     }
     if(activeTab === 'canvas-assets' && canvasAssetManageMode){
@@ -3239,9 +3231,23 @@ async function handleClick(event){
             const selected = toggleSelectionSet(selectedCanvasAssetIds, id);
             selectedCanvasAssetId = selected ? id : (selectedCanvasAssetId === id ? '' : selectedCanvasAssetId);
             refreshCanvasAssetSelectionOnly();
-            return;
+            return true;
         }
     }
+    return false;
+}
+
+async function handleClick(event){
+    const target = event.target;
+    if(await handleStorageSettingsClick(event, target)) return;
+
+    if(guardMatchesManagedSelection(target)){
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+    }
+    if(await handleSelectionManageClick(event, target)) return;
+
     const tabBtn = target.closest?.('[data-tab]');
     if(tabBtn){ activeTab = tabBtn.dataset.tab || 'assets'; selectedAssetIds.clear(); selectedWorkflowIds.clear(); selectedPromptIds.clear(); selectedLocalIds.clear(); selectedLocalUploadIds.clear(); selectedCanvasAssetIds.clear(); render(); return; }
     if(target.closest?.('#refreshBtn')){ await loadAll(); return; }
