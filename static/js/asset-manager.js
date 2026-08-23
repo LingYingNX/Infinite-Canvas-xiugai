@@ -104,6 +104,14 @@ let activeCanvasAssetCategory = 'smart';
 let activeCanvasAssetCanvasId = '';
 let selectedCanvasAssetId = '';
 let selectedCanvasAssetIds = new Set();
+function clearAllManagedSelections(){
+    selectedAssetIds.clear();
+    selectedWorkflowIds.clear();
+    selectedPromptIds.clear();
+    selectedLocalIds.clear();
+    selectedLocalUploadIds.clear();
+    selectedCanvasAssetIds.clear();
+}
 let canvasAssetQuery = '';
 let canvasAssetSort = 'canvas_asc';
 let canvasAssetManageMode = false;
@@ -4743,12 +4751,7 @@ uploadInput?.addEventListener('change', event => {
 document.querySelectorAll('[data-tab]').forEach(btn => {
     btn.addEventListener('click', () => {
         activeTab = btn.dataset.tab || 'assets';
-        selectedAssetIds.clear();
-        selectedWorkflowIds.clear();
-        selectedPromptIds.clear();
-        selectedLocalIds.clear();
-        selectedLocalUploadIds.clear();
-        selectedCanvasAssetIds.clear();
+        clearAllManagedSelections();
         render();
     });
 });
