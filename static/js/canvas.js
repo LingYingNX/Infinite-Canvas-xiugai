@@ -8210,87 +8210,7 @@ function llmInputVideos(node){
     });
     return urls;
 }
-function renderGeneratorBody(node){
-    const wrap = document.createElement('div');
-    wrap.className = 'generator-body';
-    const inputSources = generatorSources(node);
-    const ordered = orderedSources(node, inputSources);
-    const mediaInputs = ordered.filter(src => src.refs?.some(ref => ['image','video','audio'].includes(mediaKindForRef(ref))));
-    const promptInputs = ordered.filter(src => src.prompt && !src.refs?.length);
-    sanitizeImageNodeProviderModel(node);
-    normalizeApiNodeSizeChoice(node);
-    wrap.innerHTML = `
-        <div class="prompt-list mb-3"></div>
-        <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">${tr('canvas.images')}</div>
-        <div class="input-list"></div>
-        <div class="gen-settings">
-            <div class="gen-settings-row">
-                <select class="select-lite provider-select">${providerOptions(node.apiProvider)}</select>
-                <select class="select-lite model-select">${imageModelOptions(node.model, node.apiProvider)}</select>
-            </div>
-            <div class="gen-settings-row api-size-row">
-                <select class="select-lite resolution compact-select" data-field="resolution">
-                    <option value="auto">自动</option>
-                    <option value="1k">1K</option>
-                    <option value="2k">2K</option>
-                    <option value="4k">4K</option>
-                    <option value="custom">${tr('canvas.custom')}</option>
-                </select>
-                <select class="select-lite ratio compact-select" data-field="ratio">
-                    <option value="square">1:1</option>
-                    <option value="portrait">2:3</option>
-                    <option value="landscape">3:2</option>
-                    <option value="portrait43">3:4</option>
-                    <option value="landscape43">4:3</option>
-                    <option value="story">9:16</option>
-                    <option value="wide">16:9</option>
-                    <option value="ultrawide">21:9</option>
-                    <option value="ultratall">9:21</option>
-                    <option value="source">${tr('canvas.adaptiveRatio')}</option>
-                    <option value="custom">${tr('canvas.custom')}</option>
-                </select>
-                <select class="select-lite quality-select">
-                    <option value="auto">Q auto</option>
-                    <option value="low">Q low</option>
-                    <option value="medium">Q med</option>
-                    <option value="high">Q high</option>
-                </select>
-                <div class="gen-count-row">
-                    <div class="gen-stepper">
-                        <button class="gen-step-btn" data-step="-1" type="button" title="${tr('canvas.decrease')}" aria-label="${tr('canvas.decreaseCount')}"><i data-lucide="chevron-left" class="w-3.5 h-3.5"></i></button>
-                        <input class="gen-count-input" type="text" inputmode="numeric" pattern="[0-9]*" value="${Math.max(1, Math.min(8, Number(node.count || 1)))}">
-                        <button class="gen-step-btn" data-step="1" type="button" title="${tr('canvas.increase')}" aria-label="${tr('canvas.increaseCount')}"><i data-lucide="chevron-right" class="w-3.5 h-3.5"></i></button>
-                    </div>
-                </div>
-            </div>
-            <div class="gen-settings-row custom-ratio-row" style="display:none">
-                <label class="field">
-                    <div class="setting-title">${tr('canvas.ratioWidth')}</div>
-                    <input class="setting-input custom-ratio-w-input" type="number" min="1" step="1" value="${escapeHtml(node.customRatioWidth || '')}" placeholder="4">
-                </label>
-                <label class="field">
-                    <div class="setting-title">${tr('canvas.ratioHeight')}</div>
-                    <input class="setting-input custom-ratio-h-input" type="number" min="1" step="1" value="${escapeHtml(node.customRatioHeight || '')}" placeholder="3">
-                </label>
-            </div>
-            <div class="gen-settings-row custom-size-row" style="display:none">
-                <label class="field">
-                    <div class="setting-title">${tr('canvas.width')}</div>
-                    <input class="setting-input custom-w-input" type="number" min="64" step="64" value="${escapeHtml(node.customWidth || '')}" placeholder="Auto">
-                </label>
-                <label class="field">
-                    <div class="setting-title">${tr('canvas.height')}</div>
-                    <input class="setting-input custom-h-input" type="number" min="64" step="64" value="${escapeHtml(node.customHeight || '')}" placeholder="Auto">
-                </label>
-                <button class="secondary-btn fit-size-btn" type="button" style="height:32px;align-self:flex-end;padding:0 10px;font-size:11px">${tr('canvas.fitImageSize')}</button>
-            </div>
-        </div>
-        <div class="gen-run-row">
-            <button class="gen-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="zap" class="w-4 h-4"></i>${node.running ? tr('canvas.generating') : tr('canvas.apiGenerate')}</button>
-            ${cascadeBtnHtml(node)}
-        </div>
-        ${retryBarHtml(node)}
-    `;
+function bindGeneratorProviderModel(wrap, node, syncSizeControls, syncQualityControls){
     const providerSelect = wrap.querySelector('.provider-select');
     const modelSelect = wrap.querySelector('.model-select');
     providerSelect.onmousedown = e => e.stopPropagation();
@@ -8318,6 +8238,9 @@ function renderGeneratorBody(node){
         syncQualityControls();
         scheduleSave();
     };
+}
+
+function bindGeneratorSizeControls(wrap, node, referenceImages){
     const ratioSelect = wrap.querySelector('.ratio');
     const resolutionSelect = wrap.querySelector('.resolution');
     const qualitySelect = wrap.querySelector('.quality-select');
@@ -8328,7 +8251,6 @@ function renderGeneratorBody(node){
     const customWInput = wrap.querySelector('.custom-w-input');
     const customHInput = wrap.querySelector('.custom-h-input');
     const fitSizeBtn = wrap.querySelector('.fit-size-btn');
-    const referenceImages = ordered.flatMap(src => src.refs || []);
     const syncQualityControls = () => {
         qualitySelect.disabled = false;
         if(!['auto','low','medium','high'].includes(String(node.quality || 'auto'))) node.quality = 'auto';
@@ -8400,6 +8322,7 @@ function renderGeneratorBody(node){
         syncQualityControls();
         if(node.ratio === 'source') updateSourceRatioFromFirstRef();
     };
+    bindGeneratorProviderModel(wrap, node, syncSizeControls, syncQualityControls);
     qualitySelect.onmousedown = e => e.stopPropagation();
     qualitySelect.onclick = e => e.stopPropagation();
     qualitySelect.onchange = e => {
@@ -8500,6 +8423,9 @@ function renderGeneratorBody(node){
         };
     }
     syncSizeControls();
+}
+
+function bindGeneratorCountInput(wrap, node){
     const countInput = wrap.querySelector('.gen-count-input');
     countInput.onmousedown = e => e.stopPropagation();
     countInput.onclick = e => e.stopPropagation();
@@ -8518,6 +8444,92 @@ function renderGeneratorBody(node){
             scheduleSave();
         };
     });
+}
+
+function renderGeneratorBody(node){
+    const wrap = document.createElement('div');
+    wrap.className = 'generator-body';
+    const inputSources = generatorSources(node);
+    const ordered = orderedSources(node, inputSources);
+    const mediaInputs = ordered.filter(src => src.refs?.some(ref => ['image','video','audio'].includes(mediaKindForRef(ref))));
+    const promptInputs = ordered.filter(src => src.prompt && !src.refs?.length);
+    sanitizeImageNodeProviderModel(node);
+    normalizeApiNodeSizeChoice(node);
+    const referenceImages = ordered.flatMap(src => src.refs || []);
+    wrap.innerHTML = `
+        <div class="prompt-list mb-3"></div>
+        <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">${tr('canvas.images')}</div>
+        <div class="input-list"></div>
+        <div class="gen-settings">
+            <div class="gen-settings-row">
+                <select class="select-lite provider-select">${providerOptions(node.apiProvider)}</select>
+                <select class="select-lite model-select">${imageModelOptions(node.model, node.apiProvider)}</select>
+            </div>
+            <div class="gen-settings-row api-size-row">
+                <select class="select-lite resolution compact-select" data-field="resolution">
+                    <option value="auto">自动</option>
+                    <option value="1k">1K</option>
+                    <option value="2k">2K</option>
+                    <option value="4k">4K</option>
+                    <option value="custom">${tr('canvas.custom')}</option>
+                </select>
+                <select class="select-lite ratio compact-select" data-field="ratio">
+                    <option value="square">1:1</option>
+                    <option value="portrait">2:3</option>
+                    <option value="landscape">3:2</option>
+                    <option value="portrait43">3:4</option>
+                    <option value="landscape43">4:3</option>
+                    <option value="story">9:16</option>
+                    <option value="wide">16:9</option>
+                    <option value="ultrawide">21:9</option>
+                    <option value="ultratall">9:21</option>
+                    <option value="source">${tr('canvas.adaptiveRatio')}</option>
+                    <option value="custom">${tr('canvas.custom')}</option>
+                </select>
+                <select class="select-lite quality-select">
+                    <option value="auto">Q auto</option>
+                    <option value="low">Q low</option>
+                    <option value="medium">Q med</option>
+                    <option value="high">Q high</option>
+                </select>
+                <div class="gen-count-row">
+                    <div class="gen-stepper">
+                        <button class="gen-step-btn" data-step="-1" type="button" title="${tr('canvas.decrease')}" aria-label="${tr('canvas.decreaseCount')}"><i data-lucide="chevron-left" class="w-3.5 h-3.5"></i></button>
+                        <input class="gen-count-input" type="text" inputmode="numeric" pattern="[0-9]*" value="${Math.max(1, Math.min(8, Number(node.count || 1)))}">
+                        <button class="gen-step-btn" data-step="1" type="button" title="${tr('canvas.increase')}" aria-label="${tr('canvas.increaseCount')}"><i data-lucide="chevron-right" class="w-3.5 h-3.5"></i></button>
+                    </div>
+                </div>
+            </div>
+            <div class="gen-settings-row custom-ratio-row" style="display:none">
+                <label class="field">
+                    <div class="setting-title">${tr('canvas.ratioWidth')}</div>
+                    <input class="setting-input custom-ratio-w-input" type="number" min="1" step="1" value="${escapeHtml(node.customRatioWidth || '')}" placeholder="4">
+                </label>
+                <label class="field">
+                    <div class="setting-title">${tr('canvas.ratioHeight')}</div>
+                    <input class="setting-input custom-ratio-h-input" type="number" min="1" step="1" value="${escapeHtml(node.customRatioHeight || '')}" placeholder="3">
+                </label>
+            </div>
+            <div class="gen-settings-row custom-size-row" style="display:none">
+                <label class="field">
+                    <div class="setting-title">${tr('canvas.width')}</div>
+                    <input class="setting-input custom-w-input" type="number" min="64" step="64" value="${escapeHtml(node.customWidth || '')}" placeholder="Auto">
+                </label>
+                <label class="field">
+                    <div class="setting-title">${tr('canvas.height')}</div>
+                    <input class="setting-input custom-h-input" type="number" min="64" step="64" value="${escapeHtml(node.customHeight || '')}" placeholder="Auto">
+                </label>
+                <button class="secondary-btn fit-size-btn" type="button" style="height:32px;align-self:flex-end;padding:0 10px;font-size:11px">${tr('canvas.fitImageSize')}</button>
+            </div>
+        </div>
+        <div class="gen-run-row">
+            <button class="gen-btn ${node.running ? 'running' : ''}" ${node.running ? 'disabled' : ''}><i data-lucide="zap" class="w-4 h-4"></i>${node.running ? tr('canvas.generating') : tr('canvas.apiGenerate')}</button>
+            ${cascadeBtnHtml(node)}
+        </div>
+        ${retryBarHtml(node)}
+    `;
+    bindGeneratorSizeControls(wrap, node, referenceImages);
+    bindGeneratorCountInput(wrap, node);
     const list = wrap.querySelector('.input-list');
     renderImageInputList(list, node, mediaInputs);
     renderPromptPreview(wrap.querySelector('.prompt-list'), promptInputs);
