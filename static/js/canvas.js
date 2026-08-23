@@ -3510,13 +3510,7 @@ async function downloadOutputNodeImages(nodeId){
         });
         if(!res.ok) throw new Error(await responseErrorMessage(res, tr('canvas.outputDownloadEmpty')));
         const blob = await res.blob();
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `${(canvas?.title || 'canvas-output').slice(0, 48)}-${node.id}.zip`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+        downloadBlob(blob, `${(canvas?.title || 'canvas-output').slice(0, 48)}-${node.id}.zip`, 1000);
     } catch(err) {
         alert(err.message || tr('canvas.outputDownloadEmpty'));
     }
@@ -14747,14 +14741,14 @@ function workflowFilename(ext){
     const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15);
     return `${title}-${stamp}.${ext}`;
 }
-function downloadBlob(blob, filename){
+function downloadBlob(blob, filename, revokeDelay=1200){
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = filename;
     document.body.appendChild(link);
     link.click();
     link.remove();
-    setTimeout(() => URL.revokeObjectURL(link.href), 1200);
+    setTimeout(() => URL.revokeObjectURL(link.href), revokeDelay);
 }
 function downloadUrl(url, filename='download'){
     if(!url) return Promise.resolve(false);
