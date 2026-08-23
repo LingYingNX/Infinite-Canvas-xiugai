@@ -3509,6 +3509,154 @@ async function handleWorkflowClick(event, target){
     return false;
 }
 
+
+async function handleAssetClick(event, target){
+    const assetEditSave = target.closest?.('[data-asset-edit-save]');
+    if(assetEditSave){ await saveAssetEdit(assetEditSave.dataset.assetEditSave || ''); return true; }
+    if(target.closest?.('[data-asset-edit-cancel]')){ assetEditMode = false; render(); return true; }
+    const assetEditStart = target.closest?.('[data-asset-edit-start]');
+    if(assetEditStart){ selectedAssetId = assetEditStart.dataset.assetEditStart || selectedAssetId; assetEditMode = true; pendingDeleteAssetId = ''; render(); return true; }
+    if(target.closest?.('[data-asset-manage]')){
+        assetManageMode = !assetManageMode;
+        pendingBatchDelete = '';
+        if(!assetManageMode) selectedAssetIds.clear();
+        render();
+        return true;
+    }
+    if(target.closest?.('[data-asset-select-all]')){ currentAssetItems().forEach(item => selectedAssetIds.add(item.id)); pendingBatchDelete = ''; render(); return true; }
+    if(target.closest?.('[data-asset-clear-selection]')){ selectedAssetIds.clear(); pendingBatchDelete = ''; render(); return true; }
+    if(target.closest?.('[data-asset-cut-selected]')){ setAssetClipboard('cut'); return true; }
+    if(target.closest?.('[data-asset-copy-selected]')){ setAssetClipboard('copy'); return true; }
+    if(target.closest?.('[data-asset-paste-clipboard]')){ await pasteAssetClipboard(); return true; }
+    if(target.closest?.('[data-asset-clear-clipboard]')){ assetClipboard = null; render(); return true; }
+    const assetRename = target.closest?.('[data-asset-rename]');
+    if(assetRename){ await renameAssetItem(assetRename.dataset.assetRename || ''); return true; }
+    const assetDelete = target.closest?.('[data-asset-delete]');
+    if(assetDelete){ await deleteAssetItem(assetDelete.dataset.assetDelete || ''); return true; }
+    const assetDownload = target.closest?.('[data-asset-download]');
+    if(assetDownload){ downloadAssetItem(assetDownload.dataset.assetDownload || ''); return true; }
+    const assetOpen = target.closest?.('[data-asset-open]');
+    if(assetOpen){ openAssetItem(assetOpen.dataset.assetOpen || ''); return true; }
+    const avatarCopy = target.closest?.('[data-avatar-copy]');
+    if(avatarCopy){
+        const uri = avatarCopy.dataset.avatarCopy || '';
+        const ok = await copyTextToClipboard(uri);
+        setStatus(ok ? '已复制 asset:// 地址' : `复制失败，请手动复制：${uri}`);
+        return true;
+    }
+    const avatarRegister = target.closest?.('[data-avatar-register]');
+    if(avatarRegister){ await registerAssetAvatar(avatarRegister.dataset.avatarRegister || '', avatarRegister.dataset.avatarProv || ''); return true; }
+    const avatarCheck = target.closest?.('[data-avatar-check]');
+    if(avatarCheck){ await checkAssetAvatarStatus(avatarCheck.dataset.avatarCheck || '', false, avatarCheck.dataset.avatarProv || ''); return true; }
+    if(target.closest?.('[data-asset-classify-selected]')){ await runAssetClassifySelected(); return true; }
+    if(target.closest?.('[data-asset-download-selected]')){ await downloadSelectedAssets(); return true; }
+    if(target.closest?.('[data-asset-copy-to-canvas]')){ copySelectedAssetsToCanvas(); return true; }
+    if(target.closest?.('[data-asset-delete-selected]')){ await deleteSelectedAssets(); return true; }
+    if(target.closest?.('[data-asset-upload]')){
+        if(uploadInput) uploadInput.accept = 'image/*,video/*,audio/*';
+        uploadInput?.click();
+        return true;
+    }
+    if(target.closest?.('[data-asset-lib-new]')){ assetTreeFocus = 'library'; assetTreeEdit = {kind:'library-new', placement:'head', value:'新资产库', label:'资产库名称'}; render(); focusTreeEditInput('assetTreeEditInput'); return true; }
+    if(target.closest?.('[data-asset-lib-rename]')){
+        const row = target.closest('[data-asset-lib]');
+        if(row) activeAssetLibraryId = row.dataset.assetLib || activeAssetLibraryId;
+        assetTreeFocus = 'library';
+        assetTreeEdit = {kind:'library-rename', value:activeAssetLibrary()?.name || '', label:'资产库名称'};
+        pendingTreeDelete = '';
+        render(); return true;
+    }
+    if(target.closest?.('[data-asset-lib-delete]')){
+        const row = target.closest('[data-asset-lib]');
+        if(row) activeAssetLibraryId = row.dataset.assetLib || activeAssetLibraryId;
+        await deleteAssetLibrary(); return true;
+    }
+    if(target.closest?.('[data-asset-cat-new]')){
+        const row = target.closest('[data-asset-lib]');
+        const catRow = target.closest('[data-asset-cat]');
+        if(row) activeAssetLibraryId = row.dataset.assetLib || activeAssetLibraryId;
+        if(catRow) activeAssetLibraryId = catRow.dataset.assetCatLib || activeAssetLibraryId;
+        assetTreeEdit = {kind:'category-new', value:'新分组', label:'分组名称'};
+        pendingTreeDelete = '';
+        render(); return true;
+    }
+    if(target.closest?.('[data-asset-cat-rename]')){
+        const row = target.closest('[data-asset-cat]');
+        if(row){ activeAssetLibraryId = row.dataset.assetCatLib || activeAssetLibraryId; activeAssetCategoryId = row.dataset.assetCat || activeAssetCategoryId; }
+        assetTreeFocus = 'category';
+        assetTreeEdit = {kind:'category-rename', value:activeAssetCategory()?.name || '', label:'分组名称'};
+        pendingTreeDelete = '';
+        render(); return true;
+    }
+    if(target.closest?.('[data-asset-cat-delete]')){
+        const row = target.closest('[data-asset-cat]');
+        if(row){ activeAssetLibraryId = row.dataset.assetCatLib || activeAssetLibraryId; activeAssetCategoryId = row.dataset.assetCat || activeAssetCategoryId; }
+        await deleteAssetCategory(); return true;
+    }
+    const assetLib = target.closest?.('[data-asset-lib]');
+    if(assetLib){ activeAssetLibraryId = assetLib.dataset.assetLib || ''; assetTreeFocus = 'library'; activeAssetClassFilter = ''; activeAssetCategoryId = assetCategories()[0]?.id || ''; selectedAssetId = ''; selectedAssetIds.clear(); render(); return true; }
+    const assetClassRoot = target.closest?.('[data-asset-class-root]');
+    if(assetClassRoot){
+        activeAssetLibraryId = assetClassRoot.dataset.assetClassRoot || activeAssetLibraryId;
+        assetTreeFocus = 'class';
+        if(!assetClassificationEntriesForLibrary(activeAssetLibrary()).length) setStatus('暂无智能分类，请先选择图片并点击“智能分类”');
+        return true;
+    }
+    const assetClassGroup = target.closest?.('[data-asset-class-group]');
+    if(assetClassGroup){
+        openAssetClassGroup = openAssetClassGroup === (assetClassGroup.dataset.assetClassGroup || '') ? '' : (assetClassGroup.dataset.assetClassGroup || '');
+        render();
+        return true;
+    }
+    const assetClass = target.closest?.('[data-asset-class-filter]');
+    if(assetClass){
+        activeAssetLibraryId = assetClass.dataset.assetClassLib || activeAssetLibraryId;
+        const nextFilter = assetClass.dataset.assetClassFilter || '';
+        activeAssetClassFilter = activeAssetClassFilter === nextFilter ? '' : nextFilter;
+        if(activeAssetClassFilter) {
+            openAssetClassGroup = assetClassificationGroupIdForFilter(activeAssetClassFilter, assetClassificationEntriesForLibrary(activeAssetLibrary())) || openAssetClassGroup;
+        }
+        assetTreeFocus = 'class';
+        selectedAssetId = '';
+        selectedAssetIds.clear();
+        pendingBatchDelete = '';
+        render();
+        return true;
+    }
+    const assetCat = target.closest?.('[data-asset-cat]');
+    if(assetCat){ activeAssetLibraryId = assetCat.dataset.assetCatLib || activeAssetLibraryId; activeAssetCategoryId = assetCat.dataset.assetCat || ''; activeAssetClassFilter = ''; assetTreeFocus = 'category'; selectedAssetId = ''; selectedAssetIds.clear(); render(); return true; }
+    const assetCheck = target.closest?.('[data-asset-check]');
+    if(assetCheck){
+        event.preventDefault();
+        event.stopPropagation();
+        if(assetManageMode){
+            const id = assetCheck.dataset.assetCheck || '';
+            const selected = toggleSelectionSet(selectedAssetIds, id);
+            selectedAssetId = selected ? id : (selectedAssetId === id ? '' : selectedAssetId);
+            pendingBatchDelete = '';
+            render();
+        }
+        return true;
+    }
+    const assetCard = target.closest?.('[data-asset-card]');
+    if(assetCard){
+        const id = assetCard.dataset.assetCard || '';
+        if(assetManageMode){
+            const selected = toggleSelectionSet(selectedAssetIds, id);
+            selectedAssetId = selected ? id : (selectedAssetId === id ? '' : selectedAssetId);
+        } else {
+            selectedAssetId = id;
+        }
+        assetEditMode = false;
+        pendingDeleteAssetId = '';
+        pendingBatchDelete = '';
+        render();
+        return true;
+    }
+
+    return false;
+}
+
 async function handleClick(event){
     const target = event.target;
     if(await handleStorageSettingsClick(event, target)) return;
@@ -3544,149 +3692,7 @@ async function handleClick(event){
     if(target.closest?.('[data-workflow-tree-edit-cancel]')){ workflowTreeEdit = null; render(); return; }
     if(target.closest?.('[data-prompt-tree-edit-save]')){ await savePromptTreeEdit(); return; }
     if(target.closest?.('[data-prompt-tree-edit-cancel]')){ promptTreeEdit = null; render(); return; }
-    const assetEditSave = target.closest?.('[data-asset-edit-save]');
-    if(assetEditSave){ await saveAssetEdit(assetEditSave.dataset.assetEditSave || ''); return; }
-    if(target.closest?.('[data-asset-edit-cancel]')){ assetEditMode = false; render(); return; }
-    const assetEditStart = target.closest?.('[data-asset-edit-start]');
-    if(assetEditStart){ selectedAssetId = assetEditStart.dataset.assetEditStart || selectedAssetId; assetEditMode = true; pendingDeleteAssetId = ''; render(); return; }
-    if(target.closest?.('[data-asset-manage]')){
-        assetManageMode = !assetManageMode;
-        pendingBatchDelete = '';
-        if(!assetManageMode) selectedAssetIds.clear();
-        render();
-        return;
-    }
-    if(target.closest?.('[data-asset-select-all]')){ currentAssetItems().forEach(item => selectedAssetIds.add(item.id)); pendingBatchDelete = ''; render(); return; }
-    if(target.closest?.('[data-asset-clear-selection]')){ selectedAssetIds.clear(); pendingBatchDelete = ''; render(); return; }
-    if(target.closest?.('[data-asset-cut-selected]')){ setAssetClipboard('cut'); return; }
-    if(target.closest?.('[data-asset-copy-selected]')){ setAssetClipboard('copy'); return; }
-    if(target.closest?.('[data-asset-paste-clipboard]')){ await pasteAssetClipboard(); return; }
-    if(target.closest?.('[data-asset-clear-clipboard]')){ assetClipboard = null; render(); return; }
-    const assetRename = target.closest?.('[data-asset-rename]');
-    if(assetRename){ await renameAssetItem(assetRename.dataset.assetRename || ''); return; }
-    const assetDelete = target.closest?.('[data-asset-delete]');
-    if(assetDelete){ await deleteAssetItem(assetDelete.dataset.assetDelete || ''); return; }
-    const assetDownload = target.closest?.('[data-asset-download]');
-    if(assetDownload){ downloadAssetItem(assetDownload.dataset.assetDownload || ''); return; }
-    const assetOpen = target.closest?.('[data-asset-open]');
-    if(assetOpen){ openAssetItem(assetOpen.dataset.assetOpen || ''); return; }
-    const avatarCopy = target.closest?.('[data-avatar-copy]');
-    if(avatarCopy){
-        const uri = avatarCopy.dataset.avatarCopy || '';
-        const ok = await copyTextToClipboard(uri);
-        setStatus(ok ? '已复制 asset:// 地址' : `复制失败，请手动复制：${uri}`);
-        return;
-    }
-    const avatarRegister = target.closest?.('[data-avatar-register]');
-    if(avatarRegister){ await registerAssetAvatar(avatarRegister.dataset.avatarRegister || '', avatarRegister.dataset.avatarProv || ''); return; }
-    const avatarCheck = target.closest?.('[data-avatar-check]');
-    if(avatarCheck){ await checkAssetAvatarStatus(avatarCheck.dataset.avatarCheck || '', false, avatarCheck.dataset.avatarProv || ''); return; }
-    if(target.closest?.('[data-asset-classify-selected]')){ await runAssetClassifySelected(); return; }
-    if(target.closest?.('[data-asset-download-selected]')){ await downloadSelectedAssets(); return; }
-    if(target.closest?.('[data-asset-copy-to-canvas]')){ copySelectedAssetsToCanvas(); return; }
-    if(target.closest?.('[data-asset-delete-selected]')){ await deleteSelectedAssets(); return; }
-    if(target.closest?.('[data-asset-upload]')){
-        if(uploadInput) uploadInput.accept = 'image/*,video/*,audio/*';
-        uploadInput?.click();
-        return;
-    }
-    if(target.closest?.('[data-asset-lib-new]')){ assetTreeFocus = 'library'; assetTreeEdit = {kind:'library-new', placement:'head', value:'新资产库', label:'资产库名称'}; render(); focusTreeEditInput('assetTreeEditInput'); return; }
-    if(target.closest?.('[data-asset-lib-rename]')){
-        const row = target.closest('[data-asset-lib]');
-        if(row) activeAssetLibraryId = row.dataset.assetLib || activeAssetLibraryId;
-        assetTreeFocus = 'library';
-        assetTreeEdit = {kind:'library-rename', value:activeAssetLibrary()?.name || '', label:'资产库名称'};
-        pendingTreeDelete = '';
-        render(); return;
-    }
-    if(target.closest?.('[data-asset-lib-delete]')){
-        const row = target.closest('[data-asset-lib]');
-        if(row) activeAssetLibraryId = row.dataset.assetLib || activeAssetLibraryId;
-        await deleteAssetLibrary(); return;
-    }
-    if(target.closest?.('[data-asset-cat-new]')){
-        const row = target.closest('[data-asset-lib]');
-        const catRow = target.closest('[data-asset-cat]');
-        if(row) activeAssetLibraryId = row.dataset.assetLib || activeAssetLibraryId;
-        if(catRow) activeAssetLibraryId = catRow.dataset.assetCatLib || activeAssetLibraryId;
-        assetTreeEdit = {kind:'category-new', value:'新分组', label:'分组名称'};
-        pendingTreeDelete = '';
-        render(); return;
-    }
-    if(target.closest?.('[data-asset-cat-rename]')){
-        const row = target.closest('[data-asset-cat]');
-        if(row){ activeAssetLibraryId = row.dataset.assetCatLib || activeAssetLibraryId; activeAssetCategoryId = row.dataset.assetCat || activeAssetCategoryId; }
-        assetTreeFocus = 'category';
-        assetTreeEdit = {kind:'category-rename', value:activeAssetCategory()?.name || '', label:'分组名称'};
-        pendingTreeDelete = '';
-        render(); return;
-    }
-    if(target.closest?.('[data-asset-cat-delete]')){
-        const row = target.closest('[data-asset-cat]');
-        if(row){ activeAssetLibraryId = row.dataset.assetCatLib || activeAssetLibraryId; activeAssetCategoryId = row.dataset.assetCat || activeAssetCategoryId; }
-        await deleteAssetCategory(); return;
-    }
-    const assetLib = target.closest?.('[data-asset-lib]');
-    if(assetLib){ activeAssetLibraryId = assetLib.dataset.assetLib || ''; assetTreeFocus = 'library'; activeAssetClassFilter = ''; activeAssetCategoryId = assetCategories()[0]?.id || ''; selectedAssetId = ''; selectedAssetIds.clear(); render(); return; }
-    const assetClassRoot = target.closest?.('[data-asset-class-root]');
-    if(assetClassRoot){
-        activeAssetLibraryId = assetClassRoot.dataset.assetClassRoot || activeAssetLibraryId;
-        assetTreeFocus = 'class';
-        if(!assetClassificationEntriesForLibrary(activeAssetLibrary()).length) setStatus('暂无智能分类，请先选择图片并点击“智能分类”');
-        return;
-    }
-    const assetClassGroup = target.closest?.('[data-asset-class-group]');
-    if(assetClassGroup){
-        openAssetClassGroup = openAssetClassGroup === (assetClassGroup.dataset.assetClassGroup || '') ? '' : (assetClassGroup.dataset.assetClassGroup || '');
-        render();
-        return;
-    }
-    const assetClass = target.closest?.('[data-asset-class-filter]');
-    if(assetClass){
-        activeAssetLibraryId = assetClass.dataset.assetClassLib || activeAssetLibraryId;
-        const nextFilter = assetClass.dataset.assetClassFilter || '';
-        activeAssetClassFilter = activeAssetClassFilter === nextFilter ? '' : nextFilter;
-        if(activeAssetClassFilter) {
-            openAssetClassGroup = assetClassificationGroupIdForFilter(activeAssetClassFilter, assetClassificationEntriesForLibrary(activeAssetLibrary())) || openAssetClassGroup;
-        }
-        assetTreeFocus = 'class';
-        selectedAssetId = '';
-        selectedAssetIds.clear();
-        pendingBatchDelete = '';
-        render();
-        return;
-    }
-    const assetCat = target.closest?.('[data-asset-cat]');
-    if(assetCat){ activeAssetLibraryId = assetCat.dataset.assetCatLib || activeAssetLibraryId; activeAssetCategoryId = assetCat.dataset.assetCat || ''; activeAssetClassFilter = ''; assetTreeFocus = 'category'; selectedAssetId = ''; selectedAssetIds.clear(); render(); return; }
-    const assetCheck = target.closest?.('[data-asset-check]');
-    if(assetCheck){
-        event.preventDefault();
-        event.stopPropagation();
-        if(assetManageMode){
-            const id = assetCheck.dataset.assetCheck || '';
-            const selected = toggleSelectionSet(selectedAssetIds, id);
-            selectedAssetId = selected ? id : (selectedAssetId === id ? '' : selectedAssetId);
-            pendingBatchDelete = '';
-            render();
-        }
-        return;
-    }
-    const assetCard = target.closest?.('[data-asset-card]');
-    if(assetCard){
-        const id = assetCard.dataset.assetCard || '';
-        if(assetManageMode){
-            const selected = toggleSelectionSet(selectedAssetIds, id);
-            selectedAssetId = selected ? id : (selectedAssetId === id ? '' : selectedAssetId);
-        } else {
-            selectedAssetId = id;
-        }
-        assetEditMode = false;
-        pendingDeleteAssetId = '';
-        pendingBatchDelete = '';
-        render();
-        return;
-    }
-
+    if(await handleAssetClick(event, target)) return;
     const promptEditSave = target.closest?.('[data-prompt-edit-save]');
     if(promptEditSave){ await savePromptEdit(promptEditSave.dataset.promptEditSave || ''); return; }
     if(target.closest?.('[data-prompt-create-save]')){ await savePromptCreate(); return; }
