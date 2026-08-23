@@ -12394,6 +12394,124 @@ async function runLTXDirectorNode(nodeId, opts={}){
         }
     }
 }
+async function runComfyTextMode(node, run, prompt, cascadeTargetId){
+    let images;
+    run.taskLabel = tr('canvas.comfyText');
+    const result = await runQueuedComfyGenerate({
+        prompt,
+        width:Number(node.width || 1024),
+        height:Number(node.height || 1024),
+        workflow_json:'Z-Image.json',
+        type:'zimage',
+        client_id:CLIENT_ID
+    }, {cascadeTargetId});
+    run.request = requestMetaFromResult(result);
+    images = comfyResultOutputs(result);
+    return images;
+}
+async function runComfyEnhanceMode(node, run, refs, cascadeTargetId){
+    let images;
+    run.taskLabel = tr('canvas.comfyEnhance');
+    const inputName = await comfyNameForRef(refs[0]);
+    const enhance = await runQueuedComfyGenerate({
+        workflow_json:'Z-Image-Enhance.json',
+        params:{
+            "15": { image:inputName },
+            "204": { value:Number(node.enhanceStrength ?? 0.5) }
+        },
+        type:'enhance',
+        client_id:CLIENT_ID
+    }, {cascadeTargetId});
+    run.request = requestMetaFromResult(enhance);
+    if(enhance.error) throw new Error(actionFailed('canvas.comfyEnhance', enhance.error));
+    if(!enhance.images?.length) throw new Error(noReturnedImage('canvas.comfyEnhance'));
+    if(node.enhanceUpscale){
+        images = await runComfyUpscale(enhance.images?.[0], node.enhanceUpscaleRes || 2048, {cascadeTargetId});
+    } else {
+        images = enhance.images || [];
+    }
+    return images;
+}
+async function runComfyCustomMode(node, run, prompt, refs, allRefs, cascadeTargetId){
+    let images;
+    const workflowName = validComfyWorkflowName(node.comfyWorkflow || comfyWorkflows[0]?.name || '');
+    run.taskLabel = workflowName || tr('canvas.comfyCustom');
+    if(node.comfyWorkflow && node.comfyWorkflow !== workflowName) node.comfyWorkflow = workflowName;
+    const wf = await ensureComfyWorkflow(workflowName);
+    if(!workflowName || !wf) throw new Error(tr('canvas.comfyNoWorkflow'));
+    const fields = wf?.config?.fields || [];
+    const params = {};
+    const imageFields = fields.filter(f => comfyFieldKind(f) === 'image');
+    const videoFields = fields.filter(f => comfyFieldKind(f) === 'video');
+    const audioFields = fields.filter(f => comfyFieldKind(f) === 'audio');
+    const promptFields = fields.filter(f => comfyFieldKind(f) === 'prompt');
+    const settingFields = fields.filter(f => comfyFieldKind(f) === 'setting');
+    const assignMediaFields = async (mediaFields, mediaRefs) => {
+        const names = [];
+        for(const ref of mediaRefs.slice(0, mediaFields.length)) names.push(await comfyNameForRef(ref));
+        mediaFields.forEach((f, i) => {
+            if(!f.node || !f.input) return;
+            params[f.node] = params[f.node] || {};
+            params[f.node][f.input] = names[i] || '';
+        });
+    };
+    await assignMediaFields(imageFields, refs);
+    await assignMediaFields(videoFields, videoRefsOnly(allRefs));
+    await assignMediaFields(audioFields, audioRefsOnly(allRefs));
+    promptFields.forEach(f => {
+        if(!f.node || !f.input) return;
+        params[f.node] = params[f.node] || {};
+        params[f.node][f.input] = prompt;
+    });
+    settingFields.forEach(f => {
+        if(!f.node || !f.input) return;
+        params[f.node] = params[f.node] || {};
+        if(comfyRandomEnabled(f) && comfyRandomActive(node, f.id)){
+            node.comfyParams = node.comfyParams || {};
+            node.comfyParams[f.id] = comfyRandomValue(f);
+        }
+        params[f.node][f.input] = comfyParamValue(node, f);
+    });
+    const result = await runQueuedComfyGenerate({
+        prompt,
+        workflow_json:workflowName,
+        params,
+        type:'workflow-custom',
+        client_id:CLIENT_ID
+    }, {cascadeTargetId});
+    run.request = requestMetaFromResult(result);
+    if(result.error) throw new Error(actionFailed('canvas.comfyCustom', result.error));
+    images = comfyResultOutputs(result);
+    if(!images.length) throw new Error(noReturnedImage('canvas.comfyCustom'));
+    return images;
+}
+async function runComfyEditMode(node, run, prompt, refs, cascadeTargetId){
+    let images;
+    run.taskLabel = tr('canvas.comfyEdit');
+    const names = [];
+    for (const ref of refs.slice(0, 3)) names.push(await comfyNameForRef(ref));
+    const result = await runQueuedComfyGenerate({
+        prompt,
+        workflow_json:'Flux2-Klein.json',
+        type:'klein',
+        params:{
+            "168": { text:prompt },
+            "158": { noise_seed:Math.floor(Math.random() * 1000000) },
+            "278": { image:names[0] || "" },
+            "270": { image:names[1] || "" },
+            "292": { image:names[2] || "" },
+            "313": { value:Boolean(names[1]) },
+            "314": { value:Boolean(names[2]) }
+        },
+        client_id:CLIENT_ID
+    }, {cascadeTargetId});
+    run.request = requestMetaFromResult(result);
+    if(result.error) throw new Error(actionFailed('canvas.comfyEdit', result.error));
+    if(!result.images?.length) throw new Error(noReturnedImage('canvas.comfyEdit'));
+    images = node.editUpscale ? await runComfyUpscale(result.images?.[0], node.editUpscaleRes || 2048, {cascadeTargetId}) : result.images || [];
+    return images;
+}
+
 async function runComfyNode(nodeId, opts={}){
     const node = nodes.find(n => n.id === nodeId);
     if(!node || (node.running && !opts.cascade)) return;
@@ -12426,110 +12544,13 @@ async function runComfyNode(nodeId, opts={}){
     try {
         let images = [];
         if(mode === 'text'){
-            run.taskLabel = tr('canvas.comfyText');
-            const result = await runQueuedComfyGenerate({
-                prompt,
-                width:Number(node.width || 1024),
-                height:Number(node.height || 1024),
-                workflow_json:'Z-Image.json',
-                type:'zimage',
-                client_id:CLIENT_ID
-            }, {cascadeTargetId});
-            run.request = requestMetaFromResult(result);
-            images = comfyResultOutputs(result);
+            images = await runComfyTextMode(node, run, prompt, cascadeTargetId);
         } else if(mode === 'enhance'){
-            run.taskLabel = tr('canvas.comfyEnhance');
-            const inputName = await comfyNameForRef(refs[0]);
-            const enhance = await runQueuedComfyGenerate({
-                workflow_json:'Z-Image-Enhance.json',
-                params:{
-                    "15": { image:inputName },
-                    "204": { value:Number(node.enhanceStrength ?? 0.5) }
-                },
-                type:'enhance',
-                client_id:CLIENT_ID
-            }, {cascadeTargetId});
-            run.request = requestMetaFromResult(enhance);
-            if(enhance.error) throw new Error(actionFailed('canvas.comfyEnhance', enhance.error));
-            if(!enhance.images?.length) throw new Error(noReturnedImage('canvas.comfyEnhance'));
-            if(node.enhanceUpscale){
-                images = await runComfyUpscale(enhance.images?.[0], node.enhanceUpscaleRes || 2048, {cascadeTargetId});
-            } else {
-                images = enhance.images || [];
-            }
+            images = await runComfyEnhanceMode(node, run, refs, cascadeTargetId);
         } else if(mode === 'custom'){
-            const workflowName = validComfyWorkflowName(node.comfyWorkflow || comfyWorkflows[0]?.name || '');
-            run.taskLabel = workflowName || tr('canvas.comfyCustom');
-            if(node.comfyWorkflow && node.comfyWorkflow !== workflowName) node.comfyWorkflow = workflowName;
-            const wf = await ensureComfyWorkflow(workflowName);
-            if(!workflowName || !wf) throw new Error(tr('canvas.comfyNoWorkflow'));
-            const fields = wf?.config?.fields || [];
-            const params = {};
-            const imageFields = fields.filter(f => comfyFieldKind(f) === 'image');
-            const videoFields = fields.filter(f => comfyFieldKind(f) === 'video');
-            const audioFields = fields.filter(f => comfyFieldKind(f) === 'audio');
-            const promptFields = fields.filter(f => comfyFieldKind(f) === 'prompt');
-            const settingFields = fields.filter(f => comfyFieldKind(f) === 'setting');
-            const assignMediaFields = async (mediaFields, mediaRefs) => {
-                const names = [];
-                for(const ref of mediaRefs.slice(0, mediaFields.length)) names.push(await comfyNameForRef(ref));
-                mediaFields.forEach((f, i) => {
-                    if(!f.node || !f.input) return;
-                    params[f.node] = params[f.node] || {};
-                    params[f.node][f.input] = names[i] || '';
-                });
-            };
-            await assignMediaFields(imageFields, refs);
-            await assignMediaFields(videoFields, videoRefsOnly(allRefs));
-            await assignMediaFields(audioFields, audioRefsOnly(allRefs));
-            promptFields.forEach(f => {
-                if(!f.node || !f.input) return;
-                params[f.node] = params[f.node] || {};
-                params[f.node][f.input] = prompt;
-            });
-            settingFields.forEach(f => {
-                if(!f.node || !f.input) return;
-                params[f.node] = params[f.node] || {};
-                if(comfyRandomEnabled(f) && comfyRandomActive(node, f.id)){
-                    node.comfyParams = node.comfyParams || {};
-                    node.comfyParams[f.id] = comfyRandomValue(f);
-                }
-                params[f.node][f.input] = comfyParamValue(node, f);
-            });
-            const result = await runQueuedComfyGenerate({
-                prompt,
-                workflow_json:workflowName,
-                params,
-                type:'workflow-custom',
-                client_id:CLIENT_ID
-            }, {cascadeTargetId});
-            run.request = requestMetaFromResult(result);
-            if(result.error) throw new Error(actionFailed('canvas.comfyCustom', result.error));
-            images = comfyResultOutputs(result);
-            if(!images.length) throw new Error(noReturnedImage('canvas.comfyCustom'));
+            images = await runComfyCustomMode(node, run, prompt, refs, allRefs, cascadeTargetId);
         } else {
-            run.taskLabel = tr('canvas.comfyEdit');
-            const names = [];
-            for (const ref of refs.slice(0, 3)) names.push(await comfyNameForRef(ref));
-            const result = await runQueuedComfyGenerate({
-                prompt,
-                workflow_json:'Flux2-Klein.json',
-                type:'klein',
-                params:{
-                    "168": { text:prompt },
-                    "158": { noise_seed:Math.floor(Math.random() * 1000000) },
-                    "278": { image:names[0] || "" },
-                    "270": { image:names[1] || "" },
-                    "292": { image:names[2] || "" },
-                    "313": { value:Boolean(names[1]) },
-                    "314": { value:Boolean(names[2]) }
-                },
-                client_id:CLIENT_ID
-            }, {cascadeTargetId});
-            run.request = requestMetaFromResult(result);
-            if(result.error) throw new Error(actionFailed('canvas.comfyEdit', result.error));
-            if(!result.images?.length) throw new Error(noReturnedImage('canvas.comfyEdit'));
-            images = node.editUpscale ? await runComfyUpscale(result.images?.[0], node.editUpscaleRes || 2048, {cascadeTargetId}) : result.images || [];
+            images = await runComfyEditMode(node, run, prompt, refs, cascadeTargetId);
         }
         const meta = collectRunMeta(out, pendingId);
         if(out) out._pending = (out._pending||[]).filter(p => p.id !== pendingId);
