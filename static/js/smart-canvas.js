@@ -8949,6 +8949,60 @@ function bindMinimaxPaneResize(el, node, focusMinimaxNode){
     });
 }
 
+
+function bindMinimaxMaterialCards(el, node, focusMinimaxNode){
+    el.querySelectorAll('[data-minimax-use-material]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            const item = node.materials?.[Number(btn.dataset.minimaxUseMaterial)];
+            const seg = smartMinimaxSelectedSegment(node);
+            if(!item?.url || !seg) return;
+            pushUndo();
+            smartMinimaxSetSegmentResult(node, seg, item);
+            render();
+            scheduleSave();
+        };
+    });
+    el.querySelectorAll('[data-minimax-download-material]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            const item = node.materials?.[Number(btn.dataset.minimaxDownloadMaterial)];
+            if(item?.url) downloadPreviewFile(item);
+        };
+    });
+    el.querySelectorAll('[data-minimax-material]').forEach(card => {
+        card.addEventListener('mousedown', e => {
+            if(e.target.closest('[data-minimax-download-material], [data-minimax-use-material]')) return;
+            focusMinimaxNode();
+            e.stopPropagation();
+        });
+        card.addEventListener('dragstart', e => {
+            focusMinimaxNode();
+            e.dataTransfer.effectAllowed = 'copy';
+            e.dataTransfer.setData('application/x-minimax-material', JSON.stringify({nodeId:node.id, index:Number(card.dataset.minimaxMaterial)}));
+            const item = node.materials?.[Number(card.dataset.minimaxMaterial)];
+            if(item?.url) e.dataTransfer.setData('text/plain', item.url);
+        });
+    });
+    el.querySelectorAll('[data-minimax-asset]').forEach(card => {
+        card.addEventListener('mousedown', e => {
+            focusMinimaxNode();
+            e.stopPropagation();
+        });
+        card.addEventListener('dragstart', e => {
+            focusMinimaxNode();
+            e.dataTransfer.effectAllowed = 'copy';
+            e.dataTransfer.setData('application/x-minimax-asset', JSON.stringify({nodeId:node.id, index:Number(card.dataset.minimaxAsset), copy:Boolean(e.altKey)}));
+            const item = node.assetRefs?.[Number(card.dataset.minimaxAsset)];
+            if(item?.url) e.dataTransfer.setData('text/plain', item.url);
+        });
+    });
+}
+
 function bindMinimaxNodeControls(el, node){
     const focusMinimaxNode = () => {
         if(selectedId === node.id && selectedIds.length === 0 && selectedImage.nodeId === '') return;
@@ -9167,56 +9221,7 @@ function bindMinimaxNodeControls(el, node){
             await exportMinimaxTimeline(node);
         };
     });
-    el.querySelectorAll('[data-minimax-use-material]').forEach(btn => {
-        btn.onclick = e => {
-            e.preventDefault();
-            e.stopPropagation();
-            focusMinimaxNode();
-            const item = node.materials?.[Number(btn.dataset.minimaxUseMaterial)];
-            const seg = smartMinimaxSelectedSegment(node);
-            if(!item?.url || !seg) return;
-            pushUndo();
-            smartMinimaxSetSegmentResult(node, seg, item);
-            render();
-            scheduleSave();
-        };
-    });
-    el.querySelectorAll('[data-minimax-download-material]').forEach(btn => {
-        btn.onclick = e => {
-            e.preventDefault();
-            e.stopPropagation();
-            focusMinimaxNode();
-            const item = node.materials?.[Number(btn.dataset.minimaxDownloadMaterial)];
-            if(item?.url) downloadPreviewFile(item);
-        };
-    });
-    el.querySelectorAll('[data-minimax-material]').forEach(card => {
-        card.addEventListener('mousedown', e => {
-            if(e.target.closest('[data-minimax-download-material], [data-minimax-use-material]')) return;
-            focusMinimaxNode();
-            e.stopPropagation();
-        });
-        card.addEventListener('dragstart', e => {
-            focusMinimaxNode();
-            e.dataTransfer.effectAllowed = 'copy';
-            e.dataTransfer.setData('application/x-minimax-material', JSON.stringify({nodeId:node.id, index:Number(card.dataset.minimaxMaterial)}));
-            const item = node.materials?.[Number(card.dataset.minimaxMaterial)];
-            if(item?.url) e.dataTransfer.setData('text/plain', item.url);
-        });
-    });
-    el.querySelectorAll('[data-minimax-asset]').forEach(card => {
-        card.addEventListener('mousedown', e => {
-            focusMinimaxNode();
-            e.stopPropagation();
-        });
-        card.addEventListener('dragstart', e => {
-            focusMinimaxNode();
-            e.dataTransfer.effectAllowed = 'copy';
-            e.dataTransfer.setData('application/x-minimax-asset', JSON.stringify({nodeId:node.id, index:Number(card.dataset.minimaxAsset), copy:Boolean(e.altKey)}));
-            const item = node.assetRefs?.[Number(card.dataset.minimaxAsset)];
-            if(item?.url) e.dataTransfer.setData('text/plain', item.url);
-        });
-    });
+    bindMinimaxMaterialCards(el, node, focusMinimaxNode);
     el.querySelectorAll('[data-minimax-toggle-mute]').forEach(btn => {
         btn.onclick = e => {
             e.preventDefault();
