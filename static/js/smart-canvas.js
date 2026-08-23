@@ -769,6 +769,15 @@ function apiErrorMessage(data, fallback='请求失败'){
         return fallback;
     }
 }
+async function smartRequestJson(url, init={}, fallback='请求失败'){
+    const response = await fetch(url, init);
+    if(!response.ok){
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.detail || fallback);
+    }
+    return response.json();
+}
+
 async function responseErrorMessage(response, fallback='请求失败'){
     try {
         const data = await response.clone().json();
@@ -4739,14 +4748,11 @@ async function saveCurrentPromptAsTemplate(){
         : String(nodes.find(n => n.id === promptTemplatePanel?.dataset.nodeId)?.text || '').trim();
     if(!text){ toast(tr('smart.promptPresetEmpty')); return; }
     try {
-        const data = await fetch('/api/prompt-libraries/items', {
+        const data = await smartRequestJson('/api/prompt-libraries/items', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({library_id:library.id, name:defaultPromptPresetName(text), category:promptTemplateCategory === 'all' ? 'custom' : promptTemplateCategory, positive:text, scene:'我的提示词预设'})
-        }).then(async r => {
-            if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '保存失败');
-            return r.json();
-        });
+        }, '保存失败');
         promptLibraries = data.library?.libraries || promptLibraries;
         activePromptLibraryId = library.id;
         promptTemplateCategory = data.item?.category || 'custom';
@@ -4763,14 +4769,11 @@ async function createBlankPromptTemplate(){
     if(library.readonly){ toast('请选择可编辑的提示词库'); return; }
     const category = promptTemplateCategory && promptTemplateCategory !== 'all' ? promptTemplateCategory : 'custom';
     try {
-        const data = await fetch('/api/prompt-libraries/items', {
+        const data = await smartRequestJson('/api/prompt-libraries/items', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({library_id:library.id, name:tr('smart.tplNewTemplateName'), category, positive:'新提示词', scene:'我的提示词预设'})
-        }).then(async r => {
-            if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '创建失败');
-            return r.json();
-        });
+        }, '创建失败');
         promptLibraries = data.library?.libraries || promptLibraries;
         activePromptLibraryId = library.id;
         promptTemplateCategory = category;
@@ -4790,14 +4793,11 @@ async function savePromptTemplateEdit(){
     if(!name || !text){ toast(tr('smart.tplRequired')); return; }
     if(item.remote){
         try {
-            const data = await fetch(`/api/prompt-libraries/items/${encodeURIComponent(item.id)}`, {
+            const data = await smartRequestJson(`/api/prompt-libraries/items/${encodeURIComponent(item.id)}`, {
                 method:'PATCH',
                 headers:{'Content-Type':'application/json'},
                 body:JSON.stringify({library_id:item.libraryId || activePromptLibrary().id, name, category, positive:text, scene:item.scene || '', negative:item.negative || ''})
-            }).then(async r => {
-                if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '保存失败');
-                return r.json();
-            });
+            }, '保存失败');
             promptLibraries = data.library?.libraries || promptLibraries;
             promptTemplateSelectedId = data.item?.id || item.id;
         } catch(err) {
@@ -4831,10 +4831,7 @@ async function deletePromptTemplate(){
     if(!item) return;
     if(item.remote){
         try {
-            const data = await fetch(`/api/prompt-libraries/items/${encodeURIComponent(item.id)}`, {method:'DELETE'}).then(async r => {
-                if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '删除失败');
-                return r.json();
-            });
+            const data = await smartRequestJson(`/api/prompt-libraries/items/${encodeURIComponent(item.id)}`, {method:'DELETE'}, '删除失败');
             promptLibraries = data.library?.libraries || promptLibraries;
         } catch(err) {
             toast(err.message || '删除失败');
@@ -4861,10 +4858,10 @@ async function createPromptTemplateGroup(){
     // 系统库（readonly=false）也走后端新增分组，与素材库管理同步。
     if(lib && !lib.readonly){
         try {
-            const data = await fetch('/api/prompt-libraries/categories', {
+            const data = await smartRequestJson('/api/prompt-libraries/categories', {
                 method:'POST', headers:{'Content-Type':'application/json'},
                 body:JSON.stringify({name:String(name).trim().slice(0, 24), library_id:lib.id})
-            }).then(async r => { if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '新增分组失败'); return r.json(); });
+            }, '新增分组失败');
             promptLibraries = data.library?.libraries || promptLibraries;
             promptTemplateCategory = data.category?.id || promptTemplateCategory;
             renderPromptTemplatePanel({preserveScroll:false});
@@ -4886,10 +4883,10 @@ async function renamePromptTemplateGroup(groupId){
     // 系统库的内置分组也走后端重命名（后端已放开内置分组限制），两端同步。
     if(lib && !lib.readonly){
         try {
-            const data = await fetch(`/api/prompt-libraries/categories/${encodeURIComponent(groupId)}`, {
+            const data = await smartRequestJson(`/api/prompt-libraries/categories/${encodeURIComponent(groupId)}`, {
                 method:'PATCH', headers:{'Content-Type':'application/json'},
                 body:JSON.stringify({name:String(name).trim().slice(0, 24), library_id:lib.id})
-            }).then(async r => { if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '重命名失败'); return r.json(); });
+            }, '重命名失败');
             promptLibraries = data.library?.libraries || promptLibraries;
             renderPromptTemplatePanel();
         } catch(err){ if(typeof setStatus === 'function') setStatus(err.message || '重命名失败'); }
@@ -4905,8 +4902,7 @@ async function deletePromptTemplateGroup(groupId){
     if(lib && !lib.readonly){
         if(!window.confirm(tr('smart.tplDeleteGroupConfirm'))) return;
         try {
-            const data = await fetch(`/api/prompt-libraries/categories/${encodeURIComponent(groupId)}`, {method:'DELETE'})
-                .then(async r => { if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '删除失败'); return r.json(); });
+            const data = await smartRequestJson(`/api/prompt-libraries/categories/${encodeURIComponent(groupId)}`, {method:'DELETE'}, '删除失败');
             promptLibraries = data.library?.libraries || promptLibraries;
             if(promptTemplateCategory === groupId) promptTemplateCategory = 'all';
             renderPromptTemplatePanel({preserveScroll:false});
@@ -5632,14 +5628,11 @@ function beginAssetInlineRename(assetId){
         input.disabled = true;
         try {
             if(assetLibraryIsLocal() || item.file){
-                const data = await fetch('/api/local-assets/items', {
+                const data = await smartRequestJson('/api/local-assets/items', {
                     method:'PATCH',
                     headers:{'Content-Type':'application/json'},
                     body:JSON.stringify({path:item.file || item.id, name})
-                }).then(async r => {
-                    if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '重命名失败');
-                    return r.json();
-                });
+                }, '重命名失败');
                 localAssetLibrary = {items:Array.isArray(data.items) ? data.items : localAssetLibrary.items, tree:data.tree || localAssetLibrary.tree};
                 activeAssetCategoryId = data.item?.folder || activeAssetCategoryId;
                 if(data.old_path && data.item?.url){
@@ -5773,10 +5766,7 @@ async function addUrlToAssetLibrary(url, name=''){
     if(assetLibraryIsLocal()) return addUrlToLocalAssetLibrary(url, name);
     const cat = activeAssetCategory();
     if(!cat){ toast(tr('smart.assetNoFolder')); return; }
-    const data = await fetch('/api/asset-library/items', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({library_id:activeAssetLibraryId, category_id:cat.id, url, name})}).then(async r => {
-        if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || tr('smart.assetAddFail'));
-        return r.json();
-    });
+    const data = await smartRequestJson('/api/asset-library/items', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({library_id:activeAssetLibraryId, category_id:cat.id, url, name})}, tr('smart.assetAddFail'));
     setAssetLibraryFromResponse(data);
     toast(tr('smart.assetSaved'));
 }
@@ -5793,10 +5783,7 @@ async function addFilesToLocalAssetLibrary(files=[]){
     const form = new FormData();
     form.append('folder', localAssetFolderPath());
     supported.forEach(file => form.append('files', file, file.name || 'media'));
-    const data = await fetch('/api/local-assets/upload', {method:'POST', body:form}).then(async r => {
-        if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || tr('smart.assetAddFail'));
-        return r.json();
-    });
+    const data = await smartRequestJson('/api/local-assets/upload', {method:'POST', body:form}, tr('smart.assetAddFail'));
     const localData = await fetch('/api/local-assets').then(r => r.ok ? r.json() : {items:[], tree:null});
     setLocalAssetLibraryFromResponse(localData);
     renderAssetLibrary();
@@ -5810,14 +5797,11 @@ async function addLocalPathsToLocalAssetLibrary(paths=[]){
 async function addUrlItemsToLocalAssetLibrary(items=[]){
     const list = (items || []).filter(item => item?.url);
     if(!list.length) return [];
-    const data = await fetch('/api/local-assets/import-urls', {
+    const data = await smartRequestJson('/api/local-assets/import-urls', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({folder:localAssetFolderPath(), items:list.map(item => ({url:item.url, name:item.name || smartImageNameFromUrl(item.url)}))})
-    }).then(async r => {
-        if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || tr('smart.assetAddFail'));
-        return r.json();
-    });
+    }, tr('smart.assetAddFail'));
     setLocalAssetLibraryFromResponse(data);
     renderAssetLibrary();
     toast(`已保存 ${data.count || 0} 个本地素材`);
@@ -5831,14 +5815,11 @@ async function deleteLocalAssetFromPanel(itemId){
         || (localAssetLibrary.items || []).find(x => x.id === itemId || x.file === itemId);
     if(!item) return;
     try {
-        const data = await fetch('/api/local-assets/delete', {
+        const data = await smartRequestJson('/api/local-assets/delete', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({names:[item.file || item.id]})
-        }).then(async r => {
-            if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '删除失败');
-            return r.json();
-        });
+        }, '删除失败');
         const localData = await fetch('/api/local-assets').then(r => r.ok ? r.json() : {items:[], tree:null});
         setLocalAssetLibraryFromResponse(localData);
         renderAssetLibrary();
@@ -18353,14 +18334,11 @@ if(assetAddCategoryBtn) assetAddCategoryBtn.onclick = async () => {
     const name = await openAssetNameDialog({title:tr('smart.assetNewFolder'), value:fallbackName, placeholder:fallbackName});
     if(!name) return;
     if(assetLibraryIsLocal()){
-        const data = await fetch('/api/local-assets/folders', {
+        const data = await smartRequestJson('/api/local-assets/folders', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({parent:localAssetFolderPath(), name})
-        }).then(async r => {
-            if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '新建文件夹失败');
-            return r.json();
-        });
+        }, '新建文件夹失败');
         setLocalAssetLibraryFromResponse(data);
         activeAssetCategoryId = data.folder?.path || activeAssetCategoryId;
         renderAssetLibrary();
@@ -18376,14 +18354,11 @@ if(assetRenameCategoryBtn) assetRenameCategoryBtn.onclick = async () => {
     const name = await openAssetNameDialog({title:tr('smart.assetRenameFolder'), value:cat.name || '', placeholder:currentAssetTabIsWorkflow() ? '工作流' : tr('smart.assetFolder')});
     if(!name) return;
     if(assetLibraryIsLocal()){
-        const data = await fetch('/api/local-assets/folders', {
+        const data = await smartRequestJson('/api/local-assets/folders', {
             method:'PATCH',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({path:cat.id || '', name})
-        }).then(async r => {
-            if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '重命名文件夹失败');
-            return r.json();
-        });
+        }, '重命名文件夹失败');
         setLocalAssetLibraryFromResponse(data);
         activeAssetCategoryId = data.folder?.path || activeAssetCategoryId;
         renderAssetLibrary();
@@ -18841,5 +18816,3 @@ window.onload = async () => {
     syncApiKindToggleVisibility();
     render();
 };
-
-
