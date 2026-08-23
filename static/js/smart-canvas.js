@@ -11062,6 +11062,9 @@ function previewCompareSources(){
     }
     return dedup;
 }
+function previewRunPromptHint(editing){
+    return editing.node?.runPrompt ? `${tr('smart.runPromptPrefix')}${editing.node.runPrompt.slice(0, 60)}` : '';
+}
 function refreshComparePanel(){
     const stage = document.getElementById('previewStage');
     const compareImg = document.getElementById('previewCompareImage');
@@ -11139,7 +11142,7 @@ function renderPreviewMedia(elements, editing, curUrl, isVideoPreview, onCurrent
             toggle.title = tr('smart.compareEmpty');
         }
         if(panoramaToggle) panoramaToggle.style.display = 'none';
-        updatePreviewMetaHint(editing.node?.runPrompt ? `${tr('smart.runPromptPrefix')}${editing.node.runPrompt.slice(0, 60)}` : '');
+        updatePreviewMetaHint(previewRunPromptHint(editing));
         return true;
     }
     if(currentVideo){
@@ -11202,7 +11205,7 @@ function renderPreviewCompareState(elements, editing){
         if(compareLayer) compareLayer.style.display = 'none';
         if(compareHandle) compareHandle.style.display = 'none';
         thumbsEl.style.display = 'none';
-        updatePreviewMetaHint(editing.node?.runPrompt ? `${tr('smart.runPromptPrefix')}${editing.node.runPrompt.slice(0, 60)}` : '');
+        updatePreviewMetaHint(previewRunPromptHint(editing));
         return;
     }
     const sliderActive = previewCompareOn && previewCompareIndex >= 0 && previewCompareIndex < sources.length;
@@ -11235,7 +11238,7 @@ function renderPreviewCompareState(elements, editing){
         thumbsEl.style.display = 'none';
         thumbsEl.innerHTML = '';
     }
-    let txt = editing.node?.runPrompt ? `${tr('smart.runPromptPrefix')}${editing.node.runPrompt.slice(0, 60)}` : '';
+    let txt = previewRunPromptHint(editing);
     if(previewCompareOn && !sliderActive) txt = (txt ? `${txt} · ` : '') + tr('smart.compareHintPick');
     updatePreviewMetaHint(txt);
 }
@@ -18832,5 +18835,4 @@ window.onload = async () => {
     syncApiKindToggleVisibility();
     render();
 };
-
 
