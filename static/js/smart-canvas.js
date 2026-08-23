@@ -795,7 +795,7 @@ async function responseErrorMessage(response, fallback='请求失败'){
         }
     }
 }
-function downloadBlob(blob, filename){
+function downloadBlob(blob, filename, revokeDelay=800){
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -803,7 +803,7 @@ function downloadBlob(blob, filename){
     document.body.appendChild(link);
     link.click();
     link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 800);
+    setTimeout(() => URL.revokeObjectURL(url), revokeDelay);
 }
 function smartWorkflowFilename(ext='json'){
     const title = (canvas?.title || document.getElementById('smartTitle')?.textContent || 'smart-canvas').trim();
@@ -6819,14 +6819,7 @@ async function zipDownloadImageItems(title, items){
         });
         if(!response.ok) throw new Error((await response.text()) || '批量下载失败');
         const blob = await response.blob();
-        const href = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = href;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(href), 1200);
+        downloadBlob(blob, filename, 1200);
     } catch(e) {
         toast((e.message || '批量下载失败').slice(0, 160));
     }
