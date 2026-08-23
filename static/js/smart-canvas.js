@@ -9268,6 +9268,21 @@ function bindMinimaxSegmentControls(el, node, focusMinimaxNode, bindFastMinimaxB
     });
 }
 
+
+function bindMinimaxControlFocusGuard(el, focusMinimaxNode){
+    el.querySelectorAll('button,input,select,textarea,video,audio').forEach(control => {
+        control.addEventListener('mousedown', e => {
+            focusMinimaxNode();
+            e.stopPropagation();
+        });
+        control.addEventListener('click', e => {
+            focusMinimaxNode();
+            e.stopPropagation();
+        });
+        control.addEventListener('dblclick', e => e.stopPropagation());
+    });
+}
+
 function bindMinimaxNodeControls(el, node){
     const focusMinimaxNode = () => {
         if(selectedId === node.id && selectedIds.length === 0 && selectedImage.nodeId === '') return;
@@ -9308,17 +9323,7 @@ function bindMinimaxNodeControls(el, node){
             action(e);
         }, true);
     };
-    el.querySelectorAll('button,input,select,textarea,video,audio').forEach(control => {
-        control.addEventListener('mousedown', e => {
-            focusMinimaxNode();
-            e.stopPropagation();
-        });
-        control.addEventListener('click', e => {
-            focusMinimaxNode();
-            e.stopPropagation();
-        });
-        control.addEventListener('dblclick', e => e.stopPropagation());
-    });
+    bindMinimaxControlFocusGuard(el, focusMinimaxNode);
     bindMinimaxEngineSelect(el, node, focusMinimaxNode);
     bindMinimaxSegmentControls(el, node, focusMinimaxNode, bindFastMinimaxButton, renderAfterMinimaxDelete);
     bindMinimaxParamInputs(el, node, focusMinimaxNode);
