@@ -2529,6 +2529,15 @@ function downloadUrl(url, filename='download'){
     link.click();
     link.remove();
 }
+function downloadBlob(blob, filename){
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1200);
+}
 async function exportWorkflowItems(ids){
     const items = (ids || []).map(id => findWorkflowItem(id)).filter(item => item?.url);
     if(!items.length) return;
@@ -2546,13 +2555,7 @@ async function exportWorkflowItems(ids){
     });
     if(!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || '导出工作流失败');
     const blob = await res.blob();
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'workflows.zip';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(link.href), 1200);
+    downloadBlob(blob, 'workflows.zip');
     setStatus(`已导出 ${items.length} 个工作流`);
 }
 async function downloadCanvasAssetItems(ids){
@@ -2575,13 +2578,7 @@ async function downloadCanvasAssetItems(ids){
     });
     if(!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || '下载画布资产失败');
     const blob = await res.blob();
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = items.length === 1 ? (items[0].name || 'canvas-asset') : 'canvas-assets.zip';
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(link.href), 1200);
+    downloadBlob(blob, items.length === 1 ? (items[0].name || 'canvas-asset') : 'canvas-assets.zip');
     setStatus(`已下载 ${items.length} 个画布资产`);
 }
 function assetDownloadName(item){
@@ -2637,13 +2634,7 @@ async function downloadSelectedAssets(){
         });
         if(!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || '下载失败');
         const blob = await res.blob();
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = 'assets.zip';
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(link.href), 1200);
+        downloadBlob(blob, 'assets.zip');
         setStatus(`已下载 ${items.length} 个素材`);
     } catch(err){
         showRequestError(err, '下载失败');
@@ -2669,13 +2660,7 @@ async function downloadSelectedLocalUploads(){
         });
         if(!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || '下载失败');
         const blob = await res.blob();
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = 'local-assets.zip';
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(link.href), 1200);
+        downloadBlob(blob, 'local-assets.zip');
         setStatus(`已下载 ${items.length} 个素材`);
     } catch(err){
         showRequestError(err, '下载失败');
