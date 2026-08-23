@@ -8612,6 +8612,33 @@ function bindLoopPromptControls(el, node){
     });
 }
 
+
+function bindLoopModeControls(el, node){
+    el.querySelectorAll('[data-loop-mode]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            node.mode = btn.dataset.loopMode === 'parallel' ? 'parallel' : 'serial';
+            render();
+            scheduleSave();
+        };
+    });
+    el.querySelectorAll('[data-loop-toggle]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            if(btn.dataset.loopToggle === 'image') node.imageInput = !node.imageInput;
+            if(btn.dataset.loopToggle === 'prompt') {
+                node.showPrompt = !node.showPrompt;
+                if(node.showPrompt && !smartLoopInputPromptItems(node).length && !smartLoopActivePromptFieldValues(node).length) setSmartLoopPromptFieldValues(node, [smartLoopDefaultPromptText()]);
+            }
+            fitSmartLoopNode(node);
+            render();
+            scheduleSave();
+        };
+    });
+}
+
 function bindLoopNodeControls(el, node){
     el.querySelectorAll('.loop-smart-control').forEach(control => {
         control.addEventListener('mousedown', e => e.stopPropagation());
@@ -8662,29 +8689,7 @@ function bindLoopNodeControls(el, node){
             setLoopNumber(input.dataset.loopNumberInput, input.value, true);
         };
     });
-    el.querySelectorAll('[data-loop-mode]').forEach(btn => {
-        btn.onclick = e => {
-            e.preventDefault();
-            e.stopPropagation();
-            node.mode = btn.dataset.loopMode === 'parallel' ? 'parallel' : 'serial';
-            render();
-            scheduleSave();
-        };
-    });
-    el.querySelectorAll('[data-loop-toggle]').forEach(btn => {
-        btn.onclick = e => {
-            e.preventDefault();
-            e.stopPropagation();
-            if(btn.dataset.loopToggle === 'image') node.imageInput = !node.imageInput;
-            if(btn.dataset.loopToggle === 'prompt') {
-                node.showPrompt = !node.showPrompt;
-                if(node.showPrompt && !smartLoopInputPromptItems(node).length && !smartLoopActivePromptFieldValues(node).length) setSmartLoopPromptFieldValues(node, [smartLoopDefaultPromptText()]);
-            }
-            fitSmartLoopNode(node);
-            render();
-            scheduleSave();
-        };
-    });
+    bindLoopModeControls(el, node);
     bindLoopPromptControls(el, node);
     el.querySelectorAll('[data-loop-run]').forEach(btn => {
         btn.onclick = e => {
