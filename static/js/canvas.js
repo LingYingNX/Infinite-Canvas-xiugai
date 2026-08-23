@@ -860,6 +860,14 @@ function apiErrorMessage(data, fallback='请求失败'){
         return fallback;
     }
 }
+async function canvasRequestJson(url, init={}, fallback='请求失败'){
+    const response = await fetch(url, init);
+    if(!response.ok){
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.detail || fallback);
+    }
+    return response.json();
+}
 async function responseErrorMessage(response, fallback='请求失败'){
     try {
         const data = await response.clone().json();
@@ -6912,14 +6920,11 @@ async function addUrlToCanvasAssetLibrary(url, name=''){
     const cat = activeCanvasAssetCategory();
     if(!cat){ setStatus('请先创建资产分组'); return; }
     if(String(cat.type || 'image').toLowerCase() === 'workflow'){ setStatus('当前是工作流分组，请切换到图片分组保存媒体'); return; }
-    const data = await fetch('/api/asset-library/items', {
+    const data = await canvasRequestJson('/api/asset-library/items', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({library_id:activeCanvasAssetLibraryId, category_id:cat.id, url, name})
-    }).then(async r => {
-        if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '保存失败');
-        return r.json();
-    });
+    }, '保存失败');
     canvasAssetLibrary = data.library || canvasAssetLibrary;
     renderCanvasAssetLibrary();
     setStatus('已保存到资产库');
@@ -7307,7 +7312,7 @@ async function saveCurrentCanvasPromptAsTemplate(){
     const text = currentCanvasPromptTemplateNodeText();
     if(!text){ setStatus('当前提示词为空'); return; }
     try {
-        const data = await fetch('/api/prompt-libraries/items', {
+        const data = await canvasRequestJson('/api/prompt-libraries/items', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({
@@ -7317,10 +7322,7 @@ async function saveCurrentCanvasPromptAsTemplate(){
                 positive:text,
                 scene:'我的提示词预设'
             })
-        }).then(async r => {
-            if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '保存失败');
-            return r.json();
-        });
+        }, '保存失败');
         activePromptLibraryId = lib.id;
         syncCanvasPromptTemplateMutation(data, data.item?.id || '');
         promptTemplateEditing = true;
@@ -7334,14 +7336,11 @@ async function createBlankCanvasPromptTemplate(){
     if(!currentCanvasPromptTemplateLibraryEditable()){ setStatus('请选择可编辑的提示词库'); return; }
     const category = promptTemplateCategory && promptTemplateCategory !== 'all' ? promptTemplateCategory : 'custom';
     try {
-        const data = await fetch('/api/prompt-libraries/items', {
+        const data = await canvasRequestJson('/api/prompt-libraries/items', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({library_id:lib.id, name:'新模板', category, positive:'新提示词', scene:'我的提示词预设'})
-        }).then(async r => {
-            if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '创建失败');
-            return r.json();
-        });
+        }, '创建失败');
         activePromptLibraryId = lib.id;
         promptTemplateCategory = category;
         syncCanvasPromptTemplateMutation(data, data.item?.id || '');
@@ -7375,14 +7374,11 @@ async function saveCanvasPromptTemplateEdit(){
             renderPromptTemplateModal();
             return;
         }
-        const data = await fetch(`/api/prompt-libraries/items/${encodeURIComponent(item.id)}`, {
+        const data = await canvasRequestJson(`/api/prompt-libraries/items/${encodeURIComponent(item.id)}`, {
             method:'PATCH',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({library_id:item.libraryId || lib.id, name, category, scene:item.scene || '', positive, negative:item.negative || ''})
-        }).then(async r => {
-            if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '保存失败');
-            return r.json();
-        });
+        }, '保存失败');
         // 迁移：清掉这条系统模板的旧本地覆盖，避免它盖住刚同步到后端的最新内容。
         const legacyKey = item.sourceId || item.id;
         if(canvasPromptTemplateOverrides.editedBuiltins && canvasPromptTemplateOverrides.editedBuiltins[legacyKey]){
@@ -7411,10 +7407,7 @@ async function deleteCanvasPromptTemplate(){
             renderPromptTemplateModal();
             return;
         }
-        const data = await fetch(`/api/prompt-libraries/items/${encodeURIComponent(item.id)}`, {method:'DELETE'}).then(async r => {
-            if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '删除失败');
-            return r.json();
-        });
+        const data = await canvasRequestJson(`/api/prompt-libraries/items/${encodeURIComponent(item.id)}`, {method:'DELETE'}, '删除失败');
         canvasPromptLibraries = data.library?.libraries || canvasPromptLibraries;
         refreshCanvasPromptTemplatesFromLibraries();
         promptTemplateSelectedId = '';
@@ -7451,10 +7444,10 @@ async function createCanvasPromptTemplateGroup(){
     const lib = activeCanvasPromptLibrary();
     if(lib && lib.id !== 'system'){
         try {
-            const data = await fetch('/api/prompt-libraries/categories', {
+            const data = await canvasRequestJson('/api/prompt-libraries/categories', {
                 method:'POST', headers:{'Content-Type':'application/json'},
                 body:JSON.stringify({name:String(name).trim().slice(0, 24), library_id:lib.id})
-            }).then(async r => { if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '新增分组失败'); return r.json(); });
+            }, '新增分组失败');
             canvasPromptLibraries = data.library?.libraries || canvasPromptLibraries;
             promptTemplateCategory = data.category?.id || promptTemplateCategory;
             refreshCanvasPromptTemplatesFromLibraries();
@@ -7476,10 +7469,10 @@ async function renameCanvasPromptTemplateGroup(groupId){
     if(!String(name || '').trim()) return;
     if(lib && lib.id !== 'system'){
         try {
-            const data = await fetch(`/api/prompt-libraries/categories/${encodeURIComponent(groupId)}`, {
+            const data = await canvasRequestJson(`/api/prompt-libraries/categories/${encodeURIComponent(groupId)}`, {
                 method:'PATCH', headers:{'Content-Type':'application/json'},
                 body:JSON.stringify({name:String(name).trim().slice(0, 24), library_id:lib.id})
-            }).then(async r => { if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '重命名失败'); return r.json(); });
+            }, '重命名失败');
             canvasPromptLibraries = data.library?.libraries || canvasPromptLibraries;
             refreshCanvasPromptTemplatesFromLibraries();
             renderPromptTemplateModal();
@@ -7495,8 +7488,7 @@ async function deleteCanvasPromptTemplateGroup(groupId){
     if(lib && lib.id !== 'system'){
         if(!window.confirm(tr('smart.tplDeleteGroupConfirm'))) return;
         try {
-            const data = await fetch(`/api/prompt-libraries/categories/${encodeURIComponent(groupId)}`, {method:'DELETE'})
-                .then(async r => { if(!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '删除失败'); return r.json(); });
+            const data = await canvasRequestJson(`/api/prompt-libraries/categories/${encodeURIComponent(groupId)}`, {method:'DELETE'}, '删除失败');
             canvasPromptLibraries = data.library?.libraries || canvasPromptLibraries;
             if(promptTemplateCategory === groupId) promptTemplateCategory = 'all';
             refreshCanvasPromptTemplatesFromLibraries();
