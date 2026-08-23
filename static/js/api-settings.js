@@ -572,9 +572,6 @@ function normalizeRhWorkflowField(field){
 function normalizeFetchedRhWorkflowField(field){
     return {...normalizeRhWorkflowField(field), enabled:true};
 }
-function rhWorkflowGroupKey(field){
-    return `${field?.nodeId || ''}::${field?.group || ''}`;
-}
 function rhEditorSortedFields(fields){
     return [...(fields || [])].sort((a, b) => {
         const ak = rhWorkflowFieldKind(a);
@@ -1214,11 +1211,6 @@ function updateRhWorkflowEditorMeta(prop, value){
     if(prop === 'title') config.title = value;
     if(prop === 'description') config.description = value;
     withRhEditorScrollPreserved(() => renderRhMappedPreview());
-}
-function toggleRhWorkflowEditorGroup(groupId){
-    const expanded = rhWorkflowEditorState.expanded;
-    expanded[groupId] = expanded[groupId] === false;
-    withRhEditorScrollPreserved(() => renderRhWorkflowEditor());
 }
 function openRhWorkflowNodePopover(nodeId, anchorEl){
     const state = rhWorkflowEditorState;
