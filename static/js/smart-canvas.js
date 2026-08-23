@@ -7860,15 +7860,6 @@ function smartMinimaxBodyHtml(node){
         <button type="button" data-minimax-download-material="${index}" title="Download"><i data-lucide="download"></i></button>
         <button type="button" data-minimax-use-material="${index}" title="Use as current result"><i data-lucide="replace"></i></button>
     </div>`).join('') : `<div class="minimax-library-empty"><i data-lucide="inbox"></i><span>Output</span></div>`;
-    const segDuration = Math.max(0.5, Number(selected?.duration || node.duration || 8) || 8);
-    const aspectRatio = selected?.aspectRatio || node.aspectRatio || '16:9 (Widescreen)';
-    const megapixels = Number(selected?.megapixels || node.megapixels || 0.4);
-    const selectedIndex = Math.max(0, node.segments.findIndex(item => item.id === selected?.id));
-    const selectedRefs = refsForSegment(selected || {refItems:[]});
-    const selectedRefSummary = ['image','video','audio']
-        .map(kind => ({kind, count:selectedRefs.filter(item => item.kind === kind).length}))
-        .filter(item => item.count > 0);
-    const minimaxEngine = smartMinimaxEngine(node);
     return `<div class="minimax-card minimax-workbench">
         <div class="minimax-wb-toolbar">
             <div class="minimax-brand">
@@ -7911,6 +7902,32 @@ function smartMinimaxBodyHtml(node){
                     <div class="minimax-ref-track" data-minimax-ref-track="1" data-minimax-active-segment="${escapeAttr(selected?.id || '')}" style="--ref-lanes:${refLaneCount}"><div class="minimax-ref-content" style="width:${timelineWidth}">${refTrack}</div></div>
                     <div class="minimax-add-gutter minimax-ref-gutter"></div>
                 </div>
+                ${smartMinimaxCurrentPanelHtml(node)}
+            </div>
+        </div>
+    </div>`;
+}
+
+function smartMinimaxCurrentPanelHtml(node){
+    const selected = smartMinimaxSelectedSegment(node);
+    const fmt = value => {
+        const n = Number(value) || 0;
+        return n.toFixed(n % 1 ? 1 : 0);
+    };
+    const timeLabel = value => `${fmt(value)}s`;
+    const refsForSegment = seg => (seg.refItems || []).map((ref, refIndex) => ({...ref, __index:refIndex, kind:mediaKindForItem(ref)}))
+        .filter(item => item?.url)
+        .slice(0, SMART_MINIMAX_REF_IMAGE_MAX + SMART_MINIMAX_REF_VIDEO_MAX + SMART_MINIMAX_REF_AUDIO_MAX);
+    const segDuration = Math.max(0.5, Number(selected?.duration || node.duration || 8) || 8);
+    const aspectRatio = selected?.aspectRatio || node.aspectRatio || '16:9 (Widescreen)';
+    const megapixels = Number(selected?.megapixels || node.megapixels || 0.4);
+    const selectedIndex = Math.max(0, node.segments.findIndex(item => item.id === selected?.id));
+    const selectedRefs = refsForSegment(selected || {refItems:[]});
+    const selectedRefSummary = ['image','video','audio']
+        .map(kind => ({kind, count:selectedRefs.filter(item => item.kind === kind).length}))
+        .filter(item => item.count > 0);
+    const minimaxEngine = smartMinimaxEngine(node);
+    return `
                 <div class="minimax-current-panel">
                     <div class="minimax-current-head">
                         <div class="minimax-current-title"><span class="minimax-current-dot"></span><b>Clip ${selectedIndex + 1}</b><span>${timeLabel(Number(selected?.start || 0))} - ${timeLabel(Number(selected?.start || 0) + segDuration)}</span></div>
@@ -7936,9 +7953,7 @@ function smartMinimaxBodyHtml(node){
                         </div>
                     </div>
                 </div>
-            </div>
-        </div>
-    </div>`;
+    `;
 }
 
 function nodeBodyHtml(node, layout){
