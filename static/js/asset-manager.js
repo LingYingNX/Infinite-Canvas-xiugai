@@ -3237,6 +3237,105 @@ async function handleSelectionManageClick(event, target){
     return false;
 }
 
+
+async function handleLocalUploadClick(event, target){
+    const localUpPreview = target.closest?.('[data-localup-preview]');
+    if(localUpPreview){ showDetailPreview('localup', localUpPreview.dataset.localupPreview || ''); return true; }
+    if(target.closest?.('[data-localup-upload]')){ uploadInput?.click(); return true; }
+    if(target.closest?.('[data-localup-folder-new]')){ await createLocalUploadFolder(); return true; }
+    if(target.closest?.('[data-localup-folder-rename]')){ await renameLocalUploadFolder(); return true; }
+    const localUpFolder = target.closest?.('[data-localup-folder]');
+    if(localUpFolder){
+        activeLocalUploadFolder = localUpFolder.dataset.localupFolder || '';
+        activeLocalUploadClassFilter = '';
+        selectedLocalUploadId = '';
+        selectedLocalUploadIds.clear();
+        pendingBatchDelete = '';
+        render();
+        return true;
+    }
+    if(target.closest?.('[data-localup-class-root]')){
+        if(!localUploadClassEntries().length) setStatus('暂无智能分类，请先选择图片并点击“智能分类”');
+        return true;
+    }
+    const localUpClassGroup = target.closest?.('[data-localup-class-group]');
+    if(localUpClassGroup){
+        const groupId = localUpClassGroup.dataset.localupClassGroup || '';
+        openLocalUploadClassGroup = openLocalUploadClassGroup === groupId ? '' : groupId;
+        render();
+        return true;
+    }
+    const localUpClass = target.closest?.('[data-localup-class-filter]');
+    if(localUpClass){
+        const nextFilter = localUpClass.dataset.localupClassFilter || '';
+        activeLocalUploadClassFilter = activeLocalUploadClassFilter === nextFilter ? '' : nextFilter;
+        // 不再联动展开左侧「智能分类」分组；也不再清空预览选中——切换分类时保持当前预览的那张图，
+        // 方便频繁切分类找相似图片。
+        selectedLocalUploadIds.clear();
+        pendingBatchDelete = '';
+        render();
+        return true;
+    }
+    if(target.closest?.('[data-localup-manage]')){
+        localUploadManageMode = !localUploadManageMode;
+        if(!localUploadManageMode) selectedLocalUploadIds.clear();
+        render();
+        return true;
+    }
+    if(target.closest?.('[data-localup-select-all]')){ localUploadItems().forEach(item => selectedLocalUploadIds.add(item.id)); render(); return true; }
+    if(target.closest?.('[data-localup-clear]')){ selectedLocalUploadIds.clear(); render(); return true; }
+    if(target.closest?.('[data-localup-download-selected]')){ await downloadSelectedLocalUploads(); return true; }
+    if(target.closest?.('[data-localup-canvas-selected]')){ copySelectedLocalUploadsToCanvas(); return true; }
+    if(target.closest?.('[data-localup-cut-selected]')){ setLocalUploadClipboard(); return true; }
+    if(target.closest?.('[data-localup-paste-clipboard]')){ await pasteLocalUploadClipboard(); return true; }
+    if(target.closest?.('[data-localup-clear-clipboard]')){ localUploadClipboard = null; render(); return true; }
+    const localUpDownload = target.closest?.('[data-localup-download]');
+    if(localUpDownload){ downloadLocalUpload(localUpDownload.dataset.localupDownload || ''); return true; }
+    if(target.closest?.('[data-localup-delete-selected]')){ await deleteLocalAssets([...selectedLocalUploadIds]); return true; }
+    if(target.closest?.('[data-local-classify-toggle]')){ localClassifyPromptOpen = !localClassifyPromptOpen; render(); return true; }
+    if(target.closest?.('[data-local-classify-run]')){ await runLocalUploadClassifySelected(); return true; }
+    if(target.closest?.('[data-local-caption-run]')){ await runLocalUploadCaptionSelected(); return true; }
+    const localUpCaptionOne = target.closest?.('[data-localup-caption-one]');
+    if(localUpCaptionOne){ await runLocalUploadCaptionOne(localUpCaptionOne.dataset.localupCaptionOne || ''); return true; }
+    const localUpCaptionCopy = target.closest?.('[data-localup-caption-copy]');
+    if(localUpCaptionCopy){ await copyLocalUploadCaption(localUpCaptionCopy.dataset.localupCaptionCopy || ''); return true; }
+    const localUpCaptionSave = target.closest?.('[data-localup-caption-save]');
+    if(localUpCaptionSave){ await saveLocalUploadCaption(localUpCaptionSave.dataset.localupCaptionSave || ''); return true; }
+    const localUpRename = target.closest?.('[data-localup-rename]');
+    if(localUpRename){ event.stopPropagation(); beginLocalUploadInlineRename(localUpRename.dataset.localupRename || ''); return true; }
+    const localUpDeleteOne = target.closest?.('[data-localup-delete-one]');
+    if(localUpDeleteOne){ await deleteLocalAssets([localUpDeleteOne.dataset.localupDeleteOne || '']); return true; }
+    const localUpCheck = target.closest?.('[data-localup-check]');
+    if(localUpCheck){
+        const id = localUpCheck.dataset.localupCheck || '';
+        const selected = toggleSelectionSet(selectedLocalUploadIds, id);
+        selectedLocalUploadId = selected ? id : (selectedLocalUploadId === id ? '' : selectedLocalUploadId);
+        pendingBatchDelete = '';
+        render();
+        return true;
+    }
+    const localUpOpen = target.closest?.('[data-localup-open]');
+    if(localUpOpen){ const it = findLocalUpload(localUpOpen.dataset.localupOpen || ''); if(it?.url) window.open(it.url, '_blank'); return true; }
+    const localUpCopy = target.closest?.('[data-localup-copy]');
+    if(localUpCopy){ const it = findLocalUpload(localUpCopy.dataset.localupCopy || ''); const ok = await copyTextToClipboard(it?.url || ''); setStatus(ok ? '已复制链接' : '复制失败'); return true; }
+    const localUpCard = target.closest?.('[data-localup-card]');
+    if(localUpCard){
+        const id = localUpCard.dataset.localupCard || '';
+        if(localUploadManageMode){
+            const selected = toggleSelectionSet(selectedLocalUploadIds, id);
+            selectedLocalUploadId = selected ? id : (selectedLocalUploadId === id ? '' : selectedLocalUploadId);
+            pendingBatchDelete = '';
+            render();
+        } else {
+            selectedLocalUploadId = id;
+            pendingBatchDelete = '';
+            refreshLocalUploadSelectionOnly();
+        }
+        return true;
+    }
+    return false;
+}
+
 async function handleClick(event){
     const target = event.target;
     if(await handleStorageSettingsClick(event, target)) return;
@@ -3257,100 +3356,7 @@ async function handleClick(event){
     if(canvasAssetPreview){ showDetailPreview('canvas-asset', canvasAssetPreview.dataset.canvasAssetPreview || ''); return; }
     const localPreview = target.closest?.('[data-local-preview]');
     if(localPreview){ showDetailPreview('local', localPreview.dataset.localPreview || ''); return; }
-    const localUpPreview = target.closest?.('[data-localup-preview]');
-    if(localUpPreview){ showDetailPreview('localup', localUpPreview.dataset.localupPreview || ''); return; }
-    if(target.closest?.('[data-localup-upload]')){ uploadInput?.click(); return; }
-    if(target.closest?.('[data-localup-folder-new]')){ await createLocalUploadFolder(); return; }
-    if(target.closest?.('[data-localup-folder-rename]')){ await renameLocalUploadFolder(); return; }
-    const localUpFolder = target.closest?.('[data-localup-folder]');
-    if(localUpFolder){
-        activeLocalUploadFolder = localUpFolder.dataset.localupFolder || '';
-        activeLocalUploadClassFilter = '';
-        selectedLocalUploadId = '';
-        selectedLocalUploadIds.clear();
-        pendingBatchDelete = '';
-        render();
-        return;
-    }
-    if(target.closest?.('[data-localup-class-root]')){
-        if(!localUploadClassEntries().length) setStatus('暂无智能分类，请先选择图片并点击“智能分类”');
-        return;
-    }
-    const localUpClassGroup = target.closest?.('[data-localup-class-group]');
-    if(localUpClassGroup){
-        const groupId = localUpClassGroup.dataset.localupClassGroup || '';
-        openLocalUploadClassGroup = openLocalUploadClassGroup === groupId ? '' : groupId;
-        render();
-        return;
-    }
-    const localUpClass = target.closest?.('[data-localup-class-filter]');
-    if(localUpClass){
-        const nextFilter = localUpClass.dataset.localupClassFilter || '';
-        activeLocalUploadClassFilter = activeLocalUploadClassFilter === nextFilter ? '' : nextFilter;
-        // 不再联动展开左侧「智能分类」分组；也不再清空预览选中——切换分类时保持当前预览的那张图，
-        // 方便频繁切分类找相似图片。
-        selectedLocalUploadIds.clear();
-        pendingBatchDelete = '';
-        render();
-        return;
-    }
-    if(target.closest?.('[data-localup-manage]')){
-        localUploadManageMode = !localUploadManageMode;
-        if(!localUploadManageMode) selectedLocalUploadIds.clear();
-        render();
-        return;
-    }
-    if(target.closest?.('[data-localup-select-all]')){ localUploadItems().forEach(item => selectedLocalUploadIds.add(item.id)); render(); return; }
-    if(target.closest?.('[data-localup-clear]')){ selectedLocalUploadIds.clear(); render(); return; }
-    if(target.closest?.('[data-localup-download-selected]')){ await downloadSelectedLocalUploads(); return; }
-    if(target.closest?.('[data-localup-canvas-selected]')){ copySelectedLocalUploadsToCanvas(); return; }
-    if(target.closest?.('[data-localup-cut-selected]')){ setLocalUploadClipboard(); return; }
-    if(target.closest?.('[data-localup-paste-clipboard]')){ await pasteLocalUploadClipboard(); return; }
-    if(target.closest?.('[data-localup-clear-clipboard]')){ localUploadClipboard = null; render(); return; }
-    const localUpDownload = target.closest?.('[data-localup-download]');
-    if(localUpDownload){ downloadLocalUpload(localUpDownload.dataset.localupDownload || ''); return; }
-    if(target.closest?.('[data-localup-delete-selected]')){ await deleteLocalAssets([...selectedLocalUploadIds]); return; }
-    if(target.closest?.('[data-local-classify-toggle]')){ localClassifyPromptOpen = !localClassifyPromptOpen; render(); return; }
-    if(target.closest?.('[data-local-classify-run]')){ await runLocalUploadClassifySelected(); return; }
-    if(target.closest?.('[data-local-caption-run]')){ await runLocalUploadCaptionSelected(); return; }
-    const localUpCaptionOne = target.closest?.('[data-localup-caption-one]');
-    if(localUpCaptionOne){ await runLocalUploadCaptionOne(localUpCaptionOne.dataset.localupCaptionOne || ''); return; }
-    const localUpCaptionCopy = target.closest?.('[data-localup-caption-copy]');
-    if(localUpCaptionCopy){ await copyLocalUploadCaption(localUpCaptionCopy.dataset.localupCaptionCopy || ''); return; }
-    const localUpCaptionSave = target.closest?.('[data-localup-caption-save]');
-    if(localUpCaptionSave){ await saveLocalUploadCaption(localUpCaptionSave.dataset.localupCaptionSave || ''); return; }
-    const localUpRename = target.closest?.('[data-localup-rename]');
-    if(localUpRename){ event.stopPropagation(); beginLocalUploadInlineRename(localUpRename.dataset.localupRename || ''); return; }
-    const localUpDeleteOne = target.closest?.('[data-localup-delete-one]');
-    if(localUpDeleteOne){ await deleteLocalAssets([localUpDeleteOne.dataset.localupDeleteOne || '']); return; }
-    const localUpCheck = target.closest?.('[data-localup-check]');
-    if(localUpCheck){
-        const id = localUpCheck.dataset.localupCheck || '';
-        const selected = toggleSelectionSet(selectedLocalUploadIds, id);
-        selectedLocalUploadId = selected ? id : (selectedLocalUploadId === id ? '' : selectedLocalUploadId);
-        pendingBatchDelete = '';
-        render();
-        return;
-    }
-    const localUpOpen = target.closest?.('[data-localup-open]');
-    if(localUpOpen){ const it = findLocalUpload(localUpOpen.dataset.localupOpen || ''); if(it?.url) window.open(it.url, '_blank'); return; }
-    const localUpCopy = target.closest?.('[data-localup-copy]');
-    if(localUpCopy){ const it = findLocalUpload(localUpCopy.dataset.localupCopy || ''); const ok = await copyTextToClipboard(it?.url || ''); setStatus(ok ? '已复制链接' : '复制失败'); return; }
-    const localUpCard = target.closest?.('[data-localup-card]');
-    if(localUpCard){
-        const id = localUpCard.dataset.localupCard || '';
-        if(localUploadManageMode){
-            const selected = toggleSelectionSet(selectedLocalUploadIds, id);
-            selectedLocalUploadId = selected ? id : (selectedLocalUploadId === id ? '' : selectedLocalUploadId);
-            pendingBatchDelete = '';
-            render();
-        } else {
-            selectedLocalUploadId = id;
-            pendingBatchDelete = '';
-            refreshLocalUploadSelectionOnly();
-        }
-        return;
-    }
+    if(await handleLocalUploadClick(event, target)) return;
     if(target.closest?.('[data-local-pick-folder]')){ await registerSharedFolder(); return; }
     const canvasAssetCat = target.closest?.('[data-canvas-asset-cat]');
     if(canvasAssetCat){
