@@ -9585,68 +9585,8 @@ function bindNodeThumbBadges(el, id){
         });
 }
 
-function bindNodeEvents(){
-    world.querySelectorAll('.image-node').forEach(el => {
-        const id = el.dataset.id;
-        const nodeForControls = nodes.find(n => n.id === id);
-        if(nodeForControls?.type === 'smart-prompt') bindPromptNodeControls(el, nodeForControls);
-        if(nodeForControls?.type === 'smart-loop') bindLoopNodeControls(el, nodeForControls);
-        if(nodeForControls?.type === 'smart-minimax') bindMinimaxNodeControls(el, nodeForControls);
-        if(nodeForControls?.type === 'smart-group') {
-            el.ondblclick = e => {
-                e.preventDefault();
-                e.stopPropagation();
-                selectedId = id;
-                selectedIds = [];
-                selectedImage = {nodeId:'', index:-1};
-                openCreateMenu(e, {groupId:id});
-            };
-        }
-        el.onclick = e => {
-            e.stopPropagation();
-            if(Date.now() < suppressNodeClickUntil) return;
-            const node = nodes.find(n => n.id === id);
-            hideRunTimerForNode(node);
-            const alreadySelected = selectedId === id && selectedIds.length === 0 && selectedImage.nodeId === '';
-            selectedId = id;
-            selectedIds = [];
-            selectedImage = {nodeId:'', index:-1};
-            if(smartCascadeAnyRunning()) smartCascadeSilentSelection = false;
-            if(alreadySelected){
-                syncSelectionUi();
-                updateComposer();
-                return;
-            }
-            render();
-        };
-        if(nodeForControls?.type !== 'smart-group') el.ondblclick = e => e.stopPropagation();
-        const nodeDrop = el.querySelector('.node-drop');
-        nodeDrop?.addEventListener('mousedown', e => {
-            if(e.button !== 0) return;
-            e.preventDefault();
-            e.stopPropagation();
-        }, true);
-        nodeDrop?.addEventListener('click', e => {
-            e.preventDefault(); e.stopPropagation();
-            hideRunTimerForNode(nodes.find(n => n.id === id));
-            selectedId = id;
-            selectedIds = [];
-            selectedImage = {nodeId:'', index:-1};
-            pendingGroupUploadPoint = null;
-            uploadTargetId = id;
-            syncSelectionUi();
-            updateComposer();
-            pickMediaForSmartNode(id);
-        });
-        bindNodeToolbarControls(el, id);
-        el.querySelectorAll('.image-delete').forEach(btn => {
-            btn.addEventListener('click', e => {
-                e.preventDefault(); e.stopPropagation();
-                deleteImage(id, Number(btn.dataset.imageIndex));
-            });
-        });
-        bindNodeThumbBadges(el, id);
 
+function bindNodeThumbSelection(el, id){
         el.querySelectorAll('.thumb-item,.image-wrap').forEach(item => {
             const thumbTarget = () => {
                 const targetNodeId = item.dataset.refNodeId || id;
@@ -9752,6 +9692,71 @@ function bindNodeEvents(){
                 capturePendingUndo();
             });
         });
+}
+
+function bindNodeEvents(){
+    world.querySelectorAll('.image-node').forEach(el => {
+        const id = el.dataset.id;
+        const nodeForControls = nodes.find(n => n.id === id);
+        if(nodeForControls?.type === 'smart-prompt') bindPromptNodeControls(el, nodeForControls);
+        if(nodeForControls?.type === 'smart-loop') bindLoopNodeControls(el, nodeForControls);
+        if(nodeForControls?.type === 'smart-minimax') bindMinimaxNodeControls(el, nodeForControls);
+        if(nodeForControls?.type === 'smart-group') {
+            el.ondblclick = e => {
+                e.preventDefault();
+                e.stopPropagation();
+                selectedId = id;
+                selectedIds = [];
+                selectedImage = {nodeId:'', index:-1};
+                openCreateMenu(e, {groupId:id});
+            };
+        }
+        el.onclick = e => {
+            e.stopPropagation();
+            if(Date.now() < suppressNodeClickUntil) return;
+            const node = nodes.find(n => n.id === id);
+            hideRunTimerForNode(node);
+            const alreadySelected = selectedId === id && selectedIds.length === 0 && selectedImage.nodeId === '';
+            selectedId = id;
+            selectedIds = [];
+            selectedImage = {nodeId:'', index:-1};
+            if(smartCascadeAnyRunning()) smartCascadeSilentSelection = false;
+            if(alreadySelected){
+                syncSelectionUi();
+                updateComposer();
+                return;
+            }
+            render();
+        };
+        if(nodeForControls?.type !== 'smart-group') el.ondblclick = e => e.stopPropagation();
+        const nodeDrop = el.querySelector('.node-drop');
+        nodeDrop?.addEventListener('mousedown', e => {
+            if(e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+        }, true);
+        nodeDrop?.addEventListener('click', e => {
+            e.preventDefault(); e.stopPropagation();
+            hideRunTimerForNode(nodes.find(n => n.id === id));
+            selectedId = id;
+            selectedIds = [];
+            selectedImage = {nodeId:'', index:-1};
+            pendingGroupUploadPoint = null;
+            uploadTargetId = id;
+            syncSelectionUi();
+            updateComposer();
+            pickMediaForSmartNode(id);
+        });
+        bindNodeToolbarControls(el, id);
+        el.querySelectorAll('.image-delete').forEach(btn => {
+            btn.addEventListener('click', e => {
+                e.preventDefault(); e.stopPropagation();
+                deleteImage(id, Number(btn.dataset.imageIndex));
+            });
+        });
+        bindNodeThumbBadges(el, id);
+
+        bindNodeThumbSelection(el, id);
         el.querySelector('.node-resize-handle')?.addEventListener('mousedown', e => {
             if(e.button !== 0) return;
             e.preventDefault(); e.stopPropagation();
