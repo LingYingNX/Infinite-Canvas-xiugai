@@ -8434,56 +8434,8 @@ function clearPortDragVisual(){
     world.querySelectorAll('.node-port.is-active').forEach(el => el.classList.remove('is-active'));
     world.querySelectorAll('.image-node.port-hover').forEach(el => el.classList.remove('port-hover'));
 }
-function bindPromptNodeControls(el, node){
-    el.querySelectorAll('.prompt-node-control, .prompt-node-pill').forEach(control => {
-        control.addEventListener('mousedown', e => e.stopPropagation());
-        control.addEventListener('click', e => e.stopPropagation());
-        control.addEventListener('dblclick', e => e.stopPropagation());
-    });
-    const textEl = el.querySelector('.prompt-node-text');
-    if(textEl) {
-        bindScrollableText(textEl);
-        textEl.oninput = e => {
-            const prevExtra = promptNodeSplitExtraHeight(node);
-            node.text = e.target.value;
-            refreshPromptNodeSegmentsUi(el, node);
-            if(node.promptSplitEnabled === true){
-                syncPromptNodeHeightForSplit(node, prevExtra);
-                updateNodeElementDuringResize(node);
-            }
-            scheduleSave();
-        };
-    }
-    const separatorEl = el.querySelector('.prompt-node-separator');
-    if(separatorEl) {
-        separatorEl.oninput = e => {
-            const prevExtra = promptNodeSplitExtraHeight(node);
-            node.promptSeparator = e.target.value || ';';
-            refreshPromptNodeSegmentsUi(el, node);
-            syncPromptNodeHeightForSplit(node, prevExtra);
-            updateNodeElementDuringResize(node);
-            scheduleSave();
-        };
-    }
-    const splitToggle = el.querySelector('.prompt-split-toggle');
-    if(splitToggle) splitToggle.onclick = e => {
-        e.preventDefault();
-        e.stopPropagation();
-        const prevExtra = promptNodeSplitExtraHeight(node);
-        node.promptSplitEnabled = node.promptSplitEnabled !== true;
-        if(node.promptSplitEnabled){
-            node.promptSeparator = promptNodeSeparator(node);
-        }
-        syncPromptNodeHeightForSplit(node, prevExtra);
-        render();
-        scheduleSave();
-    };
-    const presetEdit = el.querySelector('.prompt-preset-edit');
-    if(presetEdit) presetEdit.onclick = e => {
-        e.preventDefault();
-        e.stopPropagation();
-        editPromptPresetForNode(node);
-    };
+
+function bindPromptLlmControls(el, node){
     const toggle = el.querySelector('.prompt-llm-toggle');
     if(toggle) toggle.onclick = e => {
         e.preventDefault(); e.stopPropagation();
@@ -8543,6 +8495,59 @@ function bindPromptNodeControls(el, node){
         document.body.classList.add('smart-node-resize', 'smart-prompt-split-resize');
         capturePendingUndo();
     });
+}
+
+function bindPromptNodeControls(el, node){
+    el.querySelectorAll('.prompt-node-control, .prompt-node-pill').forEach(control => {
+        control.addEventListener('mousedown', e => e.stopPropagation());
+        control.addEventListener('click', e => e.stopPropagation());
+        control.addEventListener('dblclick', e => e.stopPropagation());
+    });
+    const textEl = el.querySelector('.prompt-node-text');
+    if(textEl) {
+        bindScrollableText(textEl);
+        textEl.oninput = e => {
+            const prevExtra = promptNodeSplitExtraHeight(node);
+            node.text = e.target.value;
+            refreshPromptNodeSegmentsUi(el, node);
+            if(node.promptSplitEnabled === true){
+                syncPromptNodeHeightForSplit(node, prevExtra);
+                updateNodeElementDuringResize(node);
+            }
+            scheduleSave();
+        };
+    }
+    const separatorEl = el.querySelector('.prompt-node-separator');
+    if(separatorEl) {
+        separatorEl.oninput = e => {
+            const prevExtra = promptNodeSplitExtraHeight(node);
+            node.promptSeparator = e.target.value || ';';
+            refreshPromptNodeSegmentsUi(el, node);
+            syncPromptNodeHeightForSplit(node, prevExtra);
+            updateNodeElementDuringResize(node);
+            scheduleSave();
+        };
+    }
+    const splitToggle = el.querySelector('.prompt-split-toggle');
+    if(splitToggle) splitToggle.onclick = e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const prevExtra = promptNodeSplitExtraHeight(node);
+        node.promptSplitEnabled = node.promptSplitEnabled !== true;
+        if(node.promptSplitEnabled){
+            node.promptSeparator = promptNodeSeparator(node);
+        }
+        syncPromptNodeHeightForSplit(node, prevExtra);
+        render();
+        scheduleSave();
+    };
+    const presetEdit = el.querySelector('.prompt-preset-edit');
+    if(presetEdit) presetEdit.onclick = e => {
+        e.preventDefault();
+        e.stopPropagation();
+        editPromptPresetForNode(node);
+    };
+    bindPromptLlmControls(el, node);
     const runEl = el.querySelector('.prompt-node-run');
     if(runEl) runEl.onclick = e => { e.preventDefault(); e.stopPropagation(); runPromptLLMNode(node.id); };
 }
