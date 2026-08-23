@@ -16,6 +16,13 @@ function applyLanguage(){
 }
 function refreshIcons(){ if(window.lucide) lucide.createIcons(); }
 
+async function comfyRequestJson(url, init={}, fallback='请求失败'){
+    const response = await fetch(url, init);
+    const data = await response.json().catch(() => ({}));
+    if(!response.ok) throw new Error(data?.detail || fallback);
+    return data;
+}
+
 const TYPES = [
     { v:'text', zh:'文本', en:'Text' },
     { v:'textarea', zh:'多行文本', en:'Textarea' },
@@ -238,13 +245,11 @@ async function saveComfyInstances(){
     if(!cleaned.length){ alert('请至少填一个 ComfyUI 后端地址'); return; }
     setStatus('保存中...');
     try {
-        const res = await fetch('/api/comfyui/instances', {
+        const data = await comfyRequestJson('/api/comfyui/instances', {
             method:'PUT',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({ instances: cleaned })
-        });
-        if(!res.ok) throw new Error((await res.json()).detail || '保存失败');
-        const data = await res.json();
+        }, '保存失败');
         comfyInstances = data.instances || cleaned;
         renderComfyInstances();
         try { new BroadcastChannel('studio-api').postMessage({ type: 'comfy-instances-changed' }); } catch(e) {}
@@ -1265,13 +1270,11 @@ async function onRun(){
     try {
         const baseFields = workspaceMode === 'canvas' ? fieldsFromMiniCanvas() : {...previewValues};
         const runFields = applyActiveRandomValues(baseFields);
-        const res = await fetch(`/api/workflows/${encodeURIComponent(selectedName)}/run`, {
+        const data = await comfyRequestJson(`/api/workflows/${encodeURIComponent(selectedName)}/run`, {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({ fields:runFields, config:currentConfig, client_id:'workflow-test' })
-        });
-        if(!res.ok) throw new Error((await res.json()).detail || tr('comfy.runFailed'));
-        const data = await res.json();
+        }, tr('comfy.runFailed'));
         runResult = data.images?.[0] || null;
         renderPreview();
         renderWorkspaceView();
@@ -1314,13 +1317,11 @@ async function onUpload(event){
         const baseName = file.name.replace(/\.json$/i, '');
         const inputName = prompt(tr('comfy.namePrompt'), baseName);
         if(!inputName) return;
-        const data = await fetch('/api/workflows', {
+        const result = await comfyRequestJson('/api/workflows', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({ name:inputName, workflow })
-        });
-        const result = await data.json();
-        if(!data.ok) throw new Error(result.detail || tr('comfy.uploadFailed'));
+        }, tr('comfy.uploadFailed'));
         await loadList();
         selectWorkflow(result.name);
         setStatus(tr('comfy.uploaded') + result.name);
