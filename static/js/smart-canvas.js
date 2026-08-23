@@ -7778,6 +7778,27 @@ function smartGroupBodyHtml(node){
         ${members.length ? '' : `<div class="smart-group-empty"><i data-lucide="plus"></i><span>拖入图片自动收进分组</span></div>`}
     </div>`;
 }
+function smartMinimaxAssetsHtml(node){
+    const libraryW = Math.max(178, Math.min(420, Number(node.minimaxLibraryW || 178)));
+    const refAssets = uniqueReferenceImages([
+        ...node.segments.flatMap(seg => (seg.refItems || []).map(ref => ({...ref, kind:mediaKindForItem(ref), segmentId:seg.id}))),
+        ...['image','video','audio'].flatMap(kind => (node.refs?.[kind] || []).map(ref => ({...ref, kind}))),
+        ...inputImagesFor(node).filter(ref => ref?.url && ['image','video','audio'].includes(mediaKindForItem(ref))).map(ref => ({...ref, kind:mediaKindForItem(ref)}))
+    ]).filter(item => item?.url).slice(0, 36);
+    node.assetRefs = refAssets;
+    const materials = (node.materials || []).filter(item => item?.url).slice(0, 24);
+    const assetHtml = refAssets.length ? refAssets.map((item, index) => `<div class="minimax-material-card minimax-asset-item" draggable="true" data-minimax-asset="${index}" title="${escapeAttr(item.name || smartMinimaxLabelForKind(mediaKindForItem(item)))}">
+        ${smartMinimaxLightMediaHtml(item, smartMinimaxLabelForKind(mediaKindForItem(item)))}
+        <span>${escapeHtml(smartMinimaxLabelForKind(mediaKindForItem(item)))}</span>
+    </div>`).join('') : `<div class="minimax-library-empty"><i data-lucide="database"></i><span>Assets</span></div>`;
+    const materialHtml = materials.length ? materials.map((item, index) => `<div class="minimax-material-card minimax-output-item" draggable="true" data-minimax-material="${index}" title="${escapeAttr(item.name || '??')}">
+        ${smartMinimaxLightMediaHtml(item, 'Output')}
+        <button type="button" data-minimax-download-material="${index}" title="Download"><i data-lucide="download"></i></button>
+        <button type="button" data-minimax-use-material="${index}" title="Use as current result"><i data-lucide="replace"></i></button>
+    </div>`).join('') : `<div class="minimax-library-empty"><i data-lucide="inbox"></i><span>Output</span></div>`;
+    return {libraryW, assetHtml, materialHtml};
+}
+
 function smartMinimaxBodyHtml(node){
     const selected = smartMinimaxSelectedSegment(node);
     const total = Math.max(Number(node.duration || 0), ...node.segments.map(seg => Number(seg.start || 0) + Number(seg.duration || 0)));
@@ -7840,26 +7861,11 @@ function smartMinimaxBodyHtml(node){
     const previewH = Math.max(130, Math.min(760, Number(node.minimaxPreviewH || 190)));
     const videoTrackH = Math.max(44, Math.min(160, Number(node.minimaxVideoTrackH || 70)));
     const refLaneH = Math.max(28, Math.min(160, Number(node.minimaxRefLaneH || 42)));
-    const libraryW = Math.max(178, Math.min(420, Number(node.minimaxLibraryW || 178)));
+    const assetsModule = smartMinimaxAssetsHtml(node);
+    const { libraryW, assetHtml, materialHtml } = assetsModule;
     const refTrackH = Math.max(72, refLaneCount * refLaneH);
     const timelineZoom = Math.max(1, Math.min(8, Number(node.timelineZoom || 1)));
     const timelineWidth = `${Math.round(timelineZoom * 100)}%`;
-    const refAssets = uniqueReferenceImages([
-        ...node.segments.flatMap(seg => (seg.refItems || []).map(ref => ({...ref, kind:mediaKindForItem(ref), segmentId:seg.id}))),
-        ...['image','video','audio'].flatMap(kind => (node.refs?.[kind] || []).map(ref => ({...ref, kind}))),
-        ...inputImagesFor(node).filter(ref => ref?.url && ['image','video','audio'].includes(mediaKindForItem(ref))).map(ref => ({...ref, kind:mediaKindForItem(ref)}))
-    ]).filter(item => item?.url).slice(0, 36);
-    node.assetRefs = refAssets;
-    const materials = (node.materials || []).filter(item => item?.url).slice(0, 24);
-    const assetHtml = refAssets.length ? refAssets.map((item, index) => `<div class="minimax-material-card minimax-asset-item" draggable="true" data-minimax-asset="${index}" title="${escapeAttr(item.name || smartMinimaxLabelForKind(mediaKindForItem(item)))}">
-        ${smartMinimaxLightMediaHtml(item, smartMinimaxLabelForKind(mediaKindForItem(item)))}
-        <span>${escapeHtml(smartMinimaxLabelForKind(mediaKindForItem(item)))}</span>
-    </div>`).join('') : `<div class="minimax-library-empty"><i data-lucide="database"></i><span>Assets</span></div>`;
-    const materialHtml = materials.length ? materials.map((item, index) => `<div class="minimax-material-card minimax-output-item" draggable="true" data-minimax-material="${index}" title="${escapeAttr(item.name || '??')}">
-        ${smartMinimaxLightMediaHtml(item, 'Output')}
-        <button type="button" data-minimax-download-material="${index}" title="Download"><i data-lucide="download"></i></button>
-        <button type="button" data-minimax-use-material="${index}" title="Use as current result"><i data-lucide="replace"></i></button>
-    </div>`).join('') : `<div class="minimax-library-empty"><i data-lucide="inbox"></i><span>Output</span></div>`;
     return `<div class="minimax-card minimax-workbench">
         <div class="minimax-wb-toolbar">
             <div class="minimax-brand">
@@ -18835,4 +18841,5 @@ window.onload = async () => {
     syncApiKindToggleVisibility();
     render();
 };
+
 
