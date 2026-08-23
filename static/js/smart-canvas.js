@@ -8812,6 +8812,50 @@ function bindMinimaxPromptAndRun(el, node, focusMinimaxNode){
     });
 }
 
+
+function bindMinimaxTimelinePlay(el, node, focusMinimaxNode){
+    el.querySelectorAll('[data-minimax-play-timeline]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            const media = el.querySelector('[data-minimax-player]');
+            if(!node.timelinePlaying && media){
+                media.muted = Boolean(node.minimaxMuted);
+                media.play?.().catch(() => {});
+            }
+            focusMinimaxNode();
+            if(node.timelinePlaying){
+                node.timelinePlaying = false;
+                btn.innerHTML = '<i data-lucide="play"></i>';
+                smartMinimaxSyncPlayerDom(el, smartMinimaxSelectedSegment(node), Number(node.playhead || 0), false);
+                if(window.lucide) lucide.createIcons();
+                return;
+            }
+            node.timelinePlaying = true;
+            btn.innerHTML = '<i data-lucide="pause"></i>';
+            if(window.lucide) lucide.createIcons();
+            const total = smartMinimaxTimelineTotal(node);
+            const startTime = Math.min(Number(node.playhead || 0) || 0, Math.max(0, total - 0.01)) >= total - 0.01 ? 0 : (Number(node.playhead || 0) || 0);
+            const startedAt = performance.now();
+            smartMinimaxApplyTimelineTime(el, node, startTime, {syncPlayer:true, play:true});
+            const tick = now => {
+                if(!node.timelinePlaying || !el.isConnected) return;
+                const elapsed = (now - startedAt) / 1000;
+                let time = startTime + elapsed;
+                if(time >= total){
+                    time = total;
+                    node.timelinePlaying = false;
+                    btn.innerHTML = '<i data-lucide="play"></i>';
+                    if(window.lucide) lucide.createIcons();
+                }
+                smartMinimaxApplyTimelineTime(el, node, time, {syncPlayer:true, play:node.timelinePlaying});
+                if(node.timelinePlaying) requestAnimationFrame(tick);
+            };
+            requestAnimationFrame(tick);
+        };
+    });
+}
+
 function bindMinimaxNodeControls(el, node){
     const focusMinimaxNode = () => {
         if(selectedId === node.id && selectedIds.length === 0 && selectedImage.nodeId === '') return;
@@ -8968,46 +9012,7 @@ function bindMinimaxNodeControls(el, node){
     });
     bindMinimaxParamInputs(el, node, focusMinimaxNode);
     bindMinimaxPromptAndRun(el, node, focusMinimaxNode);
-    el.querySelectorAll('[data-minimax-play-timeline]').forEach(btn => {
-        btn.onclick = e => {
-            e.preventDefault();
-            e.stopPropagation();
-            const media = el.querySelector('[data-minimax-player]');
-            if(!node.timelinePlaying && media){
-                media.muted = Boolean(node.minimaxMuted);
-                media.play?.().catch(() => {});
-            }
-            focusMinimaxNode();
-            if(node.timelinePlaying){
-                node.timelinePlaying = false;
-                btn.innerHTML = '<i data-lucide="play"></i>';
-                smartMinimaxSyncPlayerDom(el, smartMinimaxSelectedSegment(node), Number(node.playhead || 0), false);
-                if(window.lucide) lucide.createIcons();
-                return;
-            }
-            node.timelinePlaying = true;
-            btn.innerHTML = '<i data-lucide="pause"></i>';
-            if(window.lucide) lucide.createIcons();
-            const total = smartMinimaxTimelineTotal(node);
-            const startTime = Math.min(Number(node.playhead || 0) || 0, Math.max(0, total - 0.01)) >= total - 0.01 ? 0 : (Number(node.playhead || 0) || 0);
-            const startedAt = performance.now();
-            smartMinimaxApplyTimelineTime(el, node, startTime, {syncPlayer:true, play:true});
-            const tick = now => {
-                if(!node.timelinePlaying || !el.isConnected) return;
-                const elapsed = (now - startedAt) / 1000;
-                let time = startTime + elapsed;
-                if(time >= total){
-                    time = total;
-                    node.timelinePlaying = false;
-                    btn.innerHTML = '<i data-lucide="play"></i>';
-                    if(window.lucide) lucide.createIcons();
-                }
-                smartMinimaxApplyTimelineTime(el, node, time, {syncPlayer:true, play:node.timelinePlaying});
-                if(node.timelinePlaying) requestAnimationFrame(tick);
-            };
-            requestAnimationFrame(tick);
-        };
-    });
+    bindMinimaxTimelinePlay(el, node, focusMinimaxNode);
     el.querySelectorAll('[data-minimax-scrub-track]').forEach(track => {
         track.addEventListener('wheel', e => {
             if(!e.ctrlKey) return;
