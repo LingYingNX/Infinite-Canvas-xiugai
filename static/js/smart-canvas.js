@@ -8639,12 +8639,8 @@ function bindLoopModeControls(el, node){
     });
 }
 
-function bindLoopNodeControls(el, node){
-    el.querySelectorAll('.loop-smart-control').forEach(control => {
-        control.addEventListener('mousedown', e => e.stopPropagation());
-        control.addEventListener('click', e => e.stopPropagation());
-        control.addEventListener('dblclick', e => e.stopPropagation());
-    });
+
+function bindLoopNumberControls(el, node){
     const loopNumberBounds = key => {
         if(key === 'loopStart') return {min:1, max:9999};
         if(key === 'imageBatchSize') return {min:1, max:100};
@@ -8689,6 +8685,15 @@ function bindLoopNodeControls(el, node){
             setLoopNumber(input.dataset.loopNumberInput, input.value, true);
         };
     });
+}
+
+function bindLoopNodeControls(el, node){
+    el.querySelectorAll('.loop-smart-control').forEach(control => {
+        control.addEventListener('mousedown', e => e.stopPropagation());
+        control.addEventListener('click', e => e.stopPropagation());
+        control.addEventListener('dblclick', e => e.stopPropagation());
+    });
+    bindLoopNumberControls(el, node);
     bindLoopModeControls(el, node);
     bindLoopPromptControls(el, node);
     el.querySelectorAll('[data-loop-run]').forEach(btn => {
