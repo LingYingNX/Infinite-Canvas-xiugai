@@ -6063,44 +6063,11 @@ function destroyLTXEditor(node){
 function isNodeDragSurface(target){
     return !isNodeControl(target) && !target.closest('.port, .resize-handle, .output-img-wrap');
 }
-function renderNode(node){
-    normalizeApiNodeLayout(node);
-    if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
-    const el = document.createElement('div');
-    const size = defaultNodeSize(node.type);
-    const hasFixedSize = Boolean(node.h || size.h);
-    el.className = `node ${node.type}-node ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
-    el.style.left = `${node.x}px`;
-    el.style.top = `${node.y}px`;
-    el.style.width = `${node.w || size.w}px`;
-    if(node.h || size.h) el.style.height = `${node.h || size.h}px`;
-    el.dataset.id = node.id;
-    el.onclick = (e) => {
-        e.stopPropagation();
-        if(isNodeControl(e.target)) return;
-        if(e.ctrlKey || e.metaKey) selected.has(node.id) ? selected.delete(node.id) : selected.add(node.id);
-        else if(!selected.has(node.id)) { selected.clear(); selected.add(node.id); }
-        refreshSelectionVisuals();
-    };
-    el.oncontextmenu = e => {
-    if(!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'output') return;
-        e.preventDefault();
-        e.stopPropagation();
-        if(node.type === 'output') openOutputNodeMenu(node.id, e.clientX, e.clientY);
-        else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
-    };
-    const title = node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'minimax' ? 'MiniMax H3' : node.type === 'midjourney' ? 'Midjourney' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
-    const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
-    // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
-    const showStatus = ['generator','midjourney','msgen','comfy','ltxDirector','llm','video','rh','minimax'].includes(node.type) && node.runStatus
-        && (node.runStatus !== 'failed' || node._cascadeFailed);
-    const statusHtml = showStatus ? (() => {
-        const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
-        return `<span class="node-run-status ${node.runStatus}"><span class="dot"></span>${escapeHtml(label)}${node._cascadeIdx?' '+node._cascadeIdx:''}</span>`;
-    })() : '';
-    el.innerHTML = `<div class="node-head"><span class="node-title">${displayTitle}</span><div style="display:flex;align-items:center;gap:8px">${statusHtml}<button onclick="deleteNodeFromButton('${node.id}', event)" class="text-gray-300 hover:text-red-500"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
-    const body = document.createElement('div');
-    body.className = 'node-body';
+function canvasNodeTitle(node){
+    return node.type === 'image' ? 'Image' : node.type === 'prompt' ? 'Prompt' : node.type === 'loop' ? tr('canvas.loopNode') : node.type === 'promptGroup' ? 'Prompts' : node.type === 'group' ? 'Group' : node.type === 'output' ? 'Output' : node.type === 'llm' ? 'LLM' : node.type === 'comfy' ? 'ComfyUI' : node.type === 'ltxDirector' ? tr('canvas.ltxDirector') : node.type === 'rh' ? 'RunningHub' : node.type === 'minimax' ? 'MiniMax H3' : node.type === 'midjourney' ? 'Midjourney' : node.type === 'msgen' ? tr('canvas.modelscopeGenerate') : node.type === 'video' ? tr('canvas.videoGenerateNode') : tr('canvas.apiGenerate');
+}
+
+function renderImageNodeBody(body, node){
     if(node.type === 'image') {
         if(node.url) {
             const missing = isMissingAssetUrl(node.url);
@@ -6189,7 +6156,83 @@ function renderNode(node){
             blank.ondragleave = e => { e.stopPropagation(); blank.classList.remove('drag-over'); };
             blank.ondrop = e => handleImageNodeDropEvent(e, node.id, blank);
         }
-    }
+}
+}
+
+function bindNodeElementEvents(el, node, body){
+    el.appendChild(body);
+    el.querySelectorAll('button, select, textarea, input').forEach(control => {
+        control.addEventListener('mousedown', e => e.stopPropagation(), true);
+        control.addEventListener('click', e => e.stopPropagation());
+    });
+    el.onmousedown = e => {
+        if(e.button !== 0 || !isNodeDragSurface(e.target)) return;
+        startNodeDrag(e, node);
+    };
+    const canInput = ['generator','midjourney','comfy','ltxDirector','output','llm','msgen','video','rh','minimax'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
+    const canOutput = ['image','prompt','loop','group','promptGroup','generator','midjourney','comfy','ltxDirector','llm','msgen','video','rh','minimax','output'].includes(node.type);
+    if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
+    if(canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"></div>`);
+    el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);
+    el.querySelector('.node-head').onmousedown = e => {
+        if(e.button !== 0) return;
+        if(isNodeControl(e.target)) return;
+        if(node.type === 'group' && e.detail >= 2 && groupImageItems(node).length){
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation?.();
+            openGroupLightbox(node.id);
+            return;
+        }
+        startNodeDrag(e, node);
+    };
+    el.querySelector('.resize-handle').onmousedown = e => { if(e.button === 0 && !e.shiftKey) startNodeResize(e, node); };
+    el.ondragstart = e => { e.preventDefault(); e.stopPropagation(); };
+    const out = el.querySelector('.port.out');
+    if(out) out.onmousedown = e => { if(e.button === 0 && !e.shiftKey) startLink(e, node.id, 'out'); };
+    const inp = el.querySelector('.port.in');
+    if(inp) inp.onmousedown = e => { if(e.button === 0 && !e.shiftKey) startLink(e, node.id, 'in'); };
+}
+
+function renderNode(node){
+    normalizeApiNodeLayout(node);
+    if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
+    const el = document.createElement('div');
+    const size = defaultNodeSize(node.type);
+    const hasFixedSize = Boolean(node.h || size.h);
+    el.className = `node ${node.type}-node ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
+    el.style.left = `${node.x}px`;
+    el.style.top = `${node.y}px`;
+    el.style.width = `${node.w || size.w}px`;
+    if(node.h || size.h) el.style.height = `${node.h || size.h}px`;
+    el.dataset.id = node.id;
+    el.onclick = (e) => {
+        e.stopPropagation();
+        if(isNodeControl(e.target)) return;
+        if(e.ctrlKey || e.metaKey) selected.has(node.id) ? selected.delete(node.id) : selected.add(node.id);
+        else if(!selected.has(node.id)) { selected.clear(); selected.add(node.id); }
+        refreshSelectionVisuals();
+    };
+    el.oncontextmenu = e => {
+    if(!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'output') return;
+        e.preventDefault();
+        e.stopPropagation();
+        if(node.type === 'output') openOutputNodeMenu(node.id, e.clientX, e.clientY);
+        else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
+    };
+    const title = canvasNodeTitle(node);
+    const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
+    // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
+    const showStatus = ['generator','midjourney','msgen','comfy','ltxDirector','llm','video','rh','minimax'].includes(node.type) && node.runStatus
+        && (node.runStatus !== 'failed' || node._cascadeFailed);
+    const statusHtml = showStatus ? (() => {
+        const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
+        return `<span class="node-run-status ${node.runStatus}"><span class="dot"></span>${escapeHtml(label)}${node._cascadeIdx?' '+node._cascadeIdx:''}</span>`;
+    })() : '';
+    el.innerHTML = `<div class="node-head"><span class="node-title">${displayTitle}</span><div style="display:flex;align-items:center;gap:8px">${statusHtml}<button onclick="deleteNodeFromButton('${node.id}', event)" class="text-gray-300 hover:text-red-500"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
+    const body = document.createElement('div');
+    body.className = 'node-body';
+    renderImageNodeBody(body, node);
     if(node.type === 'prompt') {
         const templateActive = promptTemplateModal?.classList.contains('open') && promptTemplateNodeId === node.id;
         body.innerHTML = `<div class="prompt-editor"><div class="prompt-toolbar"><button class="prompt-template-btn ${templateActive ? 'active' : ''}" type="button" data-prompt-template-open data-prompt-template-node-id="${escapeAttr(node.id)}" aria-pressed="${templateActive ? 'true' : 'false'}" title="${escapeAttr(tr('canvas.promptTemplateLibrary'))}"><i data-lucide="library"></i><span>${escapeHtml(tr('canvas.promptTemplateShort'))}</span></button>${promptCounterHtml(node.text || '')}</div><textarea placeholder="${tr('canvas.promptPlaceholder')}">${escapeHtml(node.text || '')}</textarea></div>`;
@@ -6261,38 +6304,7 @@ function renderNode(node){
         };
         body.querySelectorAll('.output-img-wrap').forEach(wrap => bindOutputWrap(wrap, node));
     }
-    el.appendChild(body);
-    el.querySelectorAll('button, select, textarea, input').forEach(control => {
-        control.addEventListener('mousedown', e => e.stopPropagation(), true);
-        control.addEventListener('click', e => e.stopPropagation());
-    });
-    el.onmousedown = e => {
-        if(e.button !== 0 || !isNodeDragSurface(e.target)) return;
-        startNodeDrag(e, node);
-    };
-    const canInput = ['generator','midjourney','comfy','ltxDirector','output','llm','msgen','video','rh','minimax'].includes(node.type) || (node.type === 'loop' && (node.imageInput || node.showPrompt));
-    const canOutput = ['image','prompt','loop','group','promptGroup','generator','midjourney','comfy','ltxDirector','llm','msgen','video','rh','minimax','output'].includes(node.type);
-    if(canInput) el.insertAdjacentHTML('beforeend', `<div class="port in" title="${tr('canvas.connectHere')}"></div>`);
-    if(canOutput) el.insertAdjacentHTML('beforeend', `<div class="port out" title="${tr('canvas.dragConnect')}"></div>`);
-    el.insertAdjacentHTML('beforeend', `<div class="resize-handle" title="${tr('canvas.resize')}"></div>`);
-    el.querySelector('.node-head').onmousedown = e => {
-        if(e.button !== 0) return;
-        if(isNodeControl(e.target)) return;
-        if(node.type === 'group' && e.detail >= 2 && groupImageItems(node).length){
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation?.();
-            openGroupLightbox(node.id);
-            return;
-        }
-        startNodeDrag(e, node);
-    };
-    el.querySelector('.resize-handle').onmousedown = e => { if(e.button === 0 && !e.shiftKey) startNodeResize(e, node); };
-    el.ondragstart = e => { e.preventDefault(); e.stopPropagation(); };
-    const out = el.querySelector('.port.out');
-    if(out) out.onmousedown = e => { if(e.button === 0 && !e.shiftKey) startLink(e, node.id, 'out'); };
-    const inp = el.querySelector('.port.in');
-    if(inp) inp.onmousedown = e => { if(e.button === 0 && !e.shiftKey) startLink(e, node.id, 'in'); };
+    bindNodeElementEvents(el, node, body);
     return el;
 }
 function bindOutputWrap(wrap, node){
