@@ -8694,20 +8694,8 @@ function bindLoopNodeControls(el, node){
         };
     });
 }
-function bindMinimaxNodeControls(el, node){
-    const focusMinimaxNode = () => {
-        if(selectedId === node.id && selectedIds.length === 0 && selectedImage.nodeId === '') return;
-        hideRunTimerForNode(node);
-        selectedId = node.id;
-        selectedIds = [];
-        selectedImage = {nodeId:'', index:-1};
-        if(smartCascadeAnyRunning()) smartCascadeSilentSelection = false;
-        syncSelectionUi();
-        updateComposer();
-    };
-    el.querySelectorAll('.minimax-library-list').forEach(scroller => {
-        scroller.addEventListener('wheel', e => e.stopPropagation(), {passive:true});
-    });
+
+function bindMinimaxDropHandlers(el, node, focusMinimaxNode){
     el.addEventListener('dragover', e => {
         const zone = smartMinimaxDropZoneFromEvent(el, e);
         if(!zone || !smartMinimaxDropAccepted(e.dataTransfer)) return;
@@ -8724,6 +8712,23 @@ function bindMinimaxNodeControls(el, node){
         focusMinimaxNode();
         handleMinimaxTimelineDrop(el, node, e, zone);
     }, true);
+}
+
+function bindMinimaxNodeControls(el, node){
+    const focusMinimaxNode = () => {
+        if(selectedId === node.id && selectedIds.length === 0 && selectedImage.nodeId === '') return;
+        hideRunTimerForNode(node);
+        selectedId = node.id;
+        selectedIds = [];
+        selectedImage = {nodeId:'', index:-1};
+        if(smartCascadeAnyRunning()) smartCascadeSilentSelection = false;
+        syncSelectionUi();
+        updateComposer();
+    };
+    el.querySelectorAll('.minimax-library-list').forEach(scroller => {
+        scroller.addEventListener('wheel', e => e.stopPropagation(), {passive:true});
+    });
+    bindMinimaxDropHandlers(el, node, focusMinimaxNode);
     let minimaxDeleteRenderQueued = false;
     const renderAfterMinimaxDelete = () => {
         if(minimaxDeleteRenderQueued) return;
