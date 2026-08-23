@@ -8263,6 +8263,122 @@ function bindGeneratorProviderModel(wrap, node, syncSizeControls, syncQualityCon
     };
 }
 
+function bindGeneratorQualityControls(wrap, node){
+    const qualitySelect = wrap.querySelector('.quality-select');
+    qualitySelect.onmousedown = e => e.stopPropagation();
+    qualitySelect.onclick = e => e.stopPropagation();
+    qualitySelect.onchange = e => {
+        e.stopPropagation();
+        node.quality = e.target.value;
+        scheduleSave();
+    };
+}
+
+function bindGeneratorRatioResolutionControls(wrap, node, syncSizeControls){
+    const ratioSelect = wrap.querySelector('.ratio');
+    const resolutionSelect = wrap.querySelector('.resolution');
+    const customRatioWInput = wrap.querySelector('.custom-ratio-w-input');
+    const customRatioHInput = wrap.querySelector('.custom-ratio-h-input');
+    const customWInput = wrap.querySelector('.custom-w-input');
+    const customHInput = wrap.querySelector('.custom-h-input');
+    ratioSelect.onmousedown = e => e.stopPropagation();
+    ratioSelect.onclick = e => e.stopPropagation();
+    ratioSelect.onchange = e => {
+        e.stopPropagation();
+        node.ratio = e.target.value;
+        normalizeApiNodeSizeChoice(node);
+        if(node.ratio !== 'custom' && node.ratio !== 'source') {
+            node.customRatio = '';
+            node.customRatioWidth = '';
+            node.customRatioHeight = '';
+        } else if(node.ratio === 'source') {
+            node.customRatio = '';
+            node.customRatioWidth = '';
+            node.customRatioHeight = '';
+        }
+        syncSizeControls();
+        scheduleSave();
+    };
+    resolutionSelect.onmousedown = e => e.stopPropagation();
+    resolutionSelect.onclick = e => e.stopPropagation();
+    resolutionSelect.onchange = e => {
+        e.stopPropagation();
+        node.resolution = e.target.value;
+        node._apiResolutionUserSet = true;
+        if(node.resolution === 'custom') {
+            node.ratio = '';
+        } else if(node.resolution === 'auto') {
+            if(!node.ratio) node.ratio = 'square';
+            node.customSize = '';
+            node.customWidth = '';
+            node.customHeight = '';
+        } else if(!node.ratio) {
+            node.ratio = 'square';
+            node.customSize = '';
+            node.customWidth = '';
+            node.customHeight = '';
+        } else {
+            node.customSize = '';
+            node.customWidth = '';
+            node.customHeight = '';
+        }
+        normalizeApiNodeSizeChoice(node);
+        syncSizeControls();
+        scheduleSave();
+    };
+    [customRatioWInput, customRatioHInput].forEach(input => {
+        input.onmousedown = e => e.stopPropagation();
+        input.onclick = e => e.stopPropagation();
+        input.oninput = e => {
+            node.customRatioWidth = customRatioWInput.value;
+            node.customRatioHeight = customRatioHInput.value;
+            node.customRatio = node.customRatioWidth && node.customRatioHeight ? `${node.customRatioWidth}:${node.customRatioHeight}` : '';
+            node.ratio = 'custom';
+            syncSizeControls();
+            scheduleSave();
+        };
+    });
+    [customWInput, customHInput].forEach(input => {
+        input.onmousedown = e => e.stopPropagation();
+        input.onclick = e => e.stopPropagation();
+        input.oninput = e => {
+            node.customWidth = customWInput.value;
+            node.customHeight = customHInput.value;
+            node.customSize = node.customWidth && node.customHeight ? `${node.customWidth}x${node.customHeight}` : '';
+            node.resolution = 'custom';
+            node._apiResolutionUserSet = true;
+            node.ratio = '';
+            syncSizeControls();
+            scheduleSave();
+        };
+    });
+}
+
+function bindGeneratorFitSizeButton(wrap, node, referenceImages, syncSizeControls){
+    const fitSizeBtn = wrap.querySelector('.fit-size-btn');
+    if(fitSizeBtn){
+        fitSizeBtn.onmousedown = e => e.stopPropagation();
+        fitSizeBtn.onclick = async e => {
+            e.stopPropagation();
+            const ref = referenceImages.find(item => item.url);
+            if(!ref) return;
+            try {
+                const dims = await getImageDimensions(ref.url);
+                node.customWidth = dims.width;
+                node.customHeight = dims.height;
+                node.customSize = `${dims.width}x${dims.height}`;
+                node.resolution = 'custom';
+                node._apiResolutionUserSet = true;
+                node.ratio = '';
+                syncSizeControls();
+                scheduleSave();
+            } catch(err) {
+                    showErrorModal(tr('canvas.imageReadFailed'));
+            }
+        };
+    }
+}
+
 function bindGeneratorSizeControls(wrap, node, referenceImages){
     const ratioSelect = wrap.querySelector('.ratio');
     const resolutionSelect = wrap.querySelector('.resolution');
@@ -8346,105 +8462,9 @@ function bindGeneratorSizeControls(wrap, node, referenceImages){
         if(node.ratio === 'source') updateSourceRatioFromFirstRef();
     };
     bindGeneratorProviderModel(wrap, node, syncSizeControls, syncQualityControls);
-    qualitySelect.onmousedown = e => e.stopPropagation();
-    qualitySelect.onclick = e => e.stopPropagation();
-    qualitySelect.onchange = e => {
-        e.stopPropagation();
-        node.quality = e.target.value;
-        scheduleSave();
-    };
-    ratioSelect.onmousedown = e => e.stopPropagation();
-    ratioSelect.onclick = e => e.stopPropagation();
-    ratioSelect.onchange = e => {
-        e.stopPropagation();
-        node.ratio = e.target.value;
-        normalizeApiNodeSizeChoice(node);
-        if(node.ratio !== 'custom' && node.ratio !== 'source') {
-            node.customRatio = '';
-            node.customRatioWidth = '';
-            node.customRatioHeight = '';
-        } else if(node.ratio === 'source') {
-            node.customRatio = '';
-            node.customRatioWidth = '';
-            node.customRatioHeight = '';
-        }
-        syncSizeControls();
-        scheduleSave();
-    };
-    resolutionSelect.onmousedown = e => e.stopPropagation();
-    resolutionSelect.onclick = e => e.stopPropagation();
-    resolutionSelect.onchange = e => {
-        e.stopPropagation();
-        node.resolution = e.target.value;
-        node._apiResolutionUserSet = true;
-        if(node.resolution === 'custom') {
-            node.ratio = '';
-        } else if(node.resolution === 'auto') {
-            if(!node.ratio) node.ratio = 'square';
-            node.customSize = '';
-            node.customWidth = '';
-            node.customHeight = '';
-        } else if(!node.ratio) {
-            node.ratio = 'square';
-            node.customSize = '';
-            node.customWidth = '';
-            node.customHeight = '';
-        } else {
-            node.customSize = '';
-            node.customWidth = '';
-            node.customHeight = '';
-        }
-        normalizeApiNodeSizeChoice(node);
-        syncSizeControls();
-        scheduleSave();
-    };
-    [customRatioWInput, customRatioHInput].forEach(input => {
-        input.onmousedown = e => e.stopPropagation();
-        input.onclick = e => e.stopPropagation();
-        input.oninput = e => {
-            node.customRatioWidth = customRatioWInput.value;
-            node.customRatioHeight = customRatioHInput.value;
-            node.customRatio = node.customRatioWidth && node.customRatioHeight ? `${node.customRatioWidth}:${node.customRatioHeight}` : '';
-            node.ratio = 'custom';
-            syncSizeControls();
-            scheduleSave();
-        };
-    });
-    [customWInput, customHInput].forEach(input => {
-        input.onmousedown = e => e.stopPropagation();
-        input.onclick = e => e.stopPropagation();
-        input.oninput = e => {
-            node.customWidth = customWInput.value;
-            node.customHeight = customHInput.value;
-            node.customSize = node.customWidth && node.customHeight ? `${node.customWidth}x${node.customHeight}` : '';
-            node.resolution = 'custom';
-            node._apiResolutionUserSet = true;
-            node.ratio = '';
-            syncSizeControls();
-            scheduleSave();
-        };
-    });
-    if(fitSizeBtn){
-        fitSizeBtn.onmousedown = e => e.stopPropagation();
-        fitSizeBtn.onclick = async e => {
-            e.stopPropagation();
-            const ref = referenceImages.find(item => item.url);
-            if(!ref) return;
-            try {
-                const dims = await getImageDimensions(ref.url);
-                node.customWidth = dims.width;
-                node.customHeight = dims.height;
-                node.customSize = `${dims.width}x${dims.height}`;
-                node.resolution = 'custom';
-                node._apiResolutionUserSet = true;
-                node.ratio = '';
-                syncSizeControls();
-                scheduleSave();
-            } catch(err) {
-                    showErrorModal(tr('canvas.imageReadFailed'));
-            }
-        };
-    }
+    bindGeneratorQualityControls(wrap, node);
+    bindGeneratorRatioResolutionControls(wrap, node, syncSizeControls);
+    bindGeneratorFitSizeButton(wrap, node, referenceImages, syncSizeControls);
     syncSizeControls();
 }
 
