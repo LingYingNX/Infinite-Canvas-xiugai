@@ -383,13 +383,11 @@ async function createProject(){
     const name = newProjectInput.value.trim() || L('新项目','New project');
     closeNewProject();
     try {
-        const res = await fetch('/api/projects', {
+        const data = await canvasListRequestJson('/api/projects', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name })
-        });
-        if(!res.ok) throw new Error('create project failed');
-        const data = await res.json();
+        }, 'create project failed');
         const proj = data.project;
         if(proj){
             projects.push(proj);
@@ -673,7 +671,7 @@ async function createCanvasOnBoard(title, kind, worldPt){
     const name = title || `${base} ${new Date().toLocaleTimeString(langIsEn() ? 'en-US' : 'zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
     closeCreateCard();
     try {
-        const res = await fetch('/api/canvases', {
+        const data = await canvasListRequestJson('/api/canvases', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -684,9 +682,7 @@ async function createCanvasOnBoard(title, kind, worldPt){
                 board_x: Math.round(worldPt.x),
                 board_y: Math.round(worldPt.y)
             })
-        });
-        if(!res.ok) throw new Error('create canvas failed');
-        const data = await res.json();
+        }, 'create canvas failed');
         const nc = data.canvas;
         if(nc){
             if(nc.project == null) nc.project = currentProjectId;
@@ -864,13 +860,20 @@ function downloadBlob(blob, filename){
     setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
+async function canvasListRequestJson(url, init={}, fallback='请求失败'){
+    const response = await fetch(url, init);
+    if(!response.ok){
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.detail || fallback);
+    }
+    return response.json();
+}
+
 async function exportCanvas(id){
     const c = canvases.find(x => x.id === id);
     setStatus(L('正在导出...','Exporting...'));
     try {
-        const res = await fetch(`/api/canvases/${encodeURIComponent(id)}`);
-        if(!res.ok) throw new Error('export failed');
-        const data = await res.json();
+        const data = await canvasListRequestJson(`/api/canvases/${encodeURIComponent(id)}`, 'export failed');
         const cv = data.canvas || data;
         const base = String((c?.title) || cv.title || 'canvas').replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 60) || 'canvas';
         const blob = new Blob([JSON.stringify(cv, null, 2)], { type: 'application/json' });
@@ -1019,9 +1022,7 @@ async function exportCanvasWithResources(id){
     const c = canvases.find(x => x.id === id);
     setStatus(L('正在收集资源...','Collecting assets...'));
     try {
-        const res = await fetch(`/api/canvases/${encodeURIComponent(id)}`);
-        if(!res.ok) throw new Error('export failed');
-        const data = await res.json();
+        const data = await canvasListRequestJson(`/api/canvases/${encodeURIComponent(id)}`, 'export failed');
         const cv = data.canvas || data;
         const base = safeExportBase((c?.title) || cv.title || 'canvas');
         const urls = collectCanvasResourceUrls(cv).slice(0, 1000);
@@ -1105,9 +1106,7 @@ async function moveCanvasToProject(id, projectId){
 async function copyCanvasToProject(id, projectId){
     const target = projects.find(p => p.id === projectId);
     try {
-        const res = await fetch(`/api/canvases/${encodeURIComponent(id)}`);
-        if(!res.ok) throw new Error('load failed');
-        const data = await res.json();
+        const data = await canvasListRequestJson(`/api/canvases/${encodeURIComponent(id)}`, 'load failed');
         const source = data.canvas;
         if(!source) throw new Error('load failed');
         const fd = new FormData();
@@ -1144,13 +1143,11 @@ async function copyCanvasToProject(id, projectId){
 /* ===== Card meta persist (POST /meta) ===== */
 async function persistMeta(id, patch){
     try {
-        const res = await fetch(`/api/canvases/${encodeURIComponent(id)}/meta`, {
+        const data = await canvasListRequestJson(`/api/canvases/${encodeURIComponent(id)}/meta`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(patch)
-        });
-        if(!res.ok) throw new Error('meta save failed');
-        const data = await res.json();
+        }, 'meta save failed');
         if(data.canvas){
             const idx = canvases.findIndex(x => x.id === id);
             if(idx >= 0) canvases[idx] = { ...canvases[idx], ...data.canvas };
@@ -1202,9 +1199,7 @@ function closeTrashView(){
 }
 async function loadTrash(){
     try {
-        const res = await fetch('/api/canvases/trash');
-        if(!res.ok) throw new Error('trash load failed');
-        const data = await res.json();
+        const data = await canvasListRequestJson('/api/canvases/trash', 'trash load failed');
         deletedCanvases = data.canvases || [];
         renderTrash();
         updateTrashBadge(deletedCanvases.length);
