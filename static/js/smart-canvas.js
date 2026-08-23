@@ -769,6 +769,10 @@ function apiErrorMessage(data, fallback='请求失败'){
         return fallback;
     }
 }
+async function fetchLocalAssetListData(){
+    const r = await fetch('/api/local-assets');
+    return r.ok ? r.json() : {items:[], tree:null};
+}
 async function smartRequestJson(url, init={}, fallback='请求失败'){
     const response = await fetch(url, init);
     if(!response.ok){
@@ -5784,7 +5788,7 @@ async function addFilesToLocalAssetLibrary(files=[]){
     form.append('folder', localAssetFolderPath());
     supported.forEach(file => form.append('files', file, file.name || 'media'));
     const data = await smartRequestJson('/api/local-assets/upload', {method:'POST', body:form}, tr('smart.assetAddFail'));
-    const localData = await fetch('/api/local-assets').then(r => r.ok ? r.json() : {items:[], tree:null});
+    const localData = await fetchLocalAssetListData();
     setLocalAssetLibraryFromResponse(localData);
     renderAssetLibrary();
     toast(`已保存 ${data.files?.length || 0} 个本地素材`);
@@ -5820,7 +5824,7 @@ async function deleteLocalAssetFromPanel(itemId){
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({names:[item.file || item.id]})
         }, '删除失败');
-        const localData = await fetch('/api/local-assets').then(r => r.ok ? r.json() : {items:[], tree:null});
+        const localData = await fetchLocalAssetListData();
         setLocalAssetLibraryFromResponse(localData);
         renderAssetLibrary();
         toast(data.deleted?.length ? '已删除本地素材' : '未找到要删除的本地素材');
