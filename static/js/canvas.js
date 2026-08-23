@@ -9150,35 +9150,33 @@ function renderMiniMaxBody(node){
     bindCascadeButtons(wrap, node.id);
     return wrap;
 }
-function bindMiniMaxWorkbench(wrap, node){
-    wrap.querySelectorAll('button,select,input,textarea,.minimax-tl-clip,.minimax-ref-clip,.minimax-material-card').forEach(el => {
-        el.onmousedown = e => e.stopPropagation();
-        el.onclick = el.onclick || (e => e.stopPropagation());
-    });
-    wrap.querySelectorAll('[data-minimax-pane-resize]').forEach(handle => {
-        handle.onmousedown = e => miniMaxStartPaneResize(e, node, handle.dataset.minimaxPaneResize);
-    });
-    const addRefToSegment = (seg, item) => {
-        if(!seg || !item?.url) return false;
-        const kind = mediaKindForRef(item);
-        const limits = {image:CANVAS_MINIMAX_REF_IMAGE_MAX, video:CANVAS_MINIMAX_REF_VIDEO_MAX, audio:CANVAS_MINIMAX_REF_AUDIO_MAX};
-        if(!limits[kind]) return false;
-        const current = miniMaxUniqueRefs(seg.refs || []);
-        if(current.some(ref => ref.url === item.url)) return false;
-        if(current.filter(ref => mediaKindForRef(ref) === kind).length >= limits[kind]) return false;
-        seg.refs = miniMaxUniqueRefs([...current, {...item, kind}]);
-        return true;
-    };
-    const assetsForNode = () => miniMaxUniqueRefs([...node.segments.flatMap(seg => seg.refs || []), ...miniMaxRefsForNode(node).refs]).slice(0, 36);
-    const resolveDroppedMiniMaxItem = dataTransfer => {
-        const assetIndex = Number(dataTransfer?.getData('application/x-canvas-minimax-asset-index'));
-        if(Number.isFinite(assetIndex)) return {item:assetsForNode()[assetIndex], mode:'ref'};
-        const materialIndex = Number(dataTransfer?.getData('application/x-canvas-minimax-material-index'));
-        if(Number.isFinite(materialIndex)) return {item:node.materials?.[materialIndex], mode:'result'};
-        const canvasUrl = dataTransfer?.getData('application/x-canvas-output-image') || dataTransfer?.getData('text/uri-list') || dataTransfer?.getData('text/plain') || '';
-        const url = String(canvasUrl || '').split(/\r?\n/).find(Boolean) || '';
-        return url ? {item:{url, name:canvasFileNameFromUrl(url) || 'asset', kind:mediaKindForRef({url})}, mode:'ref'} : null;
-    };
+function miniMaxAddRefToSegment(seg, item){
+    if(!seg || !item?.url) return false;
+    const kind = mediaKindForRef(item);
+    const limits = {image:CANVAS_MINIMAX_REF_IMAGE_MAX, video:CANVAS_MINIMAX_REF_VIDEO_MAX, audio:CANVAS_MINIMAX_REF_AUDIO_MAX};
+    if(!limits[kind]) return false;
+    const current = miniMaxUniqueRefs(seg.refs || []);
+    if(current.some(ref => ref.url === item.url)) return false;
+    if(current.filter(ref => mediaKindForRef(ref) === kind).length >= limits[kind]) return false;
+    seg.refs = miniMaxUniqueRefs([...current, {...item, kind}]);
+    return true;
+}
+
+function miniMaxAssetsForNode(node){
+    return miniMaxUniqueRefs([...node.segments.flatMap(seg => seg.refs || []), ...miniMaxRefsForNode(node).refs]).slice(0, 36);
+}
+
+function miniMaxResolveDroppedItem(node, dataTransfer){
+    const assetIndex = Number(dataTransfer?.getData('application/x-canvas-minimax-asset-index'));
+    if(Number.isFinite(assetIndex)) return {item:miniMaxAssetsForNode(node)[assetIndex], mode:'ref'};
+    const materialIndex = Number(dataTransfer?.getData('application/x-canvas-minimax-material-index'));
+    if(Number.isFinite(materialIndex)) return {item:node.materials?.[materialIndex], mode:'result'};
+    const canvasUrl = dataTransfer?.getData('application/x-canvas-output-image') || dataTransfer?.getData('text/uri-list') || dataTransfer?.getData('text/plain') || '';
+    const url = String(canvasUrl || '').split(/\r?\n/).find(Boolean) || '';
+    return url ? {item:{url, name:canvasFileNameFromUrl(url) || 'asset', kind:mediaKindForRef({url})}, mode:'ref'} : null;
+}
+
+function bindMiniMaxTrackInteractions(wrap, node){
     wrap.querySelectorAll('[data-minimax-scrub-track], .minimax-ruler, .minimax-video-track').forEach(track => {
         track.onmousedown = e => {
             if(e.button !== 0 || e.target.closest('button,.minimax-tl-clip,.minimax-ref-clip,.minimax-pane-resize')) return;
@@ -9204,6 +9202,9 @@ function bindMiniMaxWorkbench(wrap, node){
             window.addEventListener('blur', onUp, true);
         };
     });
+}
+
+function bindMiniMaxDropZones(wrap, node){
     wrap.querySelectorAll('[data-minimax-drop-segment], .minimax-ref-track, .minimax-video-track').forEach(zone => {
         zone.ondragover = e => { e.preventDefault(); e.stopPropagation(); zone.classList.add('drag-over'); };
         zone.ondragleave = e => { e.stopPropagation(); zone.classList.remove('drag-over'); };
@@ -9222,18 +9223,21 @@ function bindMiniMaxWorkbench(wrap, node){
             }
             segId = segId || node.selectedSegmentId;
             const seg = node.segments.find(item => item.id === segId) || miniMaxSelectedSegment(node);
-            const dropped = resolveDroppedMiniMaxItem(e.dataTransfer);
+            const dropped = miniMaxResolveDroppedItem(node, e.dataTransfer);
             if(!dropped?.item?.url || !seg) return;
             pushUndo();
             node.selectedSegmentId = seg.id;
             const intoVideoTrack = Boolean(zone.closest?.('.minimax-video-track,.minimax-tl-clip') || zone.classList?.contains('minimax-video-track') || zone.classList?.contains('minimax-tl-clip'));
             const intoRefTrack = Boolean(zone.closest?.('.minimax-ref-track,.minimax-ref-clip') || zone.classList?.contains('minimax-ref-track') || zone.classList?.contains('minimax-ref-clip'));
             if(dropped.mode === 'result' && intoVideoTrack && !intoRefTrack) miniMaxSetSegmentResult(node, seg, dropped.item);
-            else addRefToSegment(seg, dropped.item);
+            else miniMaxAddRefToSegment(seg, dropped.item);
             refreshNodes([node.id]);
             scheduleSave();
         };
     });
+}
+
+function bindMiniMaxSegmentSelection(wrap, node){
     wrap.querySelectorAll('[data-minimax-segment], [data-minimax-ref-segment]').forEach(el => {
         el.onclick = e => {
             if(e.target.closest('button')) return;
@@ -9245,6 +9249,9 @@ function bindMiniMaxWorkbench(wrap, node){
             scheduleSave();
         };
     });
+}
+
+function bindMiniMaxSegmentAddDelete(wrap, node){
     wrap.querySelectorAll('[data-minimax-add-segment]').forEach(btn => {
         btn.onclick = e => {
             e.stopPropagation();
@@ -9290,6 +9297,9 @@ function bindMiniMaxWorkbench(wrap, node){
             scheduleSave();
         };
     });
+}
+
+function bindMiniMaxPromptAndSelects(wrap, node){
     const prompt = wrap.querySelector('[data-minimax-prompt]');
     if(prompt){
         bindScrollableText(prompt);
@@ -9315,6 +9325,9 @@ function bindMiniMaxWorkbench(wrap, node){
             scheduleSave();
         };
     });
+}
+
+function bindMiniMaxSegmentNumber(wrap, node){
     wrap.querySelectorAll('[data-minimax-seg-number]').forEach(input => {
         input.oninput = input.onchange = e => {
             e.stopPropagation();
@@ -9334,6 +9347,9 @@ function bindMiniMaxWorkbench(wrap, node){
             scheduleSave();
         };
     });
+}
+
+function bindMiniMaxActions(wrap, node){
     wrap.querySelectorAll('[data-minimax-run]').forEach(btn => {
         btn.onclick = e => { e.stopPropagation(); runMiniMaxNode(node.id); };
     });
@@ -9376,6 +9392,23 @@ function bindMiniMaxWorkbench(wrap, node){
             if(video){ video.paused ? video.play?.().catch(() => {}) : video.pause?.(); }
         };
     });
+}
+
+function bindMiniMaxWorkbench(wrap, node){
+    wrap.querySelectorAll('button,select,input,textarea,.minimax-tl-clip,.minimax-ref-clip,.minimax-material-card').forEach(el => {
+        el.onmousedown = e => e.stopPropagation();
+        el.onclick = el.onclick || (e => e.stopPropagation());
+    });
+    wrap.querySelectorAll('[data-minimax-pane-resize]').forEach(handle => {
+        handle.onmousedown = e => miniMaxStartPaneResize(e, node, handle.dataset.minimaxPaneResize);
+    });
+    bindMiniMaxTrackInteractions(wrap, node);
+    bindMiniMaxDropZones(wrap, node);
+    bindMiniMaxSegmentSelection(wrap, node);
+    bindMiniMaxSegmentAddDelete(wrap, node);
+    bindMiniMaxPromptAndSelects(wrap, node);
+    bindMiniMaxSegmentNumber(wrap, node);
+    bindMiniMaxActions(wrap, node);
 }
 function renderPromptPreview(container, promptInputs){
     if(!container) return;
