@@ -4161,21 +4161,6 @@ function setImageNodeFromOutput(nodeId, url){
     render();
     scheduleSave();
 }
-function clearImageNode(nodeId, event=null){
-    if(event){
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation?.();
-    }
-    const node = nodes.find(n => n.id === nodeId);
-    if(!node || node.type !== 'image') return;
-    pushUndo();
-    node.url = '';
-    node.mediaKind = 'image';
-    node.name = '空白图片';
-    render();
-    scheduleSave();
-}
 function pickImageForNode(nodeId){
     pickMediaForNode(nodeId);
 }
@@ -6576,29 +6561,6 @@ function loopInputImageRefs(node, ctx=loopContext){
     const currentIndex = Math.max(1, Number(ctx?.index || startBase) || startBase);
     const start = Math.max(0, currentIndex - 1);
     return allRefs.slice(start, start + batchSize);
-}
-function videoRefsFromNode(node){
-    if(!node) return [];
-    if(node.type === 'image' && node.url && mediaKindForNode(node) === 'video') return [{url:node.url, name:node.name || 'video', role:node.role || '', kind:'video'}];
-    if(node.type === 'group'){
-        return (node.items || [])
-            .map(id => nodes.find(x => x.id === id))
-            .filter(x => x?.type === 'image' && x?.url && mediaKindForNode(x) === 'video')
-            .map(vid => ({url:vid.url, name:vid.name || 'video', role:vid.role || '', kind:'video'}));
-    }
-    if(node.type === 'output'){
-        return (node.images || [])
-            .map((item, i) => ({item, i}))
-            .filter(({item}) => mediaKindForOutputItem(item) === 'video')
-            .map(({item, i}) => {
-                const url = outputUrlValue(item);
-                if(!url) return null;
-                return {url, name:outputImageName(url) || `output-${i + 1}.mp4`, kind:'video', nodeId:node.id, outputIndex:i};
-            })
-            .filter(Boolean);
-    }
-    if(CANVAS_MEDIA_OUTPUT_TYPES.includes(node.type)) return generatedImageRefs(node).filter(ref => ref.kind === 'video');
-    return [];
 }
 function loopTokenLabel(token){
     if(token === '《计数》') return tr('canvas.counterToken');
@@ -9444,10 +9406,6 @@ async function ensureComfyWorkflow(name){
 function validRunningHubWorkflowId(workflowId){
     return String(workflowId || '').trim();
 }
-function currentRunningHubWorkflow(node){
-    const workflowId = validRunningHubWorkflowId(node.workflowId || '');
-    return runningHubWorkflowCache[workflowId] || null;
-}
 async function ensureRunningHubWorkflow(workflowId){
     workflowId = validRunningHubWorkflowId(workflowId);
     if(!workflowId) return null;
@@ -10477,101 +10435,6 @@ function bindRhParamControls(container, node){
         };
     });
 }
-async function rhFetchAppInfo(nodeId, showAlert=true){
-    const node = nodes.find(n => n.id === nodeId);
-    if(!node) return;
-    if(!String(node.webappId || '').trim()){
-        if(showAlert) alert(tr('canvas.rhNeedWebappId'));
-        return false;
-    }
-    node.rhFetching = true;
-    refreshNodes([node.id]);
-    try {
-        const res = await fetch(`/api/runninghub/app-info?webappId=${encodeURIComponent(node.webappId.trim())}`);
-        const data = await res.json();
-        if(!res.ok || data.success === false) throw new Error(data.detail || data.error || tr('canvas.rhFailed'));
-        node.rhAppInfo = data.data || {};
-        node.rhParams = node.rhParams || {};
-        (node.rhAppInfo.nodeInfoList || []).forEach(field => {
-            const key = rhParamKey(field.nodeId, field.fieldName);
-            if(!node.rhParams[key]) node.rhParams[key] = {value:rhDefaultValue(field)};
-        });
-        node.runStatus = '';
-        node.runError = '';
-        scheduleSave();
-        return true;
-    } catch(err) {
-        if(showAlert) alert(err.message || tr('canvas.rhFailed'));
-        return false;
-    } finally {
-        node.rhFetching = false;
-        refreshNodes([node.id]);
-    }
-}
-async function rhFetchWorkflowInfo(nodeId, showAlert=true){
-    const node = nodes.find(n => n.id === nodeId);
-    if(!node) return false;
-    if(!String(node.workflowId || '').trim()){
-        if(showAlert) alert(tr('canvas.rhNeedWorkflowId'));
-        return false;
-    }
-    node.rhFetching = true;
-    refreshNodes([node.id]);
-    try {
-        const saved = await ensureRunningHubWorkflow(node.workflowId.trim());
-        const res = await fetch(`/api/runninghub/workflow-info?workflowId=${encodeURIComponent(node.workflowId.trim())}`);
-        const data = await res.json();
-        if(!res.ok || data.success === false) throw new Error(data.detail || data.error || tr('canvas.rhFailed'));
-        const info = data.data || {};
-        const savedFields = Array.isArray(saved?.fields) ? saved.fields : [];
-        const mergedFields = savedFields.length
-            ? savedFields
-            : Array.isArray(info.nodeInfoList) ? info.nodeInfoList : [];
-        node.rhWorkflowInfo = {
-            workflowId:node.workflowId.trim(),
-            nodeInfoList:mergedFields,
-            raw:info.raw || null
-        };
-        node.rhParams = node.rhParams || {};
-        (node.rhWorkflowInfo.nodeInfoList || []).forEach(field => {
-            const key = rhParamKey(field.nodeId, field.fieldName);
-            if(!node.rhParams[key]) node.rhParams[key] = {value:rhDefaultValue(field)};
-        });
-        node.runStatus = '';
-        node.runError = '';
-        scheduleSave();
-        return true;
-    } catch(err) {
-        if(showAlert) alert(err.message || tr('canvas.rhFailed'));
-        return false;
-    } finally {
-        node.rhFetching = false;
-        refreshNodes([node.id]);
-    }
-}
-async function rhImportWorkflowJson(nodeId, file){
-    const node = nodes.find(n => n.id === nodeId);
-    if(!node || !file) return;
-    try {
-        const text = await file.text();
-        const json = JSON.parse(text);
-        const nodeInfoList = rhWorkflowNodeInfoList(json);
-        if(!nodeInfoList.length) throw new Error(tr('canvas.rhWorkflowJsonInvalid'));
-        node.rhMode = 'workflow';
-        node.rhWorkflowInfo = {fileName:file.name || 'api.json', nodeInfoList};
-        node.rhParams = node.rhParams || {};
-        nodeInfoList.forEach(field => {
-            const key = rhParamKey(field.nodeId, field.fieldName);
-            if(!node.rhParams[key]) node.rhParams[key] = {value:rhDefaultValue(field)};
-        });
-        node.runStatus = '';
-        node.runError = '';
-        render();
-        scheduleSave();
-    } catch(err) {
-        alert(err.message || tr('canvas.rhWorkflowJsonInvalid'));
-    }
-}
 async function rhUploadValueIfNeeded(value, node=null){
     const text = String(value || '').trim();
     if(!text) return '';
@@ -11443,62 +11306,6 @@ async function runMidjourneyModal(nodeId, maskRef){
         refreshRunNodes(node, out);
         scheduleSave();
         showErrorModal(node.runError, 'Midjourney');
-    }
-}
-async function runGeneratorLegacy(genId, opts={}){
-    const gen = nodes.find(n => n.id === genId);
-    if(!gen || (gen.running && !opts.cascade)) return;
-    const sources = orderedSources(gen, generatorSources(gen));
-    const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
-    const refs = imageRefsOnly(sources.flatMap(s => s.refs || []));
-    if(!prompt && !refs.length){ alert(tr('canvas.needPromptOrImage')); return; }
-    const count = Math.max(1, Math.min(8, Number(gen.count || 1)));
-    let out = outputForNode(gen, 460);
-    const pendingIds = Array.from({length:count}, () => uid('p'));
-    const run = runSnapshot(gen, prompt || 'Edit the reference images.', refs);
-    const requestSize = await generatorSizeForRun(gen, refs);
-    if(out) out._pending = [...(out._pending||[]), ...pendingIds.map(id => makePendingForRun(id, run, gen, {refs, requestSize}))];
-    if(!opts.cascade){
-        gen.running = true;
-        refreshRunNodes(gen, out);
-        setTimeout(() => { gen.running = false; refreshRunNodes(gen, out); }, 2000);
-    }
-    else refreshRunNodes(gen, out);
-    try {
-        const payload = {
-            prompt: prompt || 'Edit the reference images.',
-            provider_id:resolveImageProviderId(gen.apiProvider || 'comfly'),
-            model:resolveImageModel(gen.model),
-            size:requestSize,
-            aspect_ratio:API_RATIO_VALUES[gen.ratio] || (gen.ratio === 'custom' ? String(gen.customRatio || '').trim() : ''),
-            resolution:['1k','2k','4k'].includes(gen.resolution) ? gen.resolution : '',
-            reference_images:refs.slice(0, CANVAS_REFERENCE_IMAGE_MAX)
-        };
-        const quality = normalizedImageQuality(gen.quality);
-        if(quality) payload.quality = quality;
-        const results = await Promise.all(Array.from({length:count}, () => fetch('/api/online-image', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify(payload)
-        }).then(async r => { if(!r.ok) throw new Error(await responseErrorMessage(r, tr('canvas.generationFailed'))); return r.json(); })));
-        const images = results.flatMap(result => result.images || []);
-        const metas = collectRunMetas(out, pendingIds);
-        run.request = results[0] ? requestMetaFromResult(results[0]) : {};
-        if(out) out._pending = (out._pending||[]).filter(p => !pendingIds.includes(p.id));
-        appendOutputImages(out, images, refs[0], metas);
-        mergeGeneratedOutputs(gen, images, Boolean(opts.cascade));
-        addGenerationLog({run, outputs:images, runMs:Math.max(...metas.map(m => m.runMs || 0), 0)});
-        gen.runStatus = 'done'; gen.runError = '';
-        refreshRunNodes(gen, out);
-        scheduleSave();
-    } catch(err) {
-        const metas = collectRunMetas(out, pendingIds);
-        addGenerationLog({run, outputs:[], runMs:Math.max(...metas.map(m => m.runMs || 0), 0), error:err.message || String(err)});
-        if(out) out._pending = (out._pending||[]).filter(p => !pendingIds.includes(p.id));
-        gen.runStatus = 'failed'; gen.runError = err.message || String(err);
-        refreshRunNodes(gen, out);
-        if(opts.cascade) throw err;
-        showErrorModal(err.message || tr('canvas.generationFailed'), tr('canvas.apiFailed'));
     }
 }
 async function runVideoNode(nodeId, opts={}){
@@ -12817,26 +12624,6 @@ async function runLimitedCascadeRounds(rounds, limit, runner){
 }
 function canvasRunTypes(){
     return ['generator','midjourney','msgen','comfy','ltxDirector','llm','video','rh','minimax'];
-}
-function canvasWorkflowEdges(){
-    const runTypes = canvasRunTypes();
-    const direct = [];
-    connections.forEach(c => {
-        const from = nodes.find(n => n.id === c.from);
-        const to = nodes.find(n => n.id === c.to);
-        if(!from || !to || !runTypes.includes(from.type)) return;
-        if(runTypes.includes(to.type)){
-            direct.push([from.id, to.id]);
-            return;
-        }
-        if(to.type === 'output'){
-            connections.filter(cc => cc.from === to.id).forEach(cc => {
-                const next = nodes.find(n => n.id === cc.to);
-                if(next && runTypes.includes(next.type)) direct.push([from.id, next.id]);
-            });
-        }
-    });
-    return direct;
 }
 async function runCanvasGenerate(nodeId){
     const node = nodes.find(n => n.id === nodeId);
@@ -14581,27 +14368,6 @@ function renderSelectionHub(){
     selectionHub.innerHTML = '';
     selectionHub.classList.remove('open');
 }
-function connectSelectionToGenerator(kind, genId){
-    const ids = [...selected];
-    let source = null;
-    if(kind === 'images'){
-        const imgs = ids.map(id => nodes.find(n => n.id === id)).filter(n => n?.type === 'image' && n.url);
-        if(!imgs.length) return;
-        const box = nodeBounds(imgs.map(n => n.id));
-        source = {id:uid('grp'), type:'group', x:box.x - 24, y:box.y - 58, w:box.w + 48, h:box.h + 90, items:imgs.map(n => n.id)};
-    } else {
-        const prompts = ids.map(id => nodes.find(n => n.id === id)).filter(n => n?.type === 'prompt');
-        if(!prompts.length) return;
-        const box = nodeBounds(prompts.map(n => n.id));
-        source = {id:uid('pg'), type:'promptGroup', x:box.x - 24, y:box.y - 58, w:box.w + 48, h:box.h + 90, items:prompts.map(n => n.id)};
-    }
-    nodes.push(source);
-    connections.push({id:uid('c'), from:source.id, to:genId});
-    selected.clear();
-    selected.add(source.id);
-    syncGeneratorInputs();
-}
-
 function pushUndo(){
     if(!canvas) return;
     undoStack.push({nodes:JSON.parse(JSON.stringify(serializableCanvasNodes())), connections:JSON.parse(JSON.stringify(connections))});
