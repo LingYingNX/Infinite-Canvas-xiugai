@@ -1554,9 +1554,7 @@ try {
 } catch(e) { /* 不支持 BroadcastChannel 的旧浏览器忽略 */ }
 async function loadCanvasList(openFirst=true){
     try {
-        const res = await fetch('/api/canvases');
-        if(!res.ok) throw new Error(tr('canvas.canvasListFailed'));
-        const data = await res.json();
+        const data = await canvasRequestJson('/api/canvases', tr('canvas.canvasListFailed'));
         canvases = data.canvases || [];
         sortCanvasListByUpdated();
         refreshGateViewControls();
@@ -1574,9 +1572,7 @@ async function loadCanvasList(openFirst=true){
 }
 async function loadTrashList(){
     try {
-        const res = await fetch('/api/canvases/trash');
-        if(!res.ok) throw new Error(tr('canvas.trashLoadFailed'));
-        const data = await res.json();
+        const data = await canvasRequestJson('/api/canvases/trash', tr('canvas.trashLoadFailed'));
         deletedCanvases = data.canvases || [];
         refreshGateViewControls();
         renderCanvasList();
@@ -1642,13 +1638,11 @@ async function patchCanvasMeta(id, patch){
     sortCanvasListByUpdated();
     renderCanvasList();
     try {
-        const res = await fetch(`/api/canvases/${encodeURIComponent(id)}/meta`, {
+        const data = await canvasRequestJson(`/api/canvases/${encodeURIComponent(id)}/meta`, {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify(patch)
-        });
-        if(!res.ok) throw new Error('meta save failed');
-        const data = await res.json();
+        }, 'meta save failed');
         if(data.canvas) updateCanvasListRecord(data.canvas);
     } catch(e){
         setStatus(tr('canvas.metaSaveFailed') || '保存失败');
@@ -1898,13 +1892,11 @@ async function createCanvas(){
     refreshGateViewControls();
     setStatus('Creating...');
     try {
-        const res = await fetch('/api/canvases', {
+        const data = await canvasRequestJson('/api/canvases', {
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({title, icon:isSmart ? 'sparkles' : '🧩', kind:isSmart ? 'smart' : 'classic'})
-        });
-        if(!res.ok) throw new Error(tr('canvas.createFailed'));
-        const data = await res.json();
+        }, tr('canvas.createFailed'));
         if(isSmart){
             setCreateMode(false);
             await loadCanvasList(false);
@@ -2048,9 +2040,7 @@ async function setCanvasTitle(id, title){
 async function openCanvas(id){
     setStatus('Opening...');
     try {
-        const res = await fetch(`/api/canvases/${id}`);
-        if(!res.ok) throw new Error(tr('canvas.openFailed'));
-        const data = await res.json();
+        const data = await canvasRequestJson(`/api/canvases/${id}`, tr('canvas.openFailed'));
         resetCascadeRuntimeState();
         canvas = data.canvas;
         rememberCanvasListProject(canvas.project || 'default');
@@ -2171,9 +2161,7 @@ async function refreshMissingCanvasAssets(){
 async function syncRemoteCanvasNow(){
     if(!canvas) return;
     try {
-        const res = await fetch(`/api/canvases/${canvas.id}`);
-        if(!res.ok) throw new Error(tr('canvas.openFailed'));
-        const data = await res.json();
+        const data = await canvasRequestJson(`/api/canvases/${canvas.id}`, tr('canvas.openFailed'));
         const remote = data.canvas;
         if(Number(remote?.updated_at || 0) >= Number(lastCanvasUpdatedAt || 0)){
             applyRemoteCanvasData(remote);
@@ -2188,9 +2176,7 @@ async function checkRemoteCanvasVersion(){
     if(document.hidden) return;
     remoteSyncBusy = true;
     try {
-        const res = await fetch(`/api/canvases/${canvas.id}/meta`);
-        if(!res.ok) throw new Error('meta failed');
-        const meta = await res.json();
+        const meta = await canvasRequestJson(`/api/canvases/${canvas.id}/meta`, 'meta failed');
         const remoteUpdatedAt = Number(meta.updated_at || 0);
         if(remoteUpdatedAt > Number(lastCanvasUpdatedAt || 0)){
             await syncRemoteCanvasNow();
