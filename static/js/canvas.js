@@ -7689,6 +7689,199 @@ function applyPromptTemplateToPromptNode(mode='positive'){
     refreshGeneratorInputViews();
     render();
 }
+function loopRefreshPreview(wrap, node){
+    const preview = wrap.querySelector('.loop-preview:last-child');
+    if(preview) preview.textContent = renderLoopPrompt(node, {index:1, total:loopCount(node)}) || tr('canvas.noPromptMeta');
+}
+
+function loopRefreshImageHint(wrap, node){
+    const hint = wrap.querySelector('.loop-image-hint-only');
+    if(!hint) return;
+    const count = loopInputImageRefs(node, {index:node.loopStart}).length;
+    hint.textContent = count ? trf('canvas.loopImageWillOutput', {n:count}) : tr('canvas.loopImageEmpty');
+}
+
+function bindLoopCountAndStartInputs(wrap, node, loopTargetId, loopTargetOrder){
+    const countInput = wrap.querySelector('.loop-count-input');
+    const syncStartInputs = source => {
+        wrap.querySelectorAll('.loop-image-start-input, .loop-start-input').forEach(input => {
+            if(input !== source && input.value !== String(node.loopStart)) input.value = node.loopStart;
+        });
+    };
+    countInput.oninput = e => {
+        node.count = loopCount({count:e.target.value});
+        e.target.value = node.count;
+        loopRefreshPreview(wrap, node);
+        /* 同步底部级联按钮上的轮数文字，避免输入循环次数后下游"× N 轮"残留旧值
+           不直接 render() 是为了不破坏当前正在输入的 input 焦点 */
+        const loopCascadeBtn = wrap.querySelector('[data-loop-cascade]');
+        if(loopCascadeBtn){
+            const span = loopCascadeBtn.querySelector('span');
+            if(span) span.textContent = `开始 ${loopTargetOrder.length || 1} 个节点 × ${node.count} ${tr('canvas.loopRounds')}`;
+        }
+        if(loopTargetId){
+            const targetEl = document.querySelector(`.node[data-id="${loopTargetId}"]`);
+            const targetCascadeBtn = targetEl?.querySelector('[data-cascade]');
+            if(targetCascadeBtn){
+                const span = targetCascadeBtn.querySelector('span');
+                if(span){
+                    const targetOrder = computeCascadeOrder(loopTargetId);
+                    span.textContent = `一键运行 ${targetOrder.length} 个节点 × ${node.count} ${tr('canvas.loopRounds')}`;
+                }
+            }
+        }
+        scheduleSave();
+    };
+    const startInput = wrap.querySelector('.loop-start-input');
+    if(startInput){
+        startInput.onmousedown = e => e.stopPropagation();
+        startInput.onclick = e => e.stopPropagation();
+        startInput.oninput = e => {
+            node.loopStart = Math.max(1, Number(e.target.value) || 1);
+            loopRefreshImageHint(wrap, node);
+            syncStartInputs(e.target);
+            scheduleSave();
+            syncGeneratorInputs();
+            refreshGeneratorInputViews();
+        };
+    }
+    const imageStartInput = wrap.querySelector('.loop-image-start-input');
+    if(imageStartInput){
+        imageStartInput.onmousedown = e => e.stopPropagation();
+        imageStartInput.onclick = e => e.stopPropagation();
+        imageStartInput.oninput = e => {
+            node.loopStart = Math.max(1, Number(e.target.value) || 1);
+            loopRefreshImageHint(wrap, node);
+            syncStartInputs(e.target);
+            scheduleSave();
+            syncGeneratorInputs();
+            refreshGeneratorInputViews();
+        };
+    }
+    const batchInput = wrap.querySelector('.loop-batch-input');
+    if(batchInput){
+        batchInput.onmousedown = e => e.stopPropagation();
+        batchInput.onclick = e => e.stopPropagation();
+        batchInput.oninput = e => {
+            node.imageBatchSize = Math.max(1, Math.min(100, Number(e.target.value) || 1));
+            e.target.value = node.imageBatchSize;
+            loopRefreshImageHint(wrap, node);
+            scheduleSave();
+            syncGeneratorInputs();
+            refreshGeneratorInputViews();
+        };
+    }
+}
+
+function bindLoopModeAndPrompt(wrap, node){
+    const variable = wrap.querySelector('.loop-variable-editor');
+    const toggle = wrap.querySelector('.loop-prompt-toggle');
+    if(variable) {
+        variable.onmousedown = e => e.stopPropagation();
+        variable.onclick = e => e.stopPropagation();
+        variable.onwheel = e => e.stopPropagation();
+    }
+    wrap.querySelectorAll('[data-loop-mode]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            node.mode = btn.dataset.loopMode === 'parallel' ? 'parallel' : 'serial';
+            render();
+            scheduleSave();
+        };
+    });
+    toggle.onclick = e => {
+        e.stopPropagation();
+        const opening = !node.showPrompt;
+        node.showPrompt = opening;
+        autoSizeLoopNode(node, opening);
+        autoSizeLoopForPanels(node);
+        if(!opening){
+            connections = connections.filter(c => c.to !== node.id || canConnect(c.from, node.id));
+        }
+        render();
+        scheduleSave();
+        syncGeneratorInputs();
+        refreshGeneratorInputViews();
+    };
+    if(variable) {
+        variable.oninput = e => {
+            node.variablePrompt = loopEditorText(variable);
+            loopRefreshPreview(wrap, node);
+            scheduleSave();
+            syncGeneratorInputs();
+            refreshGeneratorInputViews();
+        };
+        variable.addEventListener('click', e => {
+            const btn = e.target.closest('.loop-token-chip button');
+            if(!btn) return;
+            e.preventDefault();
+            e.stopPropagation();
+            btn.closest('.loop-token-chip')?.remove();
+            node.variablePrompt = loopEditorText(variable);
+            loopRefreshPreview(wrap, node);
+            scheduleSave();
+            syncGeneratorInputs();
+            refreshGeneratorInputViews();
+        });
+    }
+}
+
+function bindLoopTokens(wrap, node){
+    const variable = wrap.querySelector('.loop-variable-editor');
+    wrap.querySelectorAll('[data-token]').forEach(btn => {
+        btn.onclick = e => {
+            e.stopPropagation();
+            const token = btn.dataset.token || '';
+            if(!variable) return;
+            insertLoopToken(variable, token);
+            node.variablePrompt = loopEditorText(variable);
+            variable.focus();
+            loopRefreshPreview(wrap, node);
+            scheduleSave();
+            syncGeneratorInputs();
+            refreshGeneratorInputViews();
+        };
+    });
+}
+
+function bindLoopImageToggle(wrap, node){
+    const imageToggle = wrap.querySelector('.loop-image-toggle');
+    if(imageToggle){
+        imageToggle.onclick = e => {
+            e.stopPropagation();
+            node.imageInput = !node.imageInput;
+            if(node.imageInput){
+                node.loopStart = Math.max(1, Number(node.loopStart) || 1);
+                node.imageBatchSize = Math.max(1, Math.min(100, Number(node.imageBatchSize) || 1));
+            } else {
+                connections = connections.filter(c => c.to !== node.id || canConnect(c.from, node.id));
+            }
+            autoSizeLoopForPanels(node);
+            render();
+            scheduleSave();
+            syncGeneratorInputs();
+            refreshGeneratorInputViews();
+        };
+    }
+}
+
+function bindLoopCascadeButtons(wrap, node){
+    wrap.querySelectorAll('[data-loop-cascade]').forEach(btn => {
+        btn.onmousedown = e => e.stopPropagation();
+        btn.onclick = e => {
+            e.stopPropagation();
+            runNodeCascade(btn.dataset.loopCascade);
+        };
+    });
+    wrap.querySelectorAll('[data-loop-cascade-stop]').forEach(btn => {
+        btn.onmousedown = e => e.stopPropagation();
+        btn.onclick = e => {
+            e.stopPropagation();
+            requestCascadeStop(btn.dataset.loopCascadeStop);
+        };
+    });
+}
+
 function renderLoopBody(node){
     const wrap = document.createElement('div');
     wrap.className = 'loop-body';
@@ -7747,181 +7940,11 @@ function renderLoopBody(node){
         </div>` : ''}
         ${loopRunHtml}
     `;
-    const countInput = wrap.querySelector('.loop-count-input');
-    const variable = wrap.querySelector('.loop-variable-editor');
-    const toggle = wrap.querySelector('.loop-prompt-toggle');
-    const imageToggle = wrap.querySelector('.loop-image-toggle');
-    if(variable) {
-        variable.onmousedown = e => e.stopPropagation();
-        variable.onclick = e => e.stopPropagation();
-        variable.onwheel = e => e.stopPropagation();
-    }
-    const refreshPreview = () => {
-        const preview = wrap.querySelector('.loop-preview:last-child');
-        if(preview) preview.textContent = renderLoopPrompt(node, {index:1, total:loopCount(node)}) || tr('canvas.noPromptMeta');
-    };
-    const refreshImageHint = () => {
-        const hint = wrap.querySelector('.loop-image-hint-only');
-        if(!hint) return;
-        const count = loopInputImageRefs(node, {index:node.loopStart}).length;
-        hint.textContent = count ? trf('canvas.loopImageWillOutput', {n:count}) : tr('canvas.loopImageEmpty');
-    };
-    const syncStartInputs = source => {
-        wrap.querySelectorAll('.loop-image-start-input, .loop-start-input').forEach(input => {
-            if(input !== source && input.value !== String(node.loopStart)) input.value = node.loopStart;
-        });
-    };
-    countInput.oninput = e => {
-        node.count = loopCount({count:e.target.value});
-        e.target.value = node.count;
-        refreshPreview();
-        /* 同步底部级联按钮上的轮数文字，避免输入循环次数后下游"× N 轮"残留旧值
-           不直接 render() 是为了不破坏当前正在输入的 input 焦点 */
-        const loopCascadeBtn = wrap.querySelector('[data-loop-cascade]');
-        if(loopCascadeBtn){
-            const span = loopCascadeBtn.querySelector('span');
-            if(span) span.textContent = `开始 ${loopTargetOrder.length || 1} 个节点 × ${node.count} ${tr('canvas.loopRounds')}`;
-        }
-        if(loopTargetId){
-            const targetEl = document.querySelector(`.node[data-id="${loopTargetId}"]`);
-            const targetCascadeBtn = targetEl?.querySelector('[data-cascade]');
-            if(targetCascadeBtn){
-                const span = targetCascadeBtn.querySelector('span');
-                if(span){
-                    const targetOrder = computeCascadeOrder(loopTargetId);
-                    span.textContent = `一键运行 ${targetOrder.length} 个节点 × ${node.count} ${tr('canvas.loopRounds')}`;
-                }
-            }
-        }
-        scheduleSave();
-    };
-    const startInput = wrap.querySelector('.loop-start-input');
-    if(startInput){
-        startInput.onmousedown = e => e.stopPropagation();
-        startInput.onclick = e => e.stopPropagation();
-        startInput.oninput = e => {
-            node.loopStart = Math.max(1, Number(e.target.value) || 1);
-            refreshImageHint();
-            syncStartInputs(e.target);
-            scheduleSave();
-            syncGeneratorInputs();
-            refreshGeneratorInputViews();
-        };
-    }
-    const imageStartInput = wrap.querySelector('.loop-image-start-input');
-    if(imageStartInput){
-        imageStartInput.onmousedown = e => e.stopPropagation();
-        imageStartInput.onclick = e => e.stopPropagation();
-        imageStartInput.oninput = e => {
-            node.loopStart = Math.max(1, Number(e.target.value) || 1);
-            refreshImageHint();
-            syncStartInputs(e.target);
-            scheduleSave();
-            syncGeneratorInputs();
-            refreshGeneratorInputViews();
-        };
-    }
-    const batchInput = wrap.querySelector('.loop-batch-input');
-    if(batchInput){
-        batchInput.onmousedown = e => e.stopPropagation();
-        batchInput.onclick = e => e.stopPropagation();
-        batchInput.oninput = e => {
-            node.imageBatchSize = Math.max(1, Math.min(100, Number(e.target.value) || 1));
-            e.target.value = node.imageBatchSize;
-            refreshImageHint();
-            scheduleSave();
-            syncGeneratorInputs();
-            refreshGeneratorInputViews();
-        };
-    }
-    wrap.querySelectorAll('[data-loop-mode]').forEach(btn => {
-        btn.onclick = e => {
-            e.stopPropagation();
-            node.mode = btn.dataset.loopMode === 'parallel' ? 'parallel' : 'serial';
-            render();
-            scheduleSave();
-        };
-    });
-    toggle.onclick = e => {
-        e.stopPropagation();
-        const opening = !node.showPrompt;
-        node.showPrompt = opening;
-        autoSizeLoopNode(node, opening);
-        autoSizeLoopForPanels(node);
-        if(!opening){
-            connections = connections.filter(c => c.to !== node.id || canConnect(c.from, node.id));
-        }
-        render();
-        scheduleSave();
-        syncGeneratorInputs();
-        refreshGeneratorInputViews();
-    };
-    if(variable) {
-        variable.oninput = e => {
-            node.variablePrompt = loopEditorText(variable);
-            refreshPreview();
-            scheduleSave();
-            syncGeneratorInputs();
-            refreshGeneratorInputViews();
-        };
-        variable.addEventListener('click', e => {
-            const btn = e.target.closest('.loop-token-chip button');
-            if(!btn) return;
-            e.preventDefault();
-            e.stopPropagation();
-            btn.closest('.loop-token-chip')?.remove();
-            node.variablePrompt = loopEditorText(variable);
-            refreshPreview();
-            scheduleSave();
-            syncGeneratorInputs();
-            refreshGeneratorInputViews();
-        });
-    }
-    wrap.querySelectorAll('[data-token]').forEach(btn => {
-        btn.onclick = e => {
-            e.stopPropagation();
-            const token = btn.dataset.token || '';
-            if(!variable) return;
-            insertLoopToken(variable, token);
-            node.variablePrompt = loopEditorText(variable);
-            variable.focus();
-            refreshPreview();
-            scheduleSave();
-            syncGeneratorInputs();
-            refreshGeneratorInputViews();
-        };
-    });
-    if(imageToggle){
-        imageToggle.onclick = e => {
-            e.stopPropagation();
-            node.imageInput = !node.imageInput;
-            if(node.imageInput){
-                node.loopStart = Math.max(1, Number(node.loopStart) || 1);
-                node.imageBatchSize = Math.max(1, Math.min(100, Number(node.imageBatchSize) || 1));
-            } else {
-                connections = connections.filter(c => c.to !== node.id || canConnect(c.from, node.id));
-            }
-            autoSizeLoopForPanels(node);
-            render();
-            scheduleSave();
-            syncGeneratorInputs();
-            refreshGeneratorInputViews();
-        };
-    }
-    wrap.querySelectorAll('[data-loop-cascade]').forEach(btn => {
-        btn.onmousedown = e => e.stopPropagation();
-        btn.onclick = e => {
-            e.stopPropagation();
-            runNodeCascade(btn.dataset.loopCascade);
-        };
-    });
-    wrap.querySelectorAll('[data-loop-cascade-stop]').forEach(btn => {
-        btn.onmousedown = e => e.stopPropagation();
-        btn.onclick = e => {
-            e.stopPropagation();
-            requestCascadeStop(btn.dataset.loopCascadeStop);
-        };
-    });
+    bindLoopCountAndStartInputs(wrap, node, loopTargetId, loopTargetOrder);
+    bindLoopModeAndPrompt(wrap, node);
+    bindLoopTokens(wrap, node);
+    bindLoopImageToggle(wrap, node);
+    bindLoopCascadeButtons(wrap, node);
     return wrap;
 }
 function renderLLMBody(node){
