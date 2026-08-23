@@ -8789,6 +8789,29 @@ function bindMinimaxParamInputs(el, node, focusMinimaxNode){
     });
 }
 
+
+function bindMinimaxPromptAndRun(el, node, focusMinimaxNode){
+    const prompt = el.querySelector('[data-minimax-prompt]');
+    if(prompt){
+        bindScrollableText(prompt);
+        prompt.oninput = e => {
+            e.stopPropagation();
+            focusMinimaxNode();
+            const seg = smartMinimaxSelectedSegment(node);
+            if(seg) seg.prompt = prompt.value;
+            scheduleSave();
+        };
+    }
+    el.querySelectorAll('[data-minimax-run]').forEach(btn => {
+        btn.onclick = e => {
+            e.preventDefault();
+            e.stopPropagation();
+            focusMinimaxNode();
+            runMinimaxNode(btn.dataset.minimaxRun || node.id);
+        };
+    });
+}
+
 function bindMinimaxNodeControls(el, node){
     const focusMinimaxNode = () => {
         if(selectedId === node.id && selectedIds.length === 0 && selectedImage.nodeId === '') return;
@@ -8944,25 +8967,7 @@ function bindMinimaxNodeControls(el, node){
         });
     });
     bindMinimaxParamInputs(el, node, focusMinimaxNode);
-    const prompt = el.querySelector('[data-minimax-prompt]');
-    if(prompt){
-        bindScrollableText(prompt);
-        prompt.oninput = e => {
-            e.stopPropagation();
-            focusMinimaxNode();
-            const seg = smartMinimaxSelectedSegment(node);
-            if(seg) seg.prompt = prompt.value;
-            scheduleSave();
-        };
-    }
-    el.querySelectorAll('[data-minimax-run]').forEach(btn => {
-        btn.onclick = e => {
-            e.preventDefault();
-            e.stopPropagation();
-            focusMinimaxNode();
-            runMinimaxNode(btn.dataset.minimaxRun || node.id);
-        };
-    });
+    bindMinimaxPromptAndRun(el, node, focusMinimaxNode);
     el.querySelectorAll('[data-minimax-play-timeline]').forEach(btn => {
         btn.onclick = e => {
             e.preventDefault();
