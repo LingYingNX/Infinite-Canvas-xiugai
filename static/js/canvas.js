@@ -12827,76 +12827,60 @@ function cascadeUiNodeIds(targetId, order=null){
     if(loop?.node?.id) ids.add(loop.node.id);
     return [...ids].filter(Boolean);
 }
-async function runNodeCascade(nodeId){
-    const target = nodes.find(n => n.id === nodeId);
-    if(!target) return;
-    if(target.running){ alert('当前节点正在运行'); return; }
-    const order = computeCascadeOrder(nodeId);
-    if(!order.length){ alert('没有可运行的生成节点'); return; }
-    const loop = resolveCascadeLoop(nodeId);
-    const totalRounds = loop?.count || 1;
-    const startIdx = Math.max(1, Number(loop?.node?.loopStart) || 1);
-    const loopImageStride = loop?.node?.imageInput ? Math.max(1, Math.min(100, Number(loop?.node?.imageBatchSize) || 1)) : 0;
-    const loopBatchSize = Math.max(1, loopImageStride);
-    const endIdx = startIdx + (totalRounds - 1) * loopBatchSize;
-    const ctx = beginCascade(nodeId, order, {serial:true, mode:loop?.mode || 'serial'});
-    refreshNodes(cascadeUiNodeIds(nodeId, order));
+async function runCascadeParallelLoop(nodeId, target, order, loop, startIdx, loopBatchSize, endIdx, totalRounds, ctx){
     order.forEach(id => {
         const n = nodes.find(x => x.id === id);
-        if(n) n.generatedOutputs = [];
+        if(n){ n.runStatus = 'queued'; n.runError = ''; n._cascadeFailed = false; n._cascadeIdx = `0/${totalRounds}`; }
     });
-    if(loop?.mode === 'parallel' && totalRounds > 1){
+    refreshNodes(cascadeUiNodeIds(nodeId, order));
+    let done = 0;
+    const rounds = Array.from({length:totalRounds}, (_, idx) => ({idx, index:startIdx + idx * loopBatchSize}));
+    const limit = cascadeParallelLimit(order, totalRounds);
+    const results = await runLimitedCascadeRounds(rounds, limit, async ({index}) => {
+        ensureCascadeActive(nodeId, ctx.message);
+        const loopCtx = {index, total:endIdx, nodeId:loop.node.id};
+        for(let i = 0; i < order.length; i++){
+            ensureCascadeActive(nodeId, ctx.message);
+            const id = order[i];
+            const node = nodes.find(n => n.id === id);
+            if(!node) continue;
+            ctx.currentNodeId = id;
+            ctx.currentRoundLabel = `${index}/${endIdx}`;
+            node.runStatus = 'running';
+            node._cascadeIdx = `${order.indexOf(id)+1}/${order.length} · ${index}/${endIdx}`;
+            refreshNodes([id]);
+            await runCascadeNodeWithLoopContext(node, loopCtx, {cascadeTargetId:nodeId});
+            ensureCascadeActive(nodeId, ctx.message);
+            node.runStatus = 'done';
+            refreshNodes([id]);
+        }
+        done += 1;
         order.forEach(id => {
             const n = nodes.find(x => x.id === id);
-            if(n){ n.runStatus = 'queued'; n.runError = ''; n._cascadeFailed = false; n._cascadeIdx = `0/${totalRounds}`; }
+            if(n) n._cascadeIdx = `${done}/${totalRounds}`;
         });
-        refreshNodes(cascadeUiNodeIds(nodeId, order));
-        let done = 0;
-        const rounds = Array.from({length:totalRounds}, (_, idx) => ({idx, index:startIdx + idx * loopBatchSize}));
-        const limit = cascadeParallelLimit(order, totalRounds);
-        const results = await runLimitedCascadeRounds(rounds, limit, async ({index}) => {
-            ensureCascadeActive(nodeId, ctx.message);
-            const loopCtx = {index, total:endIdx, nodeId:loop.node.id};
-            for(let i = 0; i < order.length; i++){
-                ensureCascadeActive(nodeId, ctx.message);
-                const id = order[i];
-                const node = nodes.find(n => n.id === id);
-                if(!node) continue;
-                ctx.currentNodeId = id;
-                ctx.currentRoundLabel = `${index}/${endIdx}`;
-                node.runStatus = 'running';
-                node._cascadeIdx = `${order.indexOf(id)+1}/${order.length} · ${index}/${endIdx}`;
-                refreshNodes([id]);
-                await runCascadeNodeWithLoopContext(node, loopCtx, {cascadeTargetId:nodeId});
-                ensureCascadeActive(nodeId, ctx.message);
-                node.runStatus = 'done';
-                refreshNodes([id]);
-            }
-            done += 1;
-            order.forEach(id => {
-                const n = nodes.find(x => x.id === id);
-                if(n) n._cascadeIdx = `${done}/${totalRounds}`;
-            });
-            refreshNodes(order);
-        });
-        loopContext = null;
-        const failed = results.find(r => r.status === 'rejected');
-        if(failed){
-            const err = failed.reason || new Error('parallel loop failed');
-            if(isCascadeAbortError(err)){
-                finalizeCascade(nodeId, 'stopped', {order});
-                return;
-            }
-            const node = nodes.find(n => n.id === ctx.currentNodeId) || nodes.find(n => n.id === nodeId) || target;
-            node.runStatus = 'failed';
-            node.runError = err.message || String(err);
-            node._cascadeFailed = true;
-            finalizeCascade(nodeId, 'failed', {order});
+        refreshNodes(order);
+    });
+    loopContext = null;
+    const failed = results.find(r => r.status === 'rejected');
+    if(failed){
+        const err = failed.reason || new Error('parallel loop failed');
+        if(isCascadeAbortError(err)){
+            finalizeCascade(nodeId, 'stopped', {order});
             return;
         }
-        finalizeCascade(nodeId, 'done', {order});
+        const node = nodes.find(n => n.id === ctx.currentNodeId) || nodes.find(n => n.id === nodeId) || target;
+        node.runStatus = 'failed';
+        node.runError = err.message || String(err);
+        node._cascadeFailed = true;
+        finalizeCascade(nodeId, 'failed', {order});
         return;
     }
+    finalizeCascade(nodeId, 'done', {order});
+    return;
+}
+
+async function runCascadeSerialLoop(nodeId, order, loop, startIdx, loopBatchSize, endIdx, totalRounds, ctx){
     refreshNodes(cascadeUiNodeIds(nodeId, order));
     for(let round = 1; round <= totalRounds; round++){
         ensureCascadeActive(nodeId, ctx.message);
@@ -12940,6 +12924,31 @@ async function runNodeCascade(nodeId){
     }
     loopContext = null;
     finalizeCascade(nodeId, 'done', {order});
+}
+
+async function runNodeCascade(nodeId){
+    const target = nodes.find(n => n.id === nodeId);
+    if(!target) return;
+    if(target.running){ alert('当前节点正在运行'); return; }
+    const order = computeCascadeOrder(nodeId);
+    if(!order.length){ alert('没有可运行的生成节点'); return; }
+    const loop = resolveCascadeLoop(nodeId);
+    const totalRounds = loop?.count || 1;
+    const startIdx = Math.max(1, Number(loop?.node?.loopStart) || 1);
+    const loopImageStride = loop?.node?.imageInput ? Math.max(1, Math.min(100, Number(loop?.node?.imageBatchSize) || 1)) : 0;
+    const loopBatchSize = Math.max(1, loopImageStride);
+    const endIdx = startIdx + (totalRounds - 1) * loopBatchSize;
+    const ctx = beginCascade(nodeId, order, {serial:true, mode:loop?.mode || 'serial'});
+    refreshNodes(cascadeUiNodeIds(nodeId, order));
+    order.forEach(id => {
+        const n = nodes.find(x => x.id === id);
+        if(n) n.generatedOutputs = [];
+    });
+    if(loop?.mode === 'parallel' && totalRounds > 1){
+        await runCascadeParallelLoop(nodeId, target, order, loop, startIdx, loopBatchSize, endIdx, totalRounds, ctx);
+        return;
+    }
+    await runCascadeSerialLoop(nodeId, order, loop, startIdx, loopBatchSize, endIdx, totalRounds, ctx);
 }
 async function runOneCascadePass(order, options={}){
     const targetId = cascadeTargetIdFromOptions(options);
