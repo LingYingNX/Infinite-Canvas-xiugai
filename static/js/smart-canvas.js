@@ -9279,36 +9279,29 @@ function bindMinimaxSegmentAdd(el, node, focusMinimaxNode){
     });
 }
 
+function removeMinimaxSegment(node, el, removeId, renderAfterMinimaxDelete){
+    if((node.segments || []).length <= 1) return;
+    if(!removeId) return;
+    pushUndo();
+    node.segments = node.segments.filter(seg => seg.id !== removeId);
+    node.selectedSegmentId = node.segments.find(seg => seg.id === node.selectedSegmentId)?.id || node.segments[0]?.id || '';
+    smartMinimaxEnsureSegment(node);
+    smartMinimaxCompactSegments(node);
+    el.querySelectorAll('[data-minimax-segment]').forEach(item => {
+        if(item.dataset.minimaxSegment === removeId) item.remove();
+    });
+    renderAfterMinimaxDelete();
+}
+
 function bindMinimaxSegmentDelete(el, node, bindFastMinimaxButton, renderAfterMinimaxDelete){
     el.querySelectorAll('[data-minimax-delete-segment]').forEach(btn => {
         bindFastMinimaxButton(btn, () => {
-            if((node.segments || []).length <= 1) return;
-            pushUndo();
-            const removeId = node.selectedSegmentId;
-            node.segments = node.segments.filter(seg => seg.id !== removeId);
-            node.selectedSegmentId = node.segments[0]?.id || '';
-            smartMinimaxEnsureSegment(node);
-            smartMinimaxCompactSegments(node);
-            el.querySelectorAll('[data-minimax-segment]').forEach(item => {
-                if(item.dataset.minimaxSegment === removeId) item.remove();
-            });
-            renderAfterMinimaxDelete();
+            removeMinimaxSegment(node, el, node.selectedSegmentId, renderAfterMinimaxDelete);
         });
     });
     el.querySelectorAll('[data-minimax-segment-delete]').forEach(btn => {
         bindFastMinimaxButton(btn, () => {
-            if((node.segments || []).length <= 1) return;
-            const removeId = btn.dataset.minimaxSegmentDelete || '';
-            if(!removeId) return;
-            pushUndo();
-            node.segments = node.segments.filter(seg => seg.id !== removeId);
-            node.selectedSegmentId = node.segments.find(seg => seg.id === node.selectedSegmentId)?.id || node.segments[0]?.id || '';
-            smartMinimaxEnsureSegment(node);
-            smartMinimaxCompactSegments(node);
-            el.querySelectorAll('[data-minimax-segment]').forEach(item => {
-                if(item.dataset.minimaxSegment === removeId) item.remove();
-            });
-            renderAfterMinimaxDelete();
+            removeMinimaxSegment(node, el, btn.dataset.minimaxSegmentDelete || '', renderAfterMinimaxDelete);
         });
     });
 }
@@ -18824,6 +18817,5 @@ window.onload = async () => {
     syncApiKindToggleVisibility();
     render();
 };
-
 
 
