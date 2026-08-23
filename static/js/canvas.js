@@ -3535,14 +3535,7 @@ async function downloadGroupNodeImages(groupId){
         });
         if(!res.ok) throw new Error(await responseErrorMessage(res, tr('canvas.outputDownloadEmpty')));
         const blob = await res.blob();
-        const href = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = href;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(href), 1200);
+        downloadBlob(blob, filename, 1200);
     } catch(err) {
         alert(err.message || tr('canvas.outputDownloadEmpty'));
     }
@@ -13828,13 +13821,7 @@ async function downloadUrl(url, filename){
     const res = await fetch(url);
     if(!res.ok) throw new Error('下载失败');
     const blob = await res.blob();
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    downloadBlob(blob, filename, 1000);
 }
 function setOutputCompareMode(active){
     outputPreview.classList.toggle('compare-mode', active);
