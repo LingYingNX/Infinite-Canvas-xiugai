@@ -1689,33 +1689,22 @@ async function touchCanvasOpened(id){
         return null;
     }
 }
-function renderCanvasListInto(list){
-    if(!list) return;
-    refreshGateViewControls();
-    const items = trashMode ? deletedCanvases : canvases;
-    list.innerHTML = '';
-    if(!items.length){
-        const empty = document.createElement('div');
-        empty.className = 'gate-list-empty';
-        empty.innerHTML = trashMode
-            ? `<div class="gate-list-empty-icon"><i data-lucide="trash-2" class="w-6 h-6"></i></div>${tr('canvas.trashEmpty')}`
-            : `<div class="gate-list-empty-icon"><i data-lucide="layout-grid" class="w-6 h-6"></i></div>${tr('canvas.noCanvas')}<br>${tr('canvas.startWithNewCanvas')}`;
-        list.appendChild(empty);
-        refreshIcons();
-        return;
-    }
-    items.forEach(item => {
-        const row = document.createElement('div');
-        const isSmartCanvas = (item.kind || 'classic') === 'smart';
-        const color = String(item.color || '').trim();
-        const owner = String(item.owner || '').trim();
-        const pinned = !!item.pinned && !trashMode;
-        row.className = `canvas-item ${isSmartCanvas ? 'smart-canvas' : ''} ${canvas?.id === item.id ? 'active' : ''} ${pinned ? 'pinned' : ''} ${color ? 'has-color' : ''}`;
-        row.dataset.canvasId = item.id;
-        const ownerChip = owner
+function renderCanvasListEmptyState(list){
+    const empty = document.createElement('div');
+    empty.className = 'gate-list-empty';
+    empty.innerHTML = trashMode
+        ? `<div class="gate-list-empty-icon"><i data-lucide="trash-2" class="w-6 h-6"></i></div>${tr('canvas.trashEmpty')}`
+        : `<div class="gate-list-empty-icon"><i data-lucide="layout-grid" class="w-6 h-6"></i></div>${tr('canvas.noCanvas')}<br>${tr('canvas.startWithNewCanvas')}`;
+    list.appendChild(empty);
+    refreshIcons();
+    return;
+}
+
+function canvasListItemHtml(item, isSmartCanvas, color, owner, pinned){
+    const ownerChip = owner
             ? `<span class="canvas-owner-chip" role="button" tabindex="0" title="${escapeAttr(owner)}"><i data-lucide="user-round" class="w-3 h-3"></i><span class="canvas-owner-text">${escapeHtml(owner)}</span></span>`
             : '';
-        row.innerHTML = `
+    return `
             <div class="canvas-open" role="button" tabindex="${trashMode ? '-1' : '0'}">
                 <div class="canvas-card-icon-row">
                     <span class="canvas-preview-mark ${color ? `icon-has-color cc-${escapeAttr(color)}` : ''}" role="button" tabindex="0" title="${trashMode ? tr('canvas.deletedCanvas') : (tr('canvas.editMeta') || '编辑图标 / 颜色 / 负责人')}">${renderCanvasIcon(isSmartCanvas && /[^\x00-\x7F]/.test(item.icon || '') ? 'sparkles' : item.icon, 16)}</span>
@@ -1767,43 +1756,67 @@ function renderCanvasListInto(list){
                 </button>
             `)}
         `;
-        if(!trashMode) row.querySelector('.canvas-open').onclick = () => openCanvas(item.id);
-        const titleEl = row.querySelector('.canvas-card-title');
-        const editBtn = row.querySelector('.canvas-card-edit');
-        if(editBtn && titleEl && !trashMode) {
-            editBtn.onmousedown = e => e.stopPropagation();
-            editBtn.onclick = e => { e.stopPropagation(); startTitleEdit(item.id, titleEl); };
-        }
-        const iconBtn = row.querySelector('.canvas-preview-mark');
-        if(iconBtn && !trashMode) {
-            iconBtn.onclick = e => toggleEmojiPicker(item.id, e);
-            iconBtn.onkeydown = e => {
-                if(e.key === 'Enter' || e.key === ' ') toggleEmojiPicker(item.id, e);
-            };
-        }
-        row.querySelectorAll('.emoji-option').forEach(btn => {
-            btn.onclick = e => setCanvasIcon(item.id, btn.dataset.icon, e);
-        });
-        const pinBtn = row.querySelector('.canvas-pin-btn');
-        if(pinBtn){
-            pinBtn.onmousedown = e => e.stopPropagation();
-            pinBtn.onclick = e => togglePinCanvas(item.id, e);
-        }
-        const ownerChipEl = row.querySelector('.canvas-owner-chip');
-        if(ownerChipEl && !trashMode){
-            ownerChipEl.onmousedown = e => e.stopPropagation();
-            ownerChipEl.onclick = e => { e.stopPropagation(); toggleEmojiPicker(item.id, e); };
-        }
-        const deleteBtn = row.querySelector('.canvas-delete');
-        if(deleteBtn) deleteBtn.onclick = e => requestDeleteCanvas(item.id, e);
-        const confirmBtn = row.querySelector('.canvas-confirm-btn');
-        if(confirmBtn) confirmBtn.onclick = e => trashMode ? purgeCanvas(item.id, e) : deleteCanvas(item.id, e);
-        const cancelBtn = row.querySelector('.canvas-cancel-btn');
-        if(cancelBtn) cancelBtn.onclick = e => cancelDeleteCanvas(e);
-        const restoreBtn = row.querySelector('.canvas-restore');
-        if(restoreBtn) restoreBtn.onclick = e => restoreCanvas(item.id, e);
-        const purgeBtn = row.querySelector('.canvas-purge');
-        if(purgeBtn) purgeBtn.onclick = e => requestPurgeCanvas(item.id, e);
+}
+
+function bindCanvasListItemEvents(row, item){
+    if(!trashMode) row.querySelector('.canvas-open').onclick = () => openCanvas(item.id);
+    const titleEl = row.querySelector('.canvas-card-title');
+    const editBtn = row.querySelector('.canvas-card-edit');
+    if(editBtn && titleEl && !trashMode) {
+        editBtn.onmousedown = e => e.stopPropagation();
+        editBtn.onclick = e => { e.stopPropagation(); startTitleEdit(item.id, titleEl); };
+    }
+    const iconBtn = row.querySelector('.canvas-preview-mark');
+    if(iconBtn && !trashMode) {
+        iconBtn.onclick = e => toggleEmojiPicker(item.id, e);
+        iconBtn.onkeydown = e => {
+            if(e.key === 'Enter' || e.key === ' ') toggleEmojiPicker(item.id, e);
+        };
+    }
+    row.querySelectorAll('.emoji-option').forEach(btn => {
+        btn.onclick = e => setCanvasIcon(item.id, btn.dataset.icon, e);
+    });
+    const pinBtn = row.querySelector('.canvas-pin-btn');
+    if(pinBtn){
+        pinBtn.onmousedown = e => e.stopPropagation();
+        pinBtn.onclick = e => togglePinCanvas(item.id, e);
+    }
+    const ownerChipEl = row.querySelector('.canvas-owner-chip');
+    if(ownerChipEl && !trashMode){
+        ownerChipEl.onmousedown = e => e.stopPropagation();
+        ownerChipEl.onclick = e => { e.stopPropagation(); toggleEmojiPicker(item.id, e); };
+    }
+    const deleteBtn = row.querySelector('.canvas-delete');
+    if(deleteBtn) deleteBtn.onclick = e => requestDeleteCanvas(item.id, e);
+    const confirmBtn = row.querySelector('.canvas-confirm-btn');
+    if(confirmBtn) confirmBtn.onclick = e => trashMode ? purgeCanvas(item.id, e) : deleteCanvas(item.id, e);
+    const cancelBtn = row.querySelector('.canvas-cancel-btn');
+    if(cancelBtn) cancelBtn.onclick = e => cancelDeleteCanvas(e);
+    const restoreBtn = row.querySelector('.canvas-restore');
+    if(restoreBtn) restoreBtn.onclick = e => restoreCanvas(item.id, e);
+    const purgeBtn = row.querySelector('.canvas-purge');
+    if(purgeBtn) purgeBtn.onclick = e => requestPurgeCanvas(item.id, e);
+}
+
+function renderCanvasListInto(list){
+    if(!list) return;
+    refreshGateViewControls();
+    const items = trashMode ? deletedCanvases : canvases;
+    list.innerHTML = '';
+    if(!items.length){
+        renderCanvasListEmptyState(list);
+        return;
+    }
+    items.forEach(item => {
+        const row = document.createElement('div');
+        const isSmartCanvas = (item.kind || 'classic') === 'smart';
+        const color = String(item.color || '').trim();
+        const owner = String(item.owner || '').trim();
+        const pinned = !!item.pinned && !trashMode;
+        row.className = `canvas-item ${isSmartCanvas ? 'smart-canvas' : ''} ${canvas?.id === item.id ? 'active' : ''} ${pinned ? 'pinned' : ''} ${color ? 'has-color' : ''}`;
+        row.dataset.canvasId = item.id;
+        row.innerHTML = canvasListItemHtml(item, isSmartCanvas, color, owner, pinned);
+        bindCanvasListItemEvents(row, item);
         list.appendChild(row);
     });
     refreshIcons();
