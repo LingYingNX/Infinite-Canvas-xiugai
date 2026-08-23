@@ -3992,6 +3992,16 @@ function markControlInteracting(el){
     if(ctrl && !ctrl.classList.contains('pinned')) ctrl.classList.add('interacting');
 }
 function bindDynamicParams(){
+    bindDynamicPillControls();
+    bindDynamicSmartTagControls();
+    bindDynamicSizeScopeControls();
+    bindDynamicInputParamControls();
+    bindDynamicTrustedSourceControls();
+    bindDynamicComfyControls();
+    bindDynamicRhControls();
+}
+
+function bindDynamicPillControls(){
     dynamicParams.querySelectorAll('.smart-control').forEach(ctrl => {
         // 悬浮态的多选：鼠标移出整个控件（含上方弹层，弹层是 DOM 子节点）才解除，途中点参数不收起。
         ctrl.onmouseleave = () => ctrl.classList.remove('interacting');
@@ -4006,6 +4016,9 @@ function bindDynamicParams(){
             if(!wasPinned) ctrl.classList.add('pinned');
         };
     });
+}
+
+function bindDynamicSmartTagControls(){
     dynamicParams.querySelectorAll('[data-smart-param]').forEach(btn => {
         btn.onclick = event => {
             event.preventDefault();
@@ -4015,6 +4028,9 @@ function bindDynamicParams(){
             if(btn.dataset.smartParam === 'videoDuration') renderDynamicParams();
         };
     });
+}
+
+function bindDynamicSizeScopeControls(){
     dynamicParams.querySelectorAll('[data-size-scope]').forEach(btn => {
         btn.onclick = event => {
             event.preventDefault();
@@ -4041,6 +4057,9 @@ function bindDynamicParams(){
             scheduleSave();
         };
     });
+}
+
+function bindDynamicInputParamControls(){
     dynamicParams.querySelectorAll('[data-param]').forEach(input => {
         input.onclick = event => event.stopPropagation();
         input.oninput = input.onchange = event => {
@@ -4062,6 +4081,9 @@ function bindDynamicParams(){
             scheduleSave();
         };
     });
+}
+
+function bindDynamicTrustedSourceControls(){
     dynamicParams.querySelectorAll('[data-trusted-source]').forEach(btn => {
         btn.onclick = async event => {
             event.preventDefault();
@@ -4079,6 +4101,9 @@ function bindDynamicParams(){
             }
         };
     });
+}
+
+function bindDynamicComfyControls(){
     dynamicParams.querySelectorAll('[data-comfy-bool]').forEach(btn => {
         btn.onclick = event => {
             event.preventDefault();
@@ -4131,6 +4156,9 @@ function bindDynamicParams(){
             toggleSmartComfyRandom(btn.dataset.comfyRandom);
         };
     });
+}
+
+function bindDynamicRhControls(){
     dynamicParams.querySelectorAll('[data-rh-bool]').forEach(btn => {
         btn.onclick = event => {
             event.preventDefault();
@@ -18792,3 +18820,4 @@ window.onload = async () => {
     syncApiKindToggleVisibility();
     render();
 };
+
