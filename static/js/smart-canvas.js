@@ -4527,10 +4527,15 @@ function renderPromptTemplatePanel(options={}){
     if(!promptTemplatePanel || !promptTemplateBody || !promptTemplateCats) return;
     renderPromptLibrarySelect();
     const scrollSnapshot = options.preserveScroll === false ? null : promptTemplateScrollSnapshot();
-    const query = String(promptTemplateSearch?.value || '').trim().toLowerCase();
+    renderPromptTemplateCategoryNav();
+    renderPromptTemplateLibraryList();
+    refreshIcons();
+    restorePromptTemplateScroll(scrollSnapshot);
+}
+
+function renderPromptTemplateCategoryNav(){
     const allTemplates = promptTemplateItems();
     const activeGroups = activePromptTemplateGroups();
-    // 防御：若当前分类筛选不属于当前词库（例如刚切换词库或分类已被删除），回到“全部”，避免列表被过滤为空。
     if(promptTemplateCategory !== 'all' && !activeGroups.some(g => g.id === promptTemplateCategory)) promptTemplateCategory = 'all';
     const categories = [{id:'all', name:tr('smart.tplAll')}, ...activeGroups.map(group => ({...group, name:promptTemplateCategoryLabel(group.id)}))];
     const groupCounts = allTemplates.reduce((map, item) => {
@@ -4575,6 +4580,12 @@ function renderPromptTemplatePanel(options={}){
             <button type="button" class="prompt-template-manage-groups" data-template-group-edit><i data-lucide="settings-2"></i><span>${escapeHtml(tr('smart.tplManageGroups'))}</span></button>
         </div>
     `;
+}
+
+function renderPromptTemplateLibraryList(){
+    const query = String(promptTemplateSearch?.value || '').trim().toLowerCase();
+    const allTemplates = promptTemplateItems();
+    const activeGroups = activePromptTemplateGroups();
     const items = allTemplates.filter(item => {
         if(promptTemplateCategory !== 'all' && item.category !== promptTemplateCategory) return false;
         if(!query) return true;
@@ -4660,8 +4671,6 @@ function renderPromptTemplatePanel(options={}){
             ` : `<div class="prompt-template-empty">${escapeHtml(tr('smart.tplPickOrCreate'))}</div>`}
         </div>
     `;
-    refreshIcons();
-    restorePromptTemplateScroll(scrollSnapshot);
 }
 function activePromptTemplateNodeId(){
     return promptTemplatePanel?.classList?.contains('open') && promptTemplatePanel.dataset.target !== 'composer' ? (promptTemplatePanel.dataset.nodeId || '') : '';
@@ -18820,4 +18829,5 @@ window.onload = async () => {
     syncApiKindToggleVisibility();
     render();
 };
+
 
