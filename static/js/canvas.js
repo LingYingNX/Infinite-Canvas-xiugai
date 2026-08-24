@@ -884,6 +884,9 @@ async function responseErrorMessage(response, fallback='请求失败'){
 function assertCanvasResponseOk(response, message){
     if(!response.ok) throw new Error(message);
 }
+async function assertCanvasResponseMessage(response, fallback='请求失败'){
+    if(!response.ok) throw new Error(await responseErrorMessage(response, fallback));
+}
 function closeErrorModal(){
     if(errorModal) errorModal.classList.remove('open');
 }
@@ -3151,7 +3154,7 @@ async function runMsGenNode(nodeId, opts={}){
                 method:'POST', headers:{'Content-Type':'application/json'},
                 body:JSON.stringify(apiBody)
             }, {cascadeTargetId});
-            if(!res.ok) throw new Error(await responseErrorMessage(res, tr('canvas.msFailed')));
+            if(!res.ok) await assertCanvasResponseMessage(res, tr('canvas.msFailed'));
             return await res.json();
         };
         const results = await Promise.all(Array.from({length:count}, submitMs));
@@ -3542,7 +3545,7 @@ async function downloadOutputNodeImages(nodeId){
                 filename:`${(canvas?.title || 'canvas-output').slice(0, 48)}-${node.id}.zip`
             })
         });
-        if(!res.ok) throw new Error(await responseErrorMessage(res, tr('canvas.outputDownloadEmpty')));
+        if(!res.ok) await assertCanvasResponseMessage(res, tr('canvas.outputDownloadEmpty'));
         const blob = await res.blob();
         downloadBlob(blob, `${(canvas?.title || 'canvas-output').slice(0, 48)}-${node.id}.zip`, 1000);
     } catch(err) {
@@ -3567,7 +3570,7 @@ async function downloadGroupNodeImages(groupId){
                 items:items.map((item, index) => ({url:item.url, name:downloadNameForGroupImage(item, index)}))
             })
         });
-        if(!res.ok) throw new Error(await responseErrorMessage(res, tr('canvas.outputDownloadEmpty')));
+        if(!res.ok) await assertCanvasResponseMessage(res, tr('canvas.outputDownloadEmpty'));
         const blob = await res.blob();
         downloadBlob(blob, filename, 1200);
     } catch(err) {
@@ -3759,7 +3762,7 @@ async function uploadCanvasMediaRefToCloud(node, ref){
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({url:ref.url, service:'auto'})
     });
-    if(!response.ok) throw new Error(await responseErrorMessage(response, '云端上传失败'));
+    if(!response.ok) await assertCanvasResponseMessage(response, '云端上传失败');
     const data = await response.json();
     const uploadedUrl = data.url || '';
     if(!uploadedUrl) throw new Error('云端没有返回链接');
@@ -3962,7 +3965,7 @@ async function importLocalImages(paths){
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({paths})
     });
-    if(!response.ok) throw new Error(await responseErrorMessage(response, langIsEn() ? 'Local image import failed' : '导入本地图片失败'));
+    if(!response.ok) await assertCanvasResponseMessage(response, langIsEn() ? 'Local image import failed' : '导入本地图片失败');
     const data = await response.json();
     return data.files || [];
 }
@@ -11285,7 +11288,7 @@ async function runGenerator(genId, opts={}){
 async function midjourneyRequest(path, options={}){
     const {cascadeTargetId='', ...init} = options;
     const response = await cascadeFetch(path, init, cascadeTargetId ? {cascadeTargetId} : {});
-    if(!response.ok) throw new Error(await responseErrorMessage(response, 'Midjourney 请求失败'));
+    if(!response.ok) await assertCanvasResponseMessage(response, 'Midjourney 请求失败');
     return response.json();
 }
 async function waitMidjourneyTask(providerId, taskId, options={}){
@@ -11483,7 +11486,7 @@ async function runVideoNode(nodeId, opts={}){
                 generate_audio:Boolean(node.generateAudio),
                 multimodal:Boolean(node.multimodal)
             })
-        }, {cascadeTargetId}).then(async r => { if(!r.ok) throw new Error(await responseErrorMessage(r, tr('canvas.videoFailed'))); return r.json(); });
+        }, {cascadeTargetId}).then(async r => { if(!r.ok) await assertCanvasResponseMessage(r, tr('canvas.videoFailed')); return r.json(); });
         const meta = collectRunMeta(out, pendingId);
         if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
         const outputUrls = resultMediaUrls(result).map(item => {
@@ -11772,7 +11775,7 @@ async function uploadCanvasUrlToComfy(url){
     const form = new FormData();
     form.append('files', blob, filename);
     const data = await fetch('/api/upload', {method:'POST', body:form}).then(async r => {
-        if(!r.ok) throw new Error(await responseErrorMessage(r, langIsEn() ? 'Image upload to ComfyUI failed' : '图片上传到 ComfyUI 失败'));
+        if(!r.ok) await assertCanvasResponseMessage(r, langIsEn() ? 'Image upload to ComfyUI failed' : '图片上传到 ComfyUI 失败');
         return r.json();
     });
     return data.files?.[0]?.comfy_name || filename;
@@ -12619,7 +12622,7 @@ async function callCanvasLLM(node, message, messages=[], options={}){
         })
     }, options).then(async r => {
         if(!r.ok){
-            throw new Error(await responseErrorMessage(r, 'LLM 运行失败'));
+            await assertCanvasResponseMessage(r, 'LLM 运行失败');
         }
         return r.json();
     });
@@ -13389,7 +13392,7 @@ async function createCanvasImageTask(payload, options={}){
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify(payload)
     }, options);
-    if(!res.ok) throw new Error(await responseErrorMessage(res, tr('canvas.generationFailed')));
+    if(!res.ok) await assertCanvasResponseMessage(res, tr('canvas.generationFailed'));
     return res.json();
 }
 async function createCanvasComfyTask(payload, options={}){
@@ -13398,7 +13401,7 @@ async function createCanvasComfyTask(payload, options={}){
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify(payload)
     }, options);
-    if(!res.ok) throw new Error(await responseErrorMessage(res, actionFailed('canvas.comfyGenerate')));
+    if(!res.ok) await assertCanvasResponseMessage(res, actionFailed('canvas.comfyGenerate'));
     return res.json();
 }
 async function waitCanvasComfyTaskResult(taskId, options={}){
@@ -13409,7 +13412,7 @@ async function waitCanvasComfyTaskResult(taskId, options={}){
         const res = await cascadeFetch(`/api/canvas-comfy-tasks/${encodeURIComponent(taskId)}`, {}, {cascadeTargetId});
         if(!res.ok){
             if(res.status === 404) throw new Error(cascadeBackendRestartMessage());
-            throw new Error(await responseErrorMessage(res, actionFailed('canvas.comfyGenerate')));
+            await assertCanvasResponseMessage(res, actionFailed('canvas.comfyGenerate'));
         }
         const data = await res.json();
         if(data.status === 'succeeded') return data.result || {};
@@ -13472,7 +13475,7 @@ async function queryRecoverPendingOutput(pendingId){
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({provider_id:providerIdForPending(pending), task_id:taskId})
         });
-        if(!res.ok) throw new Error(await responseErrorMessage(res, '查询失败'));
+        if(!res.ok) await assertCanvasResponseMessage(res, '查询失败');
         const data = await res.json();
         if(data.status === 'succeeded'){
             completeRecoverPendingOutput(out, pending, data);
@@ -13511,7 +13514,7 @@ async function pollCanvasImageTask(taskId, options={}){
             const res = await cascadeFetch(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`, {}, {cascadeTargetId});
             if(!res.ok){
                 if(res.status === 404) throw new Error(cascadeBackendRestartMessage());
-                throw new Error(await responseErrorMessage(res, tr('canvas.generationFailed')));
+                await assertCanvasResponseMessage(res, tr('canvas.generationFailed'));
             }
             const data = await res.json();
             if(data.status === 'succeeded'){
@@ -13541,7 +13544,7 @@ async function waitCanvasImageTaskResult(taskId, options={}){
         const res = await cascadeFetch(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`, {}, {cascadeTargetId});
         if(!res.ok){
             if(res.status === 404) throw new Error(cascadeBackendRestartMessage());
-            throw new Error(await responseErrorMessage(res, tr('canvas.generationFailed')));
+            await assertCanvasResponseMessage(res, tr('canvas.generationFailed'));
         }
         const data = await res.json();
         if(data.status === 'succeeded') return data.result || {};
@@ -14732,7 +14735,7 @@ async function exportSelectedWorkflow(includeResources=false){
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({...payload, include_resources:true, filename})
         });
-        if(!res.ok) throw new Error(await responseErrorMessage(res, '导出工作流失败'));
+        if(!res.ok) await assertCanvasResponseMessage(res, '导出工作流失败');
         const blob = await res.blob();
         downloadBlob(blob, filename);
         setStatus('已导出包含资源的工作流包');
@@ -14776,7 +14779,7 @@ async function exportSelectedWorkflowToLibrary(){
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({...payload, include_resources:true, filename, name:filename.replace(/\.zip$/i, ''), library_id:target.libraryId, category_id:target.categoryId})
         });
-        if(!res.ok) throw new Error(await responseErrorMessage(res, '导出到资产库失败'));
+        if(!res.ok) await assertCanvasResponseMessage(res, '导出到资产库失败');
         const data = await res.json();
         canvasAssetLibrary = data.library || canvasAssetLibrary;
         activeCanvasAssetLibraryId = target.libraryId || canvasAssetLibrary.active_library_id || activeCanvasAssetLibraryId;
@@ -14860,7 +14863,7 @@ async function importWorkflowFile(file){
         const form = new FormData();
         form.append('file', file);
         const res = await fetch('/api/canvas-workflows/import', {method:'POST', body:form});
-        if(!res.ok) throw new Error(await responseErrorMessage(res, '导入工作流失败'));
+        if(!res.ok) await assertCanvasResponseMessage(res, '导入工作流失败');
         const data = await res.json();
         insertWorkflowIntoCanvas(normalizeImportedWorkflow(data));
         closeWorkflowTransferModal();
