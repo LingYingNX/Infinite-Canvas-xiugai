@@ -15819,6 +15819,13 @@ function runSmartCascadeFromLoop(loopId){
     selectedImage = {nodeId:'', index:-1};
     runSmartCascade(tail);
 }
+function finishSmartGenerationRun(node, sourceVisualState, run, runLogStart, outputs, previousSettings, {clearPrompt=true, scheduleRun=true}={}){
+    if(sourceVisualState) restoreSourceVisualState(node, sourceVisualState);
+    addSmartGenerationLog({run, outputs, runMs:nowMs() - runLogStart});
+    if(clearPrompt) clearPromptInput({preserveDraft:true});
+    settings = previousSettings;
+    if(scheduleRun) scheduleSave();
+}
 async function runGeneration(){
     const node = selectedNode();
     if(node?.type === 'smart-minimax') return runMinimaxNode(node.id);
@@ -15902,20 +15909,14 @@ async function runGeneration(){
     try {
         if(settings.engine === 'comfy'){
             await runComfyGeneration(pendingNode, prompt, refs, pendingNode, pendingMeta);
-            if(sourceVisualState) restoreSourceVisualState(node, sourceVisualState);
-            addSmartGenerationLog({run:runLog, outputs:pendingNode.images || [], runMs:nowMs() - runLogStart});
-            settings = previousSettings;
+            finishSmartGenerationRun(node, sourceVisualState, runLog, runLogStart, pendingNode.images || [], previousSettings, {clearPrompt:false, scheduleRun:false});
             return;
         }
         if(isApiLikeEngine(settings.engine) && settings.apiKind === 'video'){
             const outVideos = await runApiVideoGeneration(prompt, refs);
             if(!outVideos.length) throw new Error(tr('smart.errNoOutVideos'));
             finalizePendingNode(pendingNode, outVideos, pendingMeta, 'video');
-            if(sourceVisualState) restoreSourceVisualState(node, sourceVisualState);
-            addSmartGenerationLog({run:runLog, outputs:outVideos, runMs:nowMs() - runLogStart});
-            clearPromptInput({preserveDraft:true});
-            settings = previousSettings;
-            scheduleSave();
+            finishSmartGenerationRun(node, sourceVisualState, runLog, runLogStart, outVideos, previousSettings);
             return;
         }
         const rhModelMode = settings.engine === 'runninghub' && Boolean(runningHubSelectedModel(settings));
@@ -15947,21 +15948,13 @@ async function runGeneration(){
             }
             if(!(pendingNode.images || []).length) throw new Error(tr('smart.errNoOutImages'));
             if(outpaintSize) delete node.outpaintSize;
-            if(sourceVisualState) restoreSourceVisualState(node, sourceVisualState);
-            addSmartGenerationLog({run:runLog, outputs:pendingNode.images || [], runMs:nowMs() - runLogStart});
-            clearPromptInput({preserveDraft:true});
-            settings = previousSettings;
-            scheduleSave();
+            finishSmartGenerationRun(node, sourceVisualState, runLog, runLogStart, pendingNode.images || [], previousSettings);
             return;
         }
         if(!outImages.length) throw new Error(tr('smart.errNoOutImages'));
         if(outpaintSize) delete node.outpaintSize;
         finalizePendingNode(pendingNode, outImages, pendingMeta);
-        if(sourceVisualState) restoreSourceVisualState(node, sourceVisualState);
-        addSmartGenerationLog({run:runLog, outputs:outImages, runMs:nowMs() - runLogStart});
-        clearPromptInput({preserveDraft:true});
-        settings = previousSettings;
-        scheduleSave();
+        finishSmartGenerationRun(node, sourceVisualState, runLog, runLogStart, outImages, previousSettings);
     } catch(e) {
         settings = previousSettings;
         if(handleJimengPendingSignal(pendingNode, e)){
