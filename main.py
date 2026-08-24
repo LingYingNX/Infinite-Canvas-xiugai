@@ -14332,20 +14332,58 @@ async def query_image_task(payload: ImageTaskQueryRequest):
         "raw": raw,
     }
 
-async def run_canvas_image_task(task_id: str, payload: OnlineImageRequest):
+def create_canvas_task(task_id: str, task_type: str, **extra) -> None:
+    with CANVAS_TASK_LOCK:
+        CANVAS_TASKS[task_id] = {
+            "id": task_id,
+            "type": task_type,
+            "status": "queued",
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "result": None,
+            "error": "",
+            **extra,
+        }
+
+def mark_canvas_task_running(task_id: str) -> None:
     with CANVAS_TASK_LOCK:
         if task_id in CANVAS_TASKS:
             CANVAS_TASKS[task_id]["status"] = "running"
             CANVAS_TASKS[task_id]["updated_at"] = time.time()
+
+def mark_canvas_task_succeeded(task_id: str, result) -> None:
+    with CANVAS_TASK_LOCK:
+        CANVAS_TASKS[task_id].update({
+            "status": "succeeded",
+            "result": result,
+            "error": "",
+            "updated_at": time.time(),
+        })
+
+def mark_canvas_task_failed(task_id: str, detail, status_code: int, upstream_task_id: str = None) -> None:
+    updates = {
+        "status": "failed",
+        "error": str(detail),
+        "status_code": status_code,
+    }
+    if upstream_task_id is not None:
+        updates["upstream_task_id"] = upstream_task_id
+    updates["updated_at"] = time.time()
+    with CANVAS_TASK_LOCK:
+        CANVAS_TASKS[task_id].update(updates)
+
+def get_canvas_task_or_404(task_id: str, message: str):
+    with CANVAS_TASK_LOCK:
+        task = dict(CANVAS_TASKS.get(task_id) or {})
+    if not task:
+        raise HTTPException(status_code=404, detail=message)
+    return task
+
+async def run_canvas_image_task(task_id: str, payload: OnlineImageRequest):
+    mark_canvas_task_running(task_id)
     try:
         result = await build_online_image_result(payload)
-        with CANVAS_TASK_LOCK:
-            CANVAS_TASKS[task_id].update({
-                "status": "succeeded",
-                "result": result,
-                "error": "",
-                "updated_at": time.time(),
-            })
+        mark_canvas_task_succeeded(task_id, result)
     except JimengPendingError as exc:
         # 即梦云端还在排队：标记为 jimeng_pending，前端据 submit_id 持久续查（任务未丢失）
         info = jimeng_pending_payload(exc)
@@ -14364,92 +14402,41 @@ async def run_canvas_image_task(task_id: str, payload: OnlineImageRequest):
         detail = getattr(exc, "detail", None) or str(exc)
         status_code = getattr(exc, "status_code", 500)
         upstream_task_id = getattr(exc, "upstream_task_id", "") or extract_task_id_from_text(detail)
-        with CANVAS_TASK_LOCK:
-            CANVAS_TASKS[task_id].update({
-                "status": "failed",
-                "error": str(detail),
-                "status_code": status_code,
-                "upstream_task_id": upstream_task_id,
-                "updated_at": time.time(),
-            })
+        mark_canvas_task_failed(task_id, detail, status_code, upstream_task_id=upstream_task_id)
 
 @app.post("/api/canvas-image-tasks")
 async def create_canvas_image_task(payload: OnlineImageRequest):
     task_id = f"canvas_img_{uuid.uuid4().hex}"
-    with CANVAS_TASK_LOCK:
-        CANVAS_TASKS[task_id] = {
-            "id": task_id,
-            "type": "online-image",
-            "status": "queued",
-            "created_at": time.time(),
-            "updated_at": time.time(),
-            "result": None,
-            "error": "",
-            "provider_id": payload.provider_id,
-            "model": payload.model,
-        }
+    create_canvas_task(task_id, "online-image", provider_id=payload.provider_id, model=payload.model)
     asyncio.create_task(run_canvas_image_task(task_id, payload))
     return {"task_id": task_id, "status": "queued"}
 
 @app.get("/api/canvas-image-tasks/{task_id}")
 async def get_canvas_image_task(task_id: str):
-    with CANVAS_TASK_LOCK:
-        task = dict(CANVAS_TASKS.get(task_id) or {})
-    if not task:
-        raise HTTPException(status_code=404, detail="画布任务不存在，可能服务已重启或任务已过期")
-    return task
+    return get_canvas_task_or_404(task_id, "画布任务不存在，可能服务已重启或任务已过期")
 
 async def run_canvas_comfy_task(task_id: str, payload: GenerateRequest):
-    with CANVAS_TASK_LOCK:
-        if task_id in CANVAS_TASKS:
-            CANVAS_TASKS[task_id]["status"] = "running"
-            CANVAS_TASKS[task_id]["updated_at"] = time.time()
+    mark_canvas_task_running(task_id)
     try:
         result = await asyncio.to_thread(generate, payload)
         if isinstance(result, dict) and result.get("error"):
             raise RuntimeError(str(result.get("error") or "ComfyUI 生成失败"))
-        with CANVAS_TASK_LOCK:
-            CANVAS_TASKS[task_id].update({
-                "status": "succeeded",
-                "result": result,
-                "error": "",
-                "updated_at": time.time(),
-            })
+        mark_canvas_task_succeeded(task_id, result)
     except Exception as exc:
         detail = getattr(exc, "detail", None) or str(exc)
         status_code = getattr(exc, "status_code", 500)
-        with CANVAS_TASK_LOCK:
-            CANVAS_TASKS[task_id].update({
-                "status": "failed",
-                "error": str(detail),
-                "status_code": status_code,
-                "updated_at": time.time(),
-            })
+        mark_canvas_task_failed(task_id, detail, status_code)
 
 @app.post("/api/canvas-comfy-tasks")
 async def create_canvas_comfy_task(payload: GenerateRequest):
     task_id = f"canvas_comfy_{uuid.uuid4().hex}"
-    with CANVAS_TASK_LOCK:
-        CANVAS_TASKS[task_id] = {
-            "id": task_id,
-            "type": "comfy",
-            "status": "queued",
-            "created_at": time.time(),
-            "updated_at": time.time(),
-            "result": None,
-            "error": "",
-            "workflow_json": payload.workflow_json,
-        }
+    create_canvas_task(task_id, "comfy", workflow_json=payload.workflow_json)
     asyncio.create_task(run_canvas_comfy_task(task_id, payload))
     return {"task_id": task_id, "status": "queued"}
 
 @app.get("/api/canvas-comfy-tasks/{task_id}")
 async def get_canvas_comfy_task(task_id: str):
-    with CANVAS_TASK_LOCK:
-        task = dict(CANVAS_TASKS.get(task_id) or {})
-    if not task:
-        raise HTTPException(status_code=404, detail="ComfyUI 任务不存在，可能服务已重启或任务已过期")
-    return task
+    return get_canvas_task_or_404(task_id, "ComfyUI 任务不存在，可能服务已重启或任务已过期")
 
 # --- 图像生成参数 schema（供客户端动态渲染参数表单，避免把参数写死在前端） ---
 IMAGE_PARAM_RATIOS = [
