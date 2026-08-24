@@ -7730,6 +7730,15 @@ def find_asset_category_with_library(lib, category_id, library_id=""):
                 return library, cat
     return None, None
 
+def load_image_asset_category(payload):
+    lib = load_asset_library()
+    cat = find_asset_category_in_library(lib, payload.category_id, payload.library_id)
+    if not cat:
+        raise HTTPException(status_code=404, detail="分类不存在")
+    if cat.get("type") != "image":
+        raise HTTPException(status_code=400, detail="该分类暂不支持添加媒体")
+    return lib, cat
+
 # ---------------- 共享文件夹（局域网只读浏览/引用） ----------------
 SHARED_MEDIA_EXTS = {
     ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp",
@@ -16783,12 +16792,7 @@ async def delete_asset_library_category(category_id: str, library_id: str = ""):
 
 @app.post("/api/asset-library/items")
 async def add_asset_library_item(payload: AssetLibraryAddRequest):
-    lib = load_asset_library()
-    cat = find_asset_category_in_library(lib, payload.category_id, payload.library_id)
-    if not cat:
-        raise HTTPException(status_code=404, detail="分类不存在")
-    if cat.get("type") != "image":
-        raise HTTPException(status_code=400, detail="该分类暂不支持添加媒体")
+    lib, cat = load_image_asset_category(payload)
     src = output_file_from_url(payload.url)
     if not src:
         raise HTTPException(status_code=400, detail="只支持保存本地 /assets 或 /output 媒体")
@@ -16804,12 +16808,7 @@ async def add_asset_library_item(payload: AssetLibraryAddRequest):
 @app.post("/api/asset-library/items/batch")
 async def batch_add_asset_library_items(payload: AssetLibraryBatchAddRequest):
     added = []
-    lib = load_asset_library()
-    cat = find_asset_category_in_library(lib, payload.category_id, payload.library_id)
-    if not cat:
-        raise HTTPException(status_code=404, detail="分类不存在")
-    if cat.get("type") != "image":
-        raise HTTPException(status_code=400, detail="该分类暂不支持添加媒体")
+    lib, cat = load_image_asset_category(payload)
     for entry in (payload.items or [])[:200]:
         entry.category_id = payload.category_id
         entry.library_id = payload.library_id
@@ -16905,12 +16904,7 @@ async def import_shared_folder_files(payload: SharedFolderImport):
     if not entry:
         raise HTTPException(status_code=404, detail="共享文件夹不存在")
     folder_abs = shared_folder_abs(entry)
-    lib = load_asset_library()
-    cat = find_asset_category_in_library(lib, payload.category_id, payload.library_id)
-    if not cat:
-        raise HTTPException(status_code=404, detail="分类不存在")
-    if cat.get("type") != "image":
-        raise HTTPException(status_code=400, detail="该分类暂不支持添加媒体")
+    lib, cat = load_image_asset_category(payload)
     added = []
     for rel in (payload.paths or [])[:200]:
         abs_path = shared_child_abs(folder_abs, rel)
