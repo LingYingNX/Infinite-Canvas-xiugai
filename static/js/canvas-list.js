@@ -410,14 +410,14 @@ async function renameProject(pid, name){
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name })
         });
-        if(!res.ok) throw new Error('rename project failed');
+        assertCanvasListResponseOk(res, 'rename project failed');
     } catch(e){ console.error(e); setStatus(L('重命名失败','Rename failed')); loadAll(); }
 }
 async function deleteProject(pid){
     pendingDeleteProjectId = null;
     try {
         const res = await fetch(`/api/projects/${encodeURIComponent(pid)}`, { method: 'DELETE' });
-        if(!res.ok) throw new Error('delete project failed');
+        assertCanvasListResponseOk(res, 'delete project failed');
         // canvases of deleted project move back to default
         canvases.forEach(c => { if((c.project || 'default') === pid) c.project = 'default'; });
         projects = projects.filter(p => p.id !== pid);
@@ -869,6 +869,10 @@ async function canvasListRequestJson(url, init={}, fallback='请求失败'){
     return response.json();
 }
 
+function assertCanvasListResponseOk(response, message){
+    if(!response.ok) throw new Error(message);
+}
+
 async function exportCanvas(id){
     const c = canvases.find(x => x.id === id);
     setStatus(L('正在导出...','Exporting...'));
@@ -1161,7 +1165,7 @@ async function deleteCanvas(id){
     if(!c) return;
     try {
         const res = await fetch(`/api/canvases/${encodeURIComponent(id)}`, { method: 'DELETE' });
-        if(!res.ok) throw new Error('delete failed');
+        assertCanvasListResponseOk(res, 'delete failed');
         canvases = canvases.filter(x => x.id !== id);
         selectedIds.delete(id);
         if(lastSelectedId === id) lastSelectedId = selectedIds.size ? Array.from(selectedIds)[0] : null;
@@ -1249,7 +1253,7 @@ function renderTrash(){
 async function restoreCanvas(id){
     try {
         const res = await fetch(`/api/canvases/${encodeURIComponent(id)}/restore`, { method: 'POST' });
-        if(!res.ok) throw new Error('restore failed');
+        assertCanvasListResponseOk(res, 'restore failed');
         deletedCanvases = deletedCanvases.filter(c => c.id !== id);
         await loadAll();           // restored canvas returns to its stored project
         renderTrash();
@@ -1259,7 +1263,7 @@ async function restoreCanvas(id){
 async function purgeCanvas(id){
     try {
         const res = await fetch(`/api/canvases/${encodeURIComponent(id)}/purge`, { method: 'DELETE' });
-        if(!res.ok) throw new Error('purge failed');
+        assertCanvasListResponseOk(res, 'purge failed');
         deletedCanvases = deletedCanvases.filter(c => c.id !== id);
         renderTrash();
         updateTrashBadge(deletedCanvases.length);
