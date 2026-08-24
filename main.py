@@ -3863,6 +3863,34 @@ def display_title(text):
     title = re.sub(r"\s+", " ", text or "").strip()
     return title[:24] or "新对话"
 
+def load_chat_conversation(payload, request, x_user_id):
+    user_id = safe_user_id(x_user_id, request)
+    conversation = (
+        load_conversation(user_id, payload.conversation_id)
+        if payload.conversation_id
+        else new_conversation(user_id, display_title(payload.message))
+    )
+    if not conversation.get("messages"):
+        conversation["title"] = display_title(payload.message)
+    return user_id, conversation
+
+def chat_user_message(payload, refs, mode=None):
+    return {
+        "id": uuid.uuid4().hex,
+        "role": "user",
+        "content": payload.message,
+        "created_at": now_ms(),
+        "attachments": refs,
+        "mode": mode if mode is not None else payload.mode,
+    }
+
+def append_chat_user_message(conversation, user_id, payload, refs, mode=None):
+    user_message = chat_user_message(payload, refs, mode)
+    conversation["messages"].append(user_message)
+    conversation["updated_at"] = now_ms()
+    save_conversation(user_id, conversation)
+    return user_message
+
 def resolve_chat_provider(provider: str, model: str, ms_model: str):
     if provider == "modelscope":
         clean_token = modelscope_api_key()
@@ -17286,28 +17314,11 @@ async def purge_canvas(canvas_id: str):
 
 @app.post("/api/chat")
 async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(default="")):
-    user_id = safe_user_id(x_user_id, request)
-    conversation = (
-        load_conversation(user_id, payload.conversation_id)
-        if payload.conversation_id
-        else new_conversation(user_id, display_title(payload.message))
-    )
-    if not conversation.get("messages"):
-        conversation["title"] = display_title(payload.message)
+    user_id, conversation = load_chat_conversation(payload, request, x_user_id)
 
     refs = [ref.dict() for ref in payload.reference_images if ref.url]
     image_refs = image_references(refs)
-    user_message = {
-        "id": uuid.uuid4().hex,
-        "role": "user",
-        "content": payload.message,
-        "created_at": now_ms(),
-        "attachments": refs,
-        "mode": payload.mode,
-    }
-    conversation["messages"].append(user_message)
-    conversation["updated_at"] = now_ms()
-    save_conversation(user_id, conversation)
+    user_message = append_chat_user_message(conversation, user_id, payload, refs)
 
     if payload.mode == "image":
         image_provider_id = payload.provider if payload.provider not in {"modelscope"} else "comfly"
@@ -17402,28 +17413,11 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
 
 @app.post("/api/chat/agent")
 async def chat_agent(payload: ChatRequest, request: Request, x_user_id: str = Header(default="")):
-    user_id = safe_user_id(x_user_id, request)
-    conversation = (
-        load_conversation(user_id, payload.conversation_id)
-        if payload.conversation_id
-        else new_conversation(user_id, display_title(payload.message))
-    )
-    if not conversation.get("messages"):
-        conversation["title"] = display_title(payload.message)
+    user_id, conversation = load_chat_conversation(payload, request, x_user_id)
 
     refs = [ref.dict() for ref in payload.reference_images if ref.url]
     image_refs = image_references(refs)
-    user_message = {
-        "id": uuid.uuid4().hex,
-        "role": "user",
-        "content": payload.message,
-        "created_at": now_ms(),
-        "attachments": refs,
-        "mode": "agent",
-    }
-    conversation["messages"].append(user_message)
-    conversation["updated_at"] = now_ms()
-    save_conversation(user_id, conversation)
+    user_message = append_chat_user_message(conversation, user_id, payload, refs, mode="agent")
 
     decision = await decide_chat_agent_action(payload, conversation, image_refs)
     action = decision.get("action") or "chat"
@@ -17500,27 +17494,10 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
     if payload.mode == "image":
         raise HTTPException(status_code=400, detail="图片模式请使用 /api/chat")
 
-    user_id = safe_user_id(x_user_id, request)
-    conversation = (
-        load_conversation(user_id, payload.conversation_id)
-        if payload.conversation_id
-        else new_conversation(user_id, display_title(payload.message))
-    )
-    if not conversation.get("messages"):
-        conversation["title"] = display_title(payload.message)
+    user_id, conversation = load_chat_conversation(payload, request, x_user_id)
 
     refs = [ref.dict() for ref in payload.reference_images if ref.url]
-    user_message = {
-        "id": uuid.uuid4().hex,
-        "role": "user",
-        "content": payload.message,
-        "created_at": now_ms(),
-        "attachments": refs,
-        "mode": payload.mode,
-    }
-    conversation["messages"].append(user_message)
-    conversation["updated_at"] = now_ms()
-    save_conversation(user_id, conversation)
+    user_message = append_chat_user_message(conversation, user_id, payload, refs)
 
     _codex_provider = get_api_provider(payload.provider)
     if is_codex_provider(_codex_provider):
