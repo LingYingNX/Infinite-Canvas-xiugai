@@ -15693,136 +15693,145 @@ function smartCascadeCleanupRun(runKey, tail, directLoopTargetRun){
     scheduleSave();
     render();
 }
+async function runSmartCascadeRound(setup, singleLoopSlots, loopIndex=setup.startIndex, options={}){
+    const {tail, graph, chain, loop, directLoopTargetRun, singleNodeLoopRun, runState, startIndex, batchSize, endIndex, parallelLimit} = setup;
+    throwIfSmartCascadeStopRequested(runState);
+    const ctx = loop
+        ? {index:loopIndex, total:endIndex, nodeId:loop.node.id, forceWorkflow:chain.length > 1 && !singleNodeLoopRun, runState, roundOutputs:new Map()}
+        : {runState, roundOutputs:new Map()};
+    if(parallelLimit === 1) smartLoopContext = ctx;
+    if(singleNodeLoopRun){
+        const refs = refsForDirectLoopRound(loop.node, loopIndex, endIndex);
+        if(directLoopTargetRun && parallelLimit === 1) showDirectLoopRoundPreview(loop.node, tail, refs, loopIndex, endIndex);
+        const slotIndex = Math.max(0, Math.floor((loopIndex - startIndex) / batchSize));
+        const outputTarget = tagLoopOutputSlot(
+            options.outputTarget || singleLoopSlots[slotIndex] || loopOutputSlotForRound(tail, loop.node, loopIndex, slotIndex) || createLoopOutputSlot(tail, loopIndex, slotIndex, {loopNode:loop.node, slotIndex, runState}),
+            tail,
+            loop.node,
+            loopIndex,
+            slotIndex
+        );
+        singleLoopSlots[slotIndex] = outputTarget;
+        await runLoopRoundIntoSlot(loop.node, tail, outputTarget, loopIndex, ctx);
+        return;
+    }
+    const producedRefs = new Map();
+    const rootRefs = defaultReferenceImagesFor(graph.root, true, ctx).filter(img => img?.url);
+    producedRefs.set(graph.root.id, rootRefs);
+    await runSmartCascadeBranch(graph.root, rootRefs, graph, runState, ctx, producedRefs);
+}
+async function runSmartCascadeBranch(source, incomingRefs=[], graph, runState, ctx, producedRefs){
+    throwIfSmartCascadeStopRequested(runState);
+    let targets = graph.children.get(source.id) || [];
+    const loopPrompts = isSmartImageNode(source) ? upstreamLoopPromptNodesFor(source) : [];
+    const sourceLoopPrompts = isSmartImageNode(source) ? relayLoopPromptNodesForTarget(source) : [];
+    if(runState.runPath && sourceLoopPrompts.length && source?.id){
+        sourceLoopPrompts.forEach(loopNode => {
+            runState.runPath.states[`${loopNode.id}->${source.id}`] = 'done';
+        });
+        scheduleConnectionLayerRefresh();
+    }
+    if(loopPrompts.length && targets.length > 1){
+        const firstLoop = loopPrompts[0];
+        const startBase = Math.max(1, Number(firstLoop.loopStart) || 1);
+        const currentIndex = Math.max(1, Number(ctx?.index || startBase) || startBase);
+        const selectedTarget = targets[(currentIndex - 1) % targets.length];
+        if(runState.runPath && firstLoop?.id && source?.id){
+            runState.runPath.states[`${firstLoop.id}->${source.id}`] = 'done';
+            scheduleConnectionLayerRefresh();
+        }
+        targets = [selectedTarget].filter(Boolean);
+    }
+    let sharedRefs = incomingRefs;
+    for(let index = 0; index < targets.length; index++){
+        throwIfSmartCascadeStopRequested(runState);
+        const target = targets[index];
+        const edgeKey = `${source.id}->${target.id}`;
+        let outputs = [];
+        const targetChildren = (graph.children.get(target.id) || []).filter(child => child && child.type !== 'smart-loop');
+        const targetIsLeaf = target.type !== 'smart-loop' && targetChildren.length === 0;
+        const relayLoops = isSmartImageNode(source) && isSmartImageNode(target)
+            ? relayLoopPromptNodesForEdge(source, target)
+            : [];
+        const stepCtx = relayLoops.length && isSmartImageNode(target)
+            ? {...(ctx || {}), appendLoopOutputs:Boolean(ctx?.nodeId && targetIsLeaf), relayPromptNodeIds:[...new Set([...(ctx?.relayPromptNodeIds || []), ...relayLoops.map(n => n.id)])]}
+            : {...(ctx || {}), appendLoopOutputs:Boolean(ctx?.nodeId && targetIsLeaf)};
+        try {
+            if(runState.runPath && relayLoops.length && source?.id && isSmartImageNode(target)){
+                relayLoops.forEach(loopNode => {
+                    runState.runPath.states[`${loopNode.id}->${source.id}`] = 'done';
+                });
+                scheduleConnectionLayerRefresh();
+            }
+            if(runState.runPath){
+                runState.runPath.states[edgeKey] = 'active';
+                scheduleConnectionLayerRefresh();
+            }
+            if(target.type === 'smart-loop'){
+                outputs = outputImagesForNode(source, true, ctx).filter(img => img?.url);
+                sharedRefs = cascadeRefsFromOutputs(outputs, source);
+            } else if(index === 0){
+                outputs = await runCascadeStepIntoNode(source, target, incomingRefs, stepCtx);
+                sharedRefs = cascadeRefsFromOutputs(outputs, target);
+            } else {
+                outputs = appendCascadeRefsToReceiver(target, sharedRefs, stepCtx);
+            }
+        } catch(err) {
+            if(/缺少提示词|需要输入文本|need prompt/i.test(err.message || '') && incomingRefs.length){
+                outputs = appendCascadeRefsToReceiver(target, incomingRefs, stepCtx);
+                if(index === 0){
+                    sharedRefs = cascadeRefsFromOutputs(outputs, target);
+                }
+            } else {
+                throw err;
+            }
+        }
+        if(runState.runPath){
+            runState.runPath.states[edgeKey] = 'done';
+            scheduleConnectionLayerRefresh();
+        }
+        const refs = target.type === 'smart-loop' ? sharedRefs : (index === 0 ? sharedRefs : cascadeRefsFromOutputs(outputs, target));
+        producedRefs.set(target.id, refs);
+        throwIfSmartCascadeStopRequested(runState);
+        await runSmartCascadeBranch(target, refs, graph, runState, ctx, producedRefs);
+    }
+}
+function completeSmartCascadeRun(setup){
+    const {parallelLimit, originalSettings, originalPromptHtml, loopMode, totalRounds} = setup;
+    if(parallelLimit === 1) smartLoopContext = null;
+    selectedId = '';
+    selectedIds = [];
+    selectedImage = {nodeId:'', index:-1};
+    activeComposerSubject = null;
+    lastComposerNodeId = '';
+    composer.classList.remove('open');
+    settings = originalSettings;
+    promptInput.innerHTML = originalPromptHtml;
+    scheduleSave();
+    toast(totalRounds > 1
+        ? trf(loopMode === 'parallel' ? 'smart.loopParallelRoundsDone' : 'smart.loopRunRoundsDone', {n:totalRounds})
+        : tr('smart.loopRunDone'));
+}
+function handleSmartCascadeRunError(e, setup){
+    const {parallelLimit, originalSelected, originalSettings, originalPromptHtml} = setup;
+    if(parallelLimit === 1) smartLoopContext = null;
+    selectedId = originalSelected;
+    settings = originalSettings;
+    promptInput.innerHTML = originalPromptHtml;
+    toast(e?.smartCascadeStopped ? '已停止一键运行' : (e.message || tr('smart.errRunFailed')).slice(0, 160));
+}
 async function runSmartCascade(targetNode=null){
     const setup = smartCascadeRunSetup(targetNode);
     if(!setup) return;
-    const {tail, graph, chain, loop, loopId, directLoopTargetRun, singleNodeLoopRun, originalSelected, originalSettings, originalPromptHtml, runKey, runState, totalRounds, startIndex, batchSize, endIndex, loopMode, parallelLimit} = setup;
+    const {runKey, tail, directLoopTargetRun, runState, totalRounds, startIndex, batchSize} = setup;
     const singleLoopSlots = smartCascadePrepareRunState(setup);
     try {
-        const runRound = async (loopIndex=startIndex, options={}) => {
-            throwIfSmartCascadeStopRequested(runState);
-            const ctx = loop
-                ? {index:loopIndex, total:endIndex, nodeId:loop.node.id, forceWorkflow:chain.length > 1 && !singleNodeLoopRun, runState, roundOutputs:new Map()}
-                : {runState, roundOutputs:new Map()};
-            if(parallelLimit === 1) smartLoopContext = ctx;
-            if(singleNodeLoopRun){
-                const refs = refsForDirectLoopRound(loop.node, loopIndex, endIndex);
-                if(directLoopTargetRun && parallelLimit === 1) showDirectLoopRoundPreview(loop.node, tail, refs, loopIndex, endIndex);
-                const slotIndex = Math.max(0, Math.floor((loopIndex - startIndex) / batchSize));
-                const outputTarget = tagLoopOutputSlot(
-                    options.outputTarget || singleLoopSlots[slotIndex] || loopOutputSlotForRound(tail, loop.node, loopIndex, slotIndex) || createLoopOutputSlot(tail, loopIndex, slotIndex, {loopNode:loop.node, slotIndex, runState}),
-                    tail,
-                    loop.node,
-                    loopIndex,
-                    slotIndex
-                );
-                singleLoopSlots[slotIndex] = outputTarget;
-                await runLoopRoundIntoSlot(loop.node, tail, outputTarget, loopIndex, ctx);
-                return;
-            }
-            const producedRefs = new Map();
-            const runBranch = async (source, incomingRefs=[]) => {
-                throwIfSmartCascadeStopRequested(runState);
-                let targets = graph.children.get(source.id) || [];
-                const loopPrompts = isSmartImageNode(source) ? upstreamLoopPromptNodesFor(source) : [];
-                const sourceLoopPrompts = isSmartImageNode(source) ? relayLoopPromptNodesForTarget(source) : [];
-                if(runState.runPath && sourceLoopPrompts.length && source?.id){
-                    sourceLoopPrompts.forEach(loopNode => {
-                        runState.runPath.states[`${loopNode.id}->${source.id}`] = 'done';
-                    });
-                    scheduleConnectionLayerRefresh();
-                }
-                if(loopPrompts.length && targets.length > 1){
-                    const firstLoop = loopPrompts[0];
-                    const startBase = Math.max(1, Number(firstLoop.loopStart) || 1);
-                    const currentIndex = Math.max(1, Number(ctx?.index || startBase) || startBase);
-                    const selectedTarget = targets[(currentIndex - 1) % targets.length];
-                    if(runState.runPath && firstLoop?.id && source?.id){
-                        runState.runPath.states[`${firstLoop.id}->${source.id}`] = 'done';
-                        scheduleConnectionLayerRefresh();
-                    }
-                    targets = [selectedTarget].filter(Boolean);
-                }
-                let sharedRefs = incomingRefs;
-                for(let index = 0; index < targets.length; index++){
-                    throwIfSmartCascadeStopRequested(runState);
-                    const target = targets[index];
-                    const edgeKey = `${source.id}->${target.id}`;
-                    let outputs = [];
-                    const targetChildren = (graph.children.get(target.id) || []).filter(child => child && child.type !== 'smart-loop');
-                    const targetIsLeaf = target.type !== 'smart-loop' && targetChildren.length === 0;
-                    const relayLoops = isSmartImageNode(source) && isSmartImageNode(target)
-                        ? relayLoopPromptNodesForEdge(source, target)
-                        : [];
-                    const stepCtx = relayLoops.length && isSmartImageNode(target)
-                        ? {...(ctx || {}), appendLoopOutputs:Boolean(ctx?.nodeId && targetIsLeaf), relayPromptNodeIds:[...new Set([...(ctx?.relayPromptNodeIds || []), ...relayLoops.map(n => n.id)])]}
-                        : {...(ctx || {}), appendLoopOutputs:Boolean(ctx?.nodeId && targetIsLeaf)};
-                    try {
-                        if(runState.runPath && relayLoops.length && source?.id && isSmartImageNode(target)){
-                            relayLoops.forEach(loopNode => {
-                                runState.runPath.states[`${loopNode.id}->${source.id}`] = 'done';
-                            });
-                            scheduleConnectionLayerRefresh();
-                        }
-                        if(runState.runPath){
-                            runState.runPath.states[edgeKey] = 'active';
-                            scheduleConnectionLayerRefresh();
-                        }
-                        if(target.type === 'smart-loop'){
-                            outputs = outputImagesForNode(source, true, ctx).filter(img => img?.url);
-                            sharedRefs = cascadeRefsFromOutputs(outputs, source);
-                        } else if(index === 0){
-                            outputs = await runCascadeStepIntoNode(source, target, incomingRefs, stepCtx);
-                            sharedRefs = cascadeRefsFromOutputs(outputs, target);
-                        } else {
-                            outputs = appendCascadeRefsToReceiver(target, sharedRefs, stepCtx);
-                        }
-                    } catch(err) {
-                        if(/缺少提示词|需要输入文本|need prompt/i.test(err.message || '') && incomingRefs.length){
-                            outputs = appendCascadeRefsToReceiver(target, incomingRefs, stepCtx);
-                            if(index === 0){
-                                sharedRefs = cascadeRefsFromOutputs(outputs, target);
-                            }
-                        } else {
-                            throw err;
-                        }
-                    }
-                    if(runState.runPath){
-                        runState.runPath.states[edgeKey] = 'done';
-                        scheduleConnectionLayerRefresh();
-                    }
-                    const refs = target.type === 'smart-loop' ? sharedRefs : (index === 0 ? sharedRefs : cascadeRefsFromOutputs(outputs, target));
-                    producedRefs.set(target.id, refs);
-                    throwIfSmartCascadeStopRequested(runState);
-                    await runBranch(target, refs);
-                }
-            };
-            const rootRefs = defaultReferenceImagesFor(graph.root, true, ctx).filter(img => img?.url);
-            producedRefs.set(graph.root.id, rootRefs);
-            await runBranch(graph.root, rootRefs);
-        };
         const roundIndexes = Array.from({length:totalRounds}, (_, round) => startIndex + round * batchSize);
-        await runSmartCascadeRounds(setup, roundIndexes, runRound);
+        await runSmartCascadeRounds(setup, roundIndexes, (loopIndex, options) => runSmartCascadeRound(setup, singleLoopSlots, loopIndex, options));
         throwIfSmartCascadeStopRequested(runState);
-        if(parallelLimit === 1) smartLoopContext = null;
-        selectedId = '';
-        selectedIds = [];
-        selectedImage = {nodeId:'', index:-1};
-        activeComposerSubject = null;
-        lastComposerNodeId = '';
-        composer.classList.remove('open');
-        settings = originalSettings;
-        promptInput.innerHTML = originalPromptHtml;
-        scheduleSave();
-        toast(totalRounds > 1
-            ? trf(loopMode === 'parallel' ? 'smart.loopParallelRoundsDone' : 'smart.loopRunRoundsDone', {n:totalRounds})
-            : tr('smart.loopRunDone'));
+        completeSmartCascadeRun(setup);
     } catch(e) {
-        if(parallelLimit === 1) smartLoopContext = null;
-        selectedId = originalSelected;
-        settings = originalSettings;
-        promptInput.innerHTML = originalPromptHtml;
-        toast(e?.smartCascadeStopped ? '已停止一键运行' : (e.message || tr('smart.errRunFailed')).slice(0, 160));
+        handleSmartCascadeRunError(e, setup);
     } finally {
         smartCascadeCleanupRun(runKey, tail, directLoopTargetRun);
     }
