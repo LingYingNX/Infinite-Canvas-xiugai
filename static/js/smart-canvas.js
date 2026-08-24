@@ -3643,7 +3643,7 @@ async function uploadMediaRefToCloud(ref){
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({url:sourceUrl, service:'auto'})
     });
-    if(!response.ok) throw new Error(await smartResponseErrorMessage(response, '云端上传失败'));
+    if(!response.ok) await assertSmartCanvasResponseMessage(response, '云端上传失败');
     const data = await response.json();
     const uploadedUrl = data.url || '';
     if(!uploadedUrl) throw new Error('云端没有返回链接');
@@ -13300,6 +13300,9 @@ async function smartResponseErrorMessage(response, fallback='请求失败'){
     } catch(_) {}
     return fallback;
 }
+async function assertSmartCanvasResponseMessage(response, fallback='请求失败'){
+    if(!response.ok) throw new Error(await smartResponseErrorMessage(response, fallback));
+}
 function smartDropDataTypes(dataTransfer){
     return [...(dataTransfer?.types || [])].map(type => String(type || ''));
 }
@@ -13482,7 +13485,7 @@ async function importSmartLocalImages(paths){
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({paths:(paths || []).slice(0, SMART_UPLOAD_MAX)})
     });
-    if(!response.ok) throw new Error(await smartResponseErrorMessage(response, tr('smart.toastUploadFail')));
+    if(!response.ok) await assertSmartCanvasResponseMessage(response, tr('smart.toastUploadFail'));
     const data = await response.json();
     return data.files || [];
 }
@@ -15169,14 +15172,14 @@ async function createSmartComfyTask(payload){
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify(payload)
     });
-    if(!res.ok) throw new Error(await smartResponseErrorMessage(res, tr('smart.errRunFailed')));
+    if(!res.ok) await assertSmartCanvasResponseMessage(res, tr('smart.errRunFailed'));
     return res.json();
 }
 async function waitSmartComfyTaskResult(taskId){
     if(!taskId) throw new Error(tr('smart.errRunFailed'));
     while(true){
         const res = await fetch(`/api/canvas-comfy-tasks/${encodeURIComponent(taskId)}`);
-        if(!res.ok) throw new Error(await smartResponseErrorMessage(res, tr('smart.errRunFailed')));
+        if(!res.ok) await assertSmartCanvasResponseMessage(res, tr('smart.errRunFailed'));
         const data = await res.json();
         const readyResult = data?.result || data?.outputs || data?.images || data?.videos || data?.audios || data?.texts;
         if(readyResult && resultMediaUrls(readyResult).length) return data.result || data;
@@ -16190,7 +16193,7 @@ async function runApiVideoGeneration(prompt, refs, runSettings=settings){
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify(payload)
-        }).then(async r => { if(!r.ok) throw new Error(await smartResponseErrorMessage(r, tr('smart.errRunFailed'))); return r.json(); });
+        }).then(async r => { if(!r.ok) await assertSmartCanvasResponseMessage(r, tr('smart.errRunFailed')); return r.json(); });
         if(result && result.jimeng_pending) throw new JimengPendingSignal({submitId:result.submit_id, kind:result.kind || 'video', queueInfo:result.queue_info, message:result.message});
         return resultMediaUrls(result);
     } finally {
@@ -16612,7 +16615,7 @@ async function exportMinimaxTimeline(node, options={}){
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({clips, filename:`minimax-timeline-${Date.now()}.mp4`})
-        }).then(async r => { if(!r.ok) throw new Error(await smartResponseErrorMessage(r, 'Export failed')); return r.json(); });
+        }).then(async r => { if(!r.ok) await assertSmartCanvasResponseMessage(r, 'Export failed'); return r.json(); });
         if(result?.url) downloadPreviewFile({url:result.url, name:result.name || 'minimax-timeline.mp4', kind:'video'});
     } catch(e) {
         toast((e.message || 'Export failed').slice(0, 180));
