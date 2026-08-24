@@ -6803,7 +6803,7 @@ async function zipDownloadImageItems(title, items){
                 items:list.map((item, index) => ({url:item.url, name:downloadNameForMediaItem(item, `image-${String(index + 1).padStart(2, '0')}`)}))
             })
         });
-        if(!response.ok) throw new Error((await response.text()) || '批量下载失败');
+        if(!response.ok) await assertSmartCanvasResponseText(response, '批量下载失败');
         const blob = await response.blob();
         downloadBlob(blob, filename, 1200);
     } catch(e) {
@@ -8096,7 +8096,7 @@ async function runJimengUpscale(node, index){
             method:'POST', headers:{'Content-Type':'application/json'},
             body:JSON.stringify({prompt:`upscale ${resolution}`, provider_id:providerId, model:'', operation:'upscale', resolution_type:resolution, n:1, reference_images:[{url:item.url, name:item.name || 'upscale-input.png'}]})
         }).then(async response => {
-            if(!response.ok) throw new Error(await response.text());
+            if(!response.ok) await assertSmartCanvasResponseText(response);
             return response.json();
         });
         if(!task.task_id) throw new Error(tr('smart.errRunFailed'));
@@ -13303,6 +13303,9 @@ async function smartResponseErrorMessage(response, fallback='请求失败'){
 async function assertSmartCanvasResponseMessage(response, fallback='请求失败'){
     if(!response.ok) throw new Error(await smartResponseErrorMessage(response, fallback));
 }
+async function assertSmartCanvasResponseText(response, fallback=''){
+    throw new Error((await response.text()) || fallback);
+}
 function smartDropDataTypes(dataTransfer){
     return [...(dataTransfer?.types || [])].map(type => String(type || ''));
 }
@@ -13421,7 +13424,7 @@ async function uploadFiles(files){
     const form = new FormData();
     supported.forEach(file => form.append('files', file, file.name || 'media'));
     const data = await fetch('/api/ai/upload', {method:'POST', body:form}).then(async r => {
-        if(!r.ok) throw new Error((await r.text()) || tr('smart.toastUploadFail'));
+        if(!r.ok) await assertSmartCanvasResponseText(r, tr('smart.toastUploadFail'));
         return r.json();
     });
     return (data.files || []).map((file, index) => ({
@@ -15283,7 +15286,7 @@ async function generateComfyUrlsWithSettings(runSettings, prompt, refs){
     const workflowName = runSettings.comfyWorkflow || comfyWorkflows[0]?.name || '';
     if(!workflowName) throw new Error(tr('smart.errNeedWorkflow'));
     const wf = await fetch(`/api/workflows/${encodeURIComponent(workflowName)}`).then(async r => {
-        if(!r.ok) throw new Error(await r.text());
+        if(!r.ok) await assertSmartCanvasResponseText(r);
         return r.json();
     });
     const fields = wf.config?.fields || [];
@@ -16020,7 +16023,7 @@ async function runPromptLLMNode(nodeId){
                 system_prompt:node.llmSystemEnabled ? (systemPrompt || 'You are a helpful prompt assistant.') : ''
             })
         }).then(async r => {
-            if(!r.ok) throw new Error(await r.text());
+            if(!r.ok) await assertSmartCanvasResponseText(r);
             return r.json();
         });
         node.text = (result.text || '').trim();
@@ -16055,7 +16058,7 @@ async function runApiGeneration(prompt, refs, runSettings=settings){
         reference_images:imageRefsOnly(refs).slice(0, SMART_REFERENCE_IMAGE_MAX)
     };
     const tasks = await Promise.all(Array.from({length:count}, () => fetch('/api/canvas-image-tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}).then(async r => {
-        if(!r.ok) throw new Error(await r.text());
+        if(!r.ok) await assertSmartCanvasResponseText(r);
         return r.json();
     })));
     return {taskIds:tasks.map(task => task.task_id).filter(Boolean), count, providerId:payload.provider_id, model:payload.model};
@@ -16222,7 +16225,7 @@ async function runModelscopeGeneration(prompt, refs, runSettings=settings){
         else if(modelKey === 'qwen_edit') body = {prompt, image_urls:imageUrls, resolution:`${width}x${height}`};
         else body = {prompt, model:modelKey === 'custom' ? (runSettings.msCustomModel || modelscopeImageModels()[0]) : msModel.modelId, image_urls:imageUrls, width, height, size:`${width}x${height}`};
         const data = await fetch(msModel.endpoint, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}).then(async r => {
-            if(!r.ok) throw new Error(await r.text());
+            if(!r.ok) await assertSmartCanvasResponseText(r);
             return r.json();
         });
         return data.url || data.images?.[0] || '';
@@ -16252,7 +16255,7 @@ async function runComfyGeneration(node, prompt, refs, pendingNode, meta){
     const workflowName = settings.comfyWorkflow || comfyWorkflows[0]?.name || '';
     if(!workflowName) throw new Error(tr('smart.errNeedWorkflow'));
     const wf = await fetch(`/api/workflows/${encodeURIComponent(workflowName)}`).then(async r => {
-        if(!r.ok) throw new Error(await r.text());
+        if(!r.ok) await assertSmartCanvasResponseText(r);
         return r.json();
     });
     const fields = wf.config?.fields || [];
@@ -16348,7 +16351,7 @@ async function comfyNameForRef(ref){
     const form = new FormData();
     form.append('files', blob, ref.name || 'smart-ref.png');
     const data = await fetch('/api/upload', {method:'POST', body:form}).then(async r => {
-        if(!r.ok) throw new Error(await r.text());
+        if(!r.ok) await assertSmartCanvasResponseText(r);
         return r.json();
     });
     const name = String(data.files?.[0]?.comfy_name || '').trim();
@@ -16740,7 +16743,7 @@ async function fetchJimengQuery(submitId, kind){
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({submit_id:submitId, kind:kind || 'image'})
-    }).then(async r => { if(!r.ok) throw new Error(await r.text()); return r.json(); });
+    }).then(async r => { if(!r.ok) await assertSmartCanvasResponseText(r); return r.json(); });
 }
 async function queryJimengNow(nodeId){
     const node = nodes.find(n => n.id === nodeId);
@@ -16769,7 +16772,7 @@ async function fetchImageTaskQuery(providerId, taskId){
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({provider_id:providerId || 'comfly', task_id:taskId})
     }).then(async r => {
-        if(!r.ok) throw new Error(await r.text());
+        if(!r.ok) await assertSmartCanvasResponseText(r);
         return r.json();
     });
 }
@@ -16853,7 +16856,7 @@ async function pollSmartCanvasTask(taskId){
         for(let i = 0; i < 900; i++){
             await new Promise(resolve => setTimeout(resolve, 2000));
             const task = await fetch(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`).then(async r => {
-                if(!r.ok) throw new Error(await r.text());
+                if(!r.ok) await assertSmartCanvasResponseText(r);
                 return r.json();
             });
             if(task.status === 'succeeded') return task.result || {};
