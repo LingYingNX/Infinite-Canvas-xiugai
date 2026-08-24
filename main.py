@@ -3466,16 +3466,20 @@ def conversation_path(user_id, conversation_id):
 def now_ms():
     return int(time.time() * 1000)
 
-def chat_assistant_message(content, model, raw):
-    return {
+_CHAT_MESSAGE_NO_RAW = object()
+
+def chat_assistant_message(content, model, raw_usage=None, raw=_CHAT_MESSAGE_NO_RAW):
+    message = {
         "id": uuid.uuid4().hex,
         "role": "assistant",
         "content": content,
         "created_at": now_ms(),
         "model": model,
-        "raw_usage": None,
-        "raw": raw,
+        "raw_usage": raw_usage,
     }
+    if raw is not _CHAT_MESSAGE_NO_RAW:
+        message["raw"] = raw
+    return message
 
 def save_conversation(user_id, conversation):
     with CONVERSATION_LOCK:
@@ -17367,7 +17371,7 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
             model = selected_model(payload.model, (_codex_provider.get("chat_models") or CODEX_DEFAULT_CHAT_MODELS)[0])
             payload.model = model
             text, raw = await codex_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
-            assistant_message = chat_assistant_message(text, model, raw)
+            assistant_message = chat_assistant_message(text, model, raw=raw)
             conversation["messages"].append(assistant_message)
             conversation["updated_at"] = now_ms()
             save_conversation(user_id, conversation)
@@ -17376,7 +17380,7 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
             model = selected_model(payload.model, (_codex_provider.get("chat_models") or GEMINI_CLI_DEFAULT_CHAT_MODELS)[0])
             payload.model = model
             text, raw = await gemini_cli_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
-            assistant_message = chat_assistant_message(text, model, raw)
+            assistant_message = chat_assistant_message(text, model, raw=raw)
             conversation["messages"].append(assistant_message)
             conversation["updated_at"] = now_ms()
             save_conversation(user_id, conversation)
@@ -17409,14 +17413,7 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail=f"请求上游接口失败：{exc}") from exc
         raw_data = unwrap_apimart_response(raw) if isinstance(raw, dict) else raw
-        assistant_message = {
-            "id": uuid.uuid4().hex,
-            "role": "assistant",
-            "content": text_from_chat_response(raw).strip() or "接口返回了空回复。",
-            "created_at": now_ms(),
-            "model": model,
-            "raw_usage": raw_data.get("usage") if isinstance(raw_data, dict) else None,
-        }
+        assistant_message = chat_assistant_message(text_from_chat_response(raw).strip() or "接口返回了空回复。", model, raw_usage=raw_data.get("usage") if isinstance(raw_data, dict) else None)
 
     conversation["messages"].append(assistant_message)
     conversation["updated_at"] = now_ms()
@@ -17557,7 +17554,7 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
             except HTTPException as exc:
                 yield sse_event({"type": "error", "detail": exc.detail})
                 return
-            assistant_message = chat_assistant_message(text, model, raw)
+            assistant_message = chat_assistant_message(text, model, raw=raw)
             conversation["messages"].append(assistant_message)
             conversation["updated_at"] = now_ms()
             save_conversation(user_id, conversation)
@@ -17577,7 +17574,7 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
             except HTTPException as exc:
                 yield sse_event({"type": "error", "detail": exc.detail})
                 return
-            assistant_message = chat_assistant_message(text, model, raw)
+            assistant_message = chat_assistant_message(text, model, raw=raw)
             conversation["messages"].append(assistant_message)
             conversation["updated_at"] = now_ms()
             save_conversation(user_id, conversation)
@@ -17635,14 +17632,7 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
             yield sse_event({"type": "error", "detail": f"请求上游接口失败：{exc}"})
             return
 
-        assistant_message = {
-            "id": uuid.uuid4().hex,
-            "role": "assistant",
-            "content": "".join(content_parts).strip() or "接口返回了空回复。",
-            "created_at": now_ms(),
-            "model": model,
-            "raw_usage": raw_usage,
-        }
+        assistant_message = chat_assistant_message("".join(content_parts).strip() or "接口返回了空回复。", model, raw_usage=raw_usage)
         conversation["messages"].append(assistant_message)
         conversation["updated_at"] = now_ms()
         save_conversation(user_id, conversation)
