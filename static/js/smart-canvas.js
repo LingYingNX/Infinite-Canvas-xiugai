@@ -15847,6 +15847,13 @@ function finishSmartGenerationRun(node, sourceVisualState, run, runLogStart, out
 async function runGeneration(){
     const node = selectedNode();
     if(node?.type === 'smart-minimax') return runMinimaxNode(node.id);
+    const ctx = prepareSmartGenerationRun(node);
+    if(!ctx) return;
+    const state = createSmartGenerationPendingState(ctx);
+    await dispatchSmartGenerationRun(state);
+}
+
+function prepareSmartGenerationRun(node){
     const request = buildPromptRequest(node, null, true, smartLoopContext);
     const prompt = request.prompt.trim();
     if(!node) return;
@@ -15878,6 +15885,11 @@ async function runGeneration(){
     const runLog = smartRunSnapshot(node, prompt, refs, logKind);
     rememberRecentSmartSettings(settings, node);
     const runLogStart = nowMs();
+    return {node, prompt, refs, previousSettings, outpaintSize, meta, logKind, runLog, runLogStart};
+}
+
+function createSmartGenerationPendingState(ctx){
+    const {node, prompt, refs, previousSettings, outpaintSize, meta, logKind, runLog, runLogStart} = ctx;
     const expectedCount = settings.engine === 'runninghub'
         ? 1
         : settings.engine === 'comfy'
@@ -15924,6 +15936,11 @@ async function runGeneration(){
         syncRunButtonState();
     }
     render();
+    return {node, prompt, refs, previousSettings, outpaintSize, pendingMeta, sourceVisualState, extracted, branchNode, pendingNode, expectedCount, apiConcurrentRun, runLog, runLogStart};
+}
+
+async function dispatchSmartGenerationRun(state){
+    const {node, prompt, refs, previousSettings, outpaintSize, pendingMeta, sourceVisualState, extracted, branchNode, pendingNode, apiConcurrentRun, runLog, runLogStart} = state;
     try {
         if(settings.engine === 'comfy'){
             await runComfyGeneration(pendingNode, prompt, refs, pendingNode, pendingMeta);
