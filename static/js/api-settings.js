@@ -2393,6 +2393,68 @@ function handleProviderDragEnd(){
         el.classList.remove('is-dragging', 'provider-card-drop-target');
     });
 }
+function applyRunningHubEditorState(item, isRunningHub){
+    if(isRunningHub){
+        ensureRunningHubLists(item);
+        if(rhFreeKeyInput){
+            rhFreeKeyInput.value = '';
+            rhFreeKeyInput.placeholder = item.has_key ? `${tr('api.rhKeepCoinKey')} ${item.key_preview || ''}` : tr('api.rhEnterCoinKey');
+        }
+        if(rhWalletKeyInput){
+            rhWalletKeyInput.value = '';
+            rhWalletKeyInput.placeholder = item.has_wallet_key ? `${tr('api.rhKeepWalletKey')} ${item.wallet_key_preview || ''}` : tr('api.rhEnterWalletKey');
+        }
+        if(rhFreeKeyHint) rhFreeKeyHint.textContent = rhFreeKeyHintText(item);
+        if(rhWalletKeyHint) rhWalletKeyHint.textContent = rhWalletKeyHintText(item);
+        renderRunningHubCards();
+    }
+}
+function applyVolcengineEditorState(item, isVolcengine){
+    if(isVolcengine){
+        item.base_url = item.base_url || VOLCENGINE_DEFAULT_BASE_URL;
+        item.protocol = 'volcengine';
+        item.volcengine_project_name = item.volcengine_project_name || VOLCENGINE_DEFAULT_PROJECT_NAME;
+        item.volcengine_region = item.volcengine_region || VOLCENGINE_DEFAULT_REGION;
+        keyInput.placeholder = item.has_key ? `保持当前方舟 API Key ${item.key_preview || ''}` : '输入方舟 API Key';
+        keyHint.textContent = volcengineArkKeyHintText(item);
+        if(volcArkKeyHint) volcArkKeyHint.textContent = volcengineArkKeyHintText(item);
+        if(volcAkInput){
+            volcAkInput.value = '';
+            volcAkInput.placeholder = item.has_volcengine_access_key ? `保持当前 AK ${item.volcengine_access_key_preview || ''}` : 'Access Key ID';
+        }
+        if(volcSkInput){
+            volcSkInput.value = '';
+            volcSkInput.placeholder = item.has_volcengine_secret_key ? `保持当前 SK ${item.volcengine_secret_key_preview || ''}` : 'Secret Access Key';
+        }
+        if(volcAssetKeyHint) volcAssetKeyHint.textContent = volcengineAssetKeyHintText(item);
+        if(volcProjectInput) volcProjectInput.value = item.volcengine_project_name || VOLCENGINE_DEFAULT_PROJECT_NAME;
+        if(volcRegionInput) volcRegionInput.value = item.volcengine_region || VOLCENGINE_DEFAULT_REGION;
+    }
+}
+function applyJimengEditorState(item, isJimeng){
+    if(isJimeng){
+        item.base_url = '';
+        item.protocol = 'jimeng';
+        item.image_models = unique([...(item.image_models || []).filter(model => !JIMENG_LEGACY_IMAGE_MODELS.has(String(model || '').trim())), ...JIMENG_DEFAULT_IMAGE_MODELS]);
+        item.video_models = unique([...(item.video_models || []).filter(model => !JIMENG_LEGACY_VIDEO_MODELS.has(String(model || '').trim())), ...JIMENG_DEFAULT_VIDEO_MODELS]);
+        keyInput.placeholder = '即梦 CLI 使用本机 dreamina login，无需 API Key';
+        keyHint.textContent = '请先在终端安装 dreamina CLI，并执行 dreamina login';
+    }
+}
+function applyCodexEditorState(item, isCodex){
+    if(isCodex){
+        applyCliProtocolDefaults(item, 'codex');
+        keyInput.placeholder = 'OpenAI CLI 使用本机 codex login，无需 API Key';
+        keyHint.textContent = '请先安装 OpenAI Codex CLI，并执行 codex 登录';
+    }
+}
+function applyGeminiCliEditorState(item, isGeminiCli){
+    if(isGeminiCli){
+        applyCliProtocolDefaults(item, 'gemini-cli');
+        keyInput.placeholder = 'Antigravity CLI 使用本机 agy 登录态，无需 API Key';
+        keyHint.textContent = '请先安装 Antigravity CLI，并在终端执行 agy 完成登录';
+    }
+}
 function renderEditor(){
     const item = provider();
     if(!item) return;
@@ -2437,58 +2499,11 @@ function renderEditor(){
     const isJimeng = String(protocolInput?.value || item.protocol || '').toLowerCase() === 'jimeng';
     const isCodex = String(protocolInput?.value || item.protocol || '').toLowerCase() === 'codex';
     const isGeminiCli = String(protocolInput?.value || item.protocol || '').toLowerCase() === 'gemini-cli';
-    if(isRunningHub){
-        ensureRunningHubLists(item);
-        if(rhFreeKeyInput){
-            rhFreeKeyInput.value = '';
-            rhFreeKeyInput.placeholder = item.has_key ? `${tr('api.rhKeepCoinKey')} ${item.key_preview || ''}` : tr('api.rhEnterCoinKey');
-        }
-        if(rhWalletKeyInput){
-            rhWalletKeyInput.value = '';
-            rhWalletKeyInput.placeholder = item.has_wallet_key ? `${tr('api.rhKeepWalletKey')} ${item.wallet_key_preview || ''}` : tr('api.rhEnterWalletKey');
-        }
-        if(rhFreeKeyHint) rhFreeKeyHint.textContent = rhFreeKeyHintText(item);
-        if(rhWalletKeyHint) rhWalletKeyHint.textContent = rhWalletKeyHintText(item);
-        renderRunningHubCards();
-    }
-    if(isVolcengine){
-        item.base_url = item.base_url || VOLCENGINE_DEFAULT_BASE_URL;
-        item.protocol = 'volcengine';
-        item.volcengine_project_name = item.volcengine_project_name || VOLCENGINE_DEFAULT_PROJECT_NAME;
-        item.volcengine_region = item.volcengine_region || VOLCENGINE_DEFAULT_REGION;
-        keyInput.placeholder = item.has_key ? `保持当前方舟 API Key ${item.key_preview || ''}` : '输入方舟 API Key';
-        keyHint.textContent = volcengineArkKeyHintText(item);
-        if(volcArkKeyHint) volcArkKeyHint.textContent = volcengineArkKeyHintText(item);
-        if(volcAkInput){
-            volcAkInput.value = '';
-            volcAkInput.placeholder = item.has_volcengine_access_key ? `保持当前 AK ${item.volcengine_access_key_preview || ''}` : 'Access Key ID';
-        }
-        if(volcSkInput){
-            volcSkInput.value = '';
-            volcSkInput.placeholder = item.has_volcengine_secret_key ? `保持当前 SK ${item.volcengine_secret_key_preview || ''}` : 'Secret Access Key';
-        }
-        if(volcAssetKeyHint) volcAssetKeyHint.textContent = volcengineAssetKeyHintText(item);
-        if(volcProjectInput) volcProjectInput.value = item.volcengine_project_name || VOLCENGINE_DEFAULT_PROJECT_NAME;
-        if(volcRegionInput) volcRegionInput.value = item.volcengine_region || VOLCENGINE_DEFAULT_REGION;
-    }
-    if(isJimeng){
-        item.base_url = '';
-        item.protocol = 'jimeng';
-        item.image_models = unique([...(item.image_models || []).filter(model => !JIMENG_LEGACY_IMAGE_MODELS.has(String(model || '').trim())), ...JIMENG_DEFAULT_IMAGE_MODELS]);
-        item.video_models = unique([...(item.video_models || []).filter(model => !JIMENG_LEGACY_VIDEO_MODELS.has(String(model || '').trim())), ...JIMENG_DEFAULT_VIDEO_MODELS]);
-        keyInput.placeholder = '即梦 CLI 使用本机 dreamina login，无需 API Key';
-        keyHint.textContent = '请先在终端安装 dreamina CLI，并执行 dreamina login';
-    }
-    if(isCodex){
-        applyCliProtocolDefaults(item, 'codex');
-        keyInput.placeholder = 'OpenAI CLI 使用本机 codex login，无需 API Key';
-        keyHint.textContent = '请先安装 OpenAI Codex CLI，并执行 codex 登录';
-    }
-    if(isGeminiCli){
-        applyCliProtocolDefaults(item, 'gemini-cli');
-        keyInput.placeholder = 'Antigravity CLI 使用本机 agy 登录态，无需 API Key';
-        keyHint.textContent = '请先安装 Antigravity CLI，并在终端执行 agy 完成登录';
-    }
+    applyRunningHubEditorState(item, isRunningHub);
+    applyVolcengineEditorState(item, isVolcengine);
+    applyJimengEditorState(item, isJimeng);
+    applyCodexEditorState(item, isCodex);
+    applyGeminiCliEditorState(item, isGeminiCli);
     document.body.classList.toggle('show-ms', isModelScope);
     document.body.classList.toggle('show-runninghub', isRunningHub);
     document.body.classList.toggle('show-volcengine', isVolcengine);
