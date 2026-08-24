@@ -4612,15 +4612,63 @@ async def post_openai_responses(client, url, headers, body):
             return _responses_wrap(url, 502, data)
     return _responses_wrap(url, 502, {"error": {"message": f"RS 后台任务超过 {int(RESPONSES_POLL_MAX_SECONDS)}s 仍未完成（任务 id={rid}）"}})
 
+def parse_responses_stream_chunk(chunk):
+    try:
+        event = json.loads(chunk)
+    except ValueError:
+        return None
+    return event if isinstance(event, dict) else None
+
+def remember_stream_image(image, stream_images, stream_seen_images):
+    if not isinstance(image, dict):
+        return
+    value = image.get("value")
+    if not value:
+        return
+    key = (image.get("type") or "url", value)
+    if key in stream_seen_images:
+        return
+    stream_seen_images.add(key)
+    stream_images.append(image)
+
+def remember_stream_images_from(value, stream_images, stream_seen_images):
+    try:
+        for image in extract_images(value):
+            remember_stream_image(image, stream_images, stream_seen_images)
+    except HTTPException:
+        pass
+
+def responses_stream_image_output(image):
+    if image.get("type") == "b64":
+        return {
+            "type": "image_generation_call",
+            "status": "completed",
+            "result": image.get("value"),
+            "mime_type": image.get("mime_type") or "image/png",
+        }
+    return {"type": "image", "image_url": image.get("value")}
+
+def responses_completed_with_images(completed, stream_images):
+    try:
+        has_completed_image = bool(extract_images(completed))
+    except HTTPException:
+        has_completed_image = False
+    if has_completed_image:
+        return completed
+    completed = dict(completed)
+    completed["output"] = list(completed.get("output") or [])
+    for image in stream_images:
+        completed["output"].append(responses_stream_image_output(image))
+    return completed
+
+def responses_stream_images_completed(stream_images):
+    return {"output": [responses_stream_image_output(stream_images[-1])]}
+
 async def post_openai_responses_stream(client, url, headers, body):
     """RS / Responses 的 SSE 流式请求：流式从一开始就持续有事件字节返回，
     不会触发中转的 Cloudflare 120s 读超时。收到 response.completed 后
     把完整 response 对象包装成普通 httpx.Response，下游解析逻辑不变。"""
     request = httpx.Request("POST", url)
-
-    def wrap(status_code, payload):
-        return _responses_wrap(url, status_code, payload)
-
     stream_body = dict(body)
     stream_body["stream"] = True
     try:
@@ -4638,37 +4686,14 @@ async def post_openai_responses_stream(client, url, headers, body):
             error_payload = None
             stream_images = []
             stream_seen_images = set()
-
-            def remember_stream_image(image):
-                if not isinstance(image, dict):
-                    return
-                value = image.get("value")
-                if not value:
-                    return
-                key = (image.get("type") or "url", value)
-                if key in stream_seen_images:
-                    return
-                stream_seen_images.add(key)
-                stream_images.append(image)
-
-            def remember_stream_images_from(value):
-                try:
-                    for image in extract_images(value):
-                        remember_stream_image(image)
-                except HTTPException:
-                    pass
-
             async for line in resp.aiter_lines():
                 if not line.startswith("data:"):
                     continue
                 chunk = line[5:].strip()
                 if not chunk or chunk == "[DONE]":
                     continue
-                try:
-                    event = json.loads(chunk)
-                except ValueError:
-                    continue
-                if not isinstance(event, dict):
+                event = parse_responses_stream_chunk(chunk)
+                if event is None:
                     continue
                 etype = str(event.get("type") or "")
                 if etype in {"response.completed", "response.incomplete"} and isinstance(event.get("response"), dict):
@@ -4682,43 +4707,23 @@ async def post_openai_responses_stream(client, url, headers, body):
                 if isinstance(event.get("item"), dict):
                     item = event["item"]
                     if item.get("type") not in {"input_image", "input_text"}:
-                        remember_stream_images_from(item)
+                        remember_stream_images_from(item, stream_images, stream_seen_images)
                 for key in ("partial_image_b64", "image_b64", "b64_json"):
                     image = image_payload_from_string(event.get(key), assume_b64=True)
                     if image:
-                        remember_stream_image(image)
+                        remember_stream_image(image, stream_images, stream_seen_images)
                 for key in ("result", "image", "image_url"):
                     image = image_payload_from_string(event.get(key))
                     if image:
-                        remember_stream_image(image)
+                        remember_stream_image(image, stream_images, stream_seen_images)
             if completed is not None and stream_images:
-                try:
-                    has_completed_image = bool(extract_images(completed))
-                except HTTPException:
-                    has_completed_image = False
-                if not has_completed_image:
-                    completed = dict(completed)
-                    completed["output"] = list(completed.get("output") or [])
-                    for image in stream_images:
-                        if image.get("type") == "b64":
-                            completed["output"].append({
-                                "type": "image_generation_call",
-                                "status": "completed",
-                                "result": image.get("value"),
-                                "mime_type": image.get("mime_type") or "image/png",
-                            })
-                        else:
-                            completed["output"].append({"type": "image", "image_url": image.get("value")})
+                completed = responses_completed_with_images(completed, stream_images)
             if completed is None and error_payload is None and stream_images:
                 # 流被提前掐断但已收到图片事件：用最后一张图片兜底。
-                image = stream_images[-1]
-                if image.get("type") == "b64":
-                    completed = {"output": [{"type": "image_generation_call", "status": "completed", "result": image.get("value"), "mime_type": image.get("mime_type") or "image/png"}]}
-                else:
-                    completed = {"output": [{"type": "image", "image_url": image.get("value")}]}
+                completed = responses_stream_images_completed(stream_images)
             if completed is not None:
-                return wrap(200, completed)
-            return wrap(502, error_payload or {"error": {"message": "RS 流式响应结束但没有 response.completed 事件"}})
+                return _responses_wrap(url, 200, completed)
+            return _responses_wrap(url, 502, error_payload or {"error": {"message": "RS 流式响应结束但没有 response.completed 事件"}})
     except httpx.HTTPError as e:
         print(f"RS 流式请求传输失败，回退非流式：{e}")
         return await client.post(url, headers=headers, json=body)
