@@ -2946,39 +2946,24 @@ function bindMsSettingChecks(wrap){
     });
 }
 
-function renderMsGenBody(node){
-    const wrap = document.createElement('div');
-    wrap.className = 'generator-body';
-    const modelKey = node.msgenModel || 'zimage';
-    const msModel = MS_GEN_MODELS[modelKey] || MS_GEN_MODELS.zimage;
-    const inputSources = generatorSources(node);
-    const ordered = orderedSources(node, inputSources);
-    const mediaInputs = ordered.filter(src => src.refs?.some(ref => ['image','video','audio'].includes(mediaKindForRef(ref))));
-    const promptInputs = ordered.filter(src => src.prompt && !src.refs?.length);
-    const referenceImages = ordered.flatMap(src => src.refs || []);
-    const isCustomMs = modelKey === 'custom';
-    const msUsesImages = Boolean(msModel.supportsImage || msModel.acceptsImage);
-    node.msCustomModel = node.msCustomModel || modelscopeImageModels()[0] || 'Tongyi-MAI/Z-Image-Turbo';
-    const msModelId = currentMsModelId(modelKey, node);
-    const msLoras = modelscopeLorasForModel(msModelId);
-    const selectedMsLora = msLoras.find(lora => String(lora.id || '').trim() === String(node.msLoraId || '').trim()) || msLoras[0];
-    const loraEnabled = Boolean(node.msLoraEnabled);
-    const loraStrength = node.msLoraStrength ?? Number(selectedMsLora?.strength ?? 0.8);
-    const msCount = Math.max(1, Math.min(8, Number(node.count || 1)));
-    wrap.innerHTML = `
-        <div class="ms-model-tabs">
+function msModelTabsHtml(modelKey){
+    return `        <div class="ms-model-tabs">
             ${Object.entries(MS_GEN_MODELS).map(([k,m]) =>
                 `<button type="button" data-model="${k}" class="${modelKey===k?'active':''}">${escapeHtml(m.labelKey ? tr(m.labelKey) : m.label)}</button>`
             ).join('')}
-        </div>
-        <div class="ms-content">
+        </div>`;
+}
+function msContentHtml(msUsesImages){
+    return `        <div class="ms-content">
             <div class="prompt-list mt-2 mb-2"></div>
             ${msUsesImages ? `
             <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">${tr('canvas.images')}</div>
             <div class="input-list ms-img-list"></div>
             ` : ''}
-        </div>
-        <div class="ms-controls">
+        </div>`;
+}
+function msControlsHtml(node, isCustomMs, msLoras, selectedMsLora, loraStrength, msCount){
+    return `        <div class="ms-controls">
             <div class="gen-settings">
                 ${isCustomMs ? `
                 <div class="gen-settings-row">
@@ -3064,8 +3049,27 @@ function renderMsGenBody(node){
                 ${cascadeBtnHtml(node)}
             </div>
             ${retryBarHtml(node)}
-        </div>
-    `;
+        </div>`;
+}
+function renderMsGenBody(node){
+    const wrap = document.createElement('div');
+    wrap.className = 'generator-body';
+    const modelKey = node.msgenModel || 'zimage';
+    const msModel = MS_GEN_MODELS[modelKey] || MS_GEN_MODELS.zimage;
+    const inputSources = generatorSources(node);
+    const ordered = orderedSources(node, inputSources);
+    const mediaInputs = ordered.filter(src => src.refs?.some(ref => ['image','video','audio'].includes(mediaKindForRef(ref))));
+    const promptInputs = ordered.filter(src => src.prompt && !src.refs?.length);
+    const referenceImages = ordered.flatMap(src => src.refs || []);
+    const isCustomMs = modelKey === 'custom';
+    const msUsesImages = Boolean(msModel.supportsImage || msModel.acceptsImage);
+    node.msCustomModel = node.msCustomModel || modelscopeImageModels()[0] || 'Tongyi-MAI/Z-Image-Turbo';
+    const msModelId = currentMsModelId(modelKey, node);
+    const msLoras = modelscopeLorasForModel(msModelId);
+    const selectedMsLora = msLoras.find(lora => String(lora.id || '').trim() === String(node.msLoraId || '').trim()) || msLoras[0];
+    const loraStrength = node.msLoraStrength ?? Number(selectedMsLora?.strength ?? 0.8);
+    const msCount = Math.max(1, Math.min(8, Number(node.count || 1)));
+    wrap.innerHTML = '\n' + msModelTabsHtml(modelKey) + '\n' + msContentHtml(msUsesImages) + '\n' + msControlsHtml(node, isCustomMs, msLoras, selectedMsLora, loraStrength, msCount) + '\n    ';
     bindMsModelTabs(wrap, node);
     bindMsCustomModelSelect(wrap, node);
     bindMsRatioResolutionControls(wrap, node, referenceImages);
