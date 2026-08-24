@@ -10880,6 +10880,114 @@ async def runninghub_upload_local_to_filename(client, provider, url, use_wallet=
         return raw["data"]["fileName"]
     raise HTTPException(status_code=502, detail=(raw.get("msg") if isinstance(raw, dict) else "") or f"RunningHub 上传素材失败：{raw}")
 
+def runninghub_entry_size_field_value(field, aspect, resolution, width, height):
+    names = {
+        str(field.get("fieldName") or "").strip().lower(),
+        str(field.get("fieldKey") or "").strip().lower(),
+        str(field.get("label") or "").strip().lower(),
+    }
+    if aspect and names & {"aspectratio", "aspect_ratio", "ratio"}:
+        return runninghub_schema_value(field, aspect)
+    if resolution and "resolution" in names:
+        return runninghub_schema_value(field, resolution)
+    if width and "width" in names:
+        return width
+    if height and "height" in names:
+        return height
+    return None
+
+def runninghub_entry_node_info(fields, idx_map, uploaded, prompt, size):
+    node_info_list = []
+    prompt_text = str(prompt or "").strip()
+    aspect = runninghub_aspect_from_size(size, "")
+    resolution = runninghub_resolution_from_size(size, "")
+    width, height = parse_size_pair(size)
+    for field in fields:
+        node_id = str(field.get("nodeId") or "").strip()
+        field_name = str(field.get("fieldName") or "").strip()
+        if not node_id or not field_name:
+            continue
+        kind_f = rh_field_kind(field)
+        if kind_f in ("image", "video", "audio"):
+            if kind_f != "image":
+                continue  # 在线生图仅提供图片素材
+            index = idx_map.get((node_id, field_name), 0)
+            value = uploaded[index] if index < len(uploaded) else ""
+            if not value:
+                # 工作流可选图（required!=True）无输入则跳过；必填图回退默认值
+                if field.get("required") is True:
+                    value = rh_default_value(field)
+                    if not value:
+                        continue
+                else:
+                    continue
+            node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": value})
+        elif rh_field_role(field) == "prompt":
+            value = prompt_text or rh_default_value(field)
+            node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": value})
+        elif kind_f == "number" and field.get("random_enabled") is True:
+            node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": rh_random_field_value(field)})
+        else:
+            value = runninghub_entry_size_field_value(field, aspect, resolution, width, height)
+            if value is None:
+                value = rh_default_value(field)
+            node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": value})
+    return node_info_list
+
+async def runninghub_entry_upload_references(client, provider, reference_images, use_wallet):
+    uploaded = []
+    for ref in (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]:
+        ref_url = ref.get("url") if isinstance(ref, dict) else ref
+        if not ref_url:
+            continue
+        file_name = await runninghub_upload_local_to_filename(client, provider, ref_url, use_wallet)
+        if file_name:
+            uploaded.append(file_name)
+    return uploaded
+
+def runninghub_entry_submit_payload(provider, kind, entry_id, api_key, node_info_list):
+    if kind == "workflow":
+        submit_url = runninghub_endpoint_url(provider, "/task/openapi/create")
+        body = {"apiKey": api_key, "workflowId": entry_id, "addMetadata": True}
+        if node_info_list:
+            body["nodeInfoList"] = node_info_list
+    else:
+        submit_url = runninghub_endpoint_url(provider, "/task/openapi/ai-app/run")
+        body = {"apiKey": api_key, "webappId": entry_id, "nodeInfoList": node_info_list}
+    return submit_url, body
+
+async def runninghub_entry_submit(client, provider, kind, entry_id, api_key, node_info_list, use_wallet):
+    submit_url, body = runninghub_entry_submit_payload(provider, kind, entry_id, api_key, node_info_list)
+    response = await client.post(submit_url, headers=runninghub_app_headers(True, use_wallet), json=body)
+    raw = response.json()
+    if not (isinstance(raw, dict) and raw.get("code") in (0, "0")):
+        raise HTTPException(status_code=502, detail=(raw.get("msg") if isinstance(raw, dict) else "") or f"RunningHub 提交失败：{raw}")
+    task_id = raw.get("data", {}).get("taskId") if isinstance(raw.get("data"), dict) else ""
+    if not task_id:
+        raise HTTPException(status_code=502, detail=f"RunningHub 未返回 taskId：{raw}")
+    return task_id
+
+async def runninghub_entry_poll_output(client, provider, api_key, task_id):
+    query_url = runninghub_endpoint_url(provider, "/task/openapi/outputs")
+    deadline = time.monotonic() + 1800
+    last_payload = None
+    while time.monotonic() < deadline:
+        await asyncio.sleep(2.5)
+        query_response = await client.post(query_url, headers=runninghub_app_headers(True), json={"apiKey": api_key, "taskId": task_id})
+        query_raw = query_response.json()
+        last_payload = query_raw
+        code = query_raw.get("code") if isinstance(query_raw, dict) else None
+        if code in (0, "0"):
+            outputs = runninghub_extract_outputs(query_raw.get("data"))
+            for remote in outputs:
+                if str(remote or "").startswith(("http://", "https://", "/output/", "/assets/")):
+                    return {"type": "url", "value": str(remote)}, query_raw
+            raise HTTPException(status_code=502, detail=f"RunningHub 任务无图片输出：{query_raw}")
+        if code in (805, "805"):
+            raise HTTPException(status_code=502, detail=f"RunningHub 任务失败：{runninghub_fail_reason(query_raw) or query_raw}")
+        # 804 运行中 / 813 排队中 / 其他状态继续轮询
+    raise HTTPException(status_code=504, detail=f"RunningHub 任务超时：{last_payload}")
+
 async def generate_runninghub_entry_image(prompt, size, model, reference_images, provider, entry):
     """运行 RunningHub 工作流 / AI 应用（与智能画布一致的运行方式），返回首张图片结果。"""
     kind = entry["kind"]
@@ -10888,104 +10996,12 @@ async def generate_runninghub_entry_image(prompt, size, model, reference_images,
     idx_map = rh_field_indexes(fields)
     use_wallet = False
     timeout = httpx.Timeout(connect=20.0, read=1800.0, write=240.0, pool=20.0)
-    aspect = runninghub_aspect_from_size(size, "")
-    resolution = runninghub_resolution_from_size(size, "")
-    width, height = parse_size_pair(size)
-    def requested_size_field_value(field):
-        names = {
-            str(field.get("fieldName") or "").strip().lower(),
-            str(field.get("fieldKey") or "").strip().lower(),
-            str(field.get("label") or "").strip().lower(),
-        }
-        if aspect and names & {"aspectratio", "aspect_ratio", "ratio"}:
-            return runninghub_schema_value(field, aspect)
-        if resolution and "resolution" in names:
-            return runninghub_schema_value(field, resolution)
-        if width and "width" in names:
-            return width
-        if height and "height" in names:
-            return height
-        return None
     async with httpx.AsyncClient(timeout=timeout) as client:
-        uploaded = []
-        for ref in (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]:
-            ref_url = ref.get("url") if isinstance(ref, dict) else ref
-            if not ref_url:
-                continue
-            file_name = await runninghub_upload_local_to_filename(client, provider, ref_url, use_wallet)
-            if file_name:
-                uploaded.append(file_name)
-
-        node_info_list = []
-        prompt_text = str(prompt or "").strip()
-        for field in fields:
-            node_id = str(field.get("nodeId") or "").strip()
-            field_name = str(field.get("fieldName") or "").strip()
-            if not node_id or not field_name:
-                continue
-            kind_f = rh_field_kind(field)
-            if kind_f in ("image", "video", "audio"):
-                if kind_f != "image":
-                    continue  # 在线生图仅提供图片素材
-                index = idx_map.get((node_id, field_name), 0)
-                value = uploaded[index] if index < len(uploaded) else ""
-                if not value:
-                    # 工作流可选图（required!=True）无输入则跳过；必填图回退默认值
-                    if field.get("required") is True:
-                        value = rh_default_value(field)
-                        if not value:
-                            continue
-                    else:
-                        continue
-                node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": value})
-            elif rh_field_role(field) == "prompt":
-                value = prompt_text or rh_default_value(field)
-                node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": value})
-            elif kind_f == "number" and field.get("random_enabled") is True:
-                node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": rh_random_field_value(field)})
-            else:
-                value = requested_size_field_value(field)
-                if value is None:
-                    value = rh_default_value(field)
-                node_info_list.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": value})
-
+        uploaded = await runninghub_entry_upload_references(client, provider, reference_images, use_wallet)
+        node_info_list = runninghub_entry_node_info(fields, idx_map, uploaded, prompt, size)
         api_key = runninghub_api_key(provider, use_wallet=use_wallet)
-        if kind == "workflow":
-            submit_url = runninghub_endpoint_url(provider, "/task/openapi/create")
-            body = {"apiKey": api_key, "workflowId": entry_id, "addMetadata": True}
-            if node_info_list:
-                body["nodeInfoList"] = node_info_list
-        else:
-            submit_url = runninghub_endpoint_url(provider, "/task/openapi/ai-app/run")
-            body = {"apiKey": api_key, "webappId": entry_id, "nodeInfoList": node_info_list}
-
-        response = await client.post(submit_url, headers=runninghub_app_headers(True, use_wallet), json=body)
-        raw = response.json()
-        if not (isinstance(raw, dict) and raw.get("code") in (0, "0")):
-            raise HTTPException(status_code=502, detail=(raw.get("msg") if isinstance(raw, dict) else "") or f"RunningHub 提交失败：{raw}")
-        task_id = raw.get("data", {}).get("taskId") if isinstance(raw.get("data"), dict) else ""
-        if not task_id:
-            raise HTTPException(status_code=502, detail=f"RunningHub 未返回 taskId：{raw}")
-
-        query_url = runninghub_endpoint_url(provider, "/task/openapi/outputs")
-        deadline = time.monotonic() + 1800
-        last_payload = None
-        while time.monotonic() < deadline:
-            await asyncio.sleep(2.5)
-            query_response = await client.post(query_url, headers=runninghub_app_headers(True), json={"apiKey": api_key, "taskId": task_id})
-            query_raw = query_response.json()
-            last_payload = query_raw
-            code = query_raw.get("code") if isinstance(query_raw, dict) else None
-            if code in (0, "0"):
-                outputs = runninghub_extract_outputs(query_raw.get("data"))
-                for remote in outputs:
-                    if str(remote or "").startswith(("http://", "https://", "/output/", "/assets/")):
-                        return {"type": "url", "value": str(remote)}, query_raw
-                raise HTTPException(status_code=502, detail=f"RunningHub 任务无图片输出：{query_raw}")
-            if code in (805, "805"):
-                raise HTTPException(status_code=502, detail=f"RunningHub 任务失败：{runninghub_fail_reason(query_raw) or query_raw}")
-            # 804 运行中 / 813 排队中 / 其他状态继续轮询
-        raise HTTPException(status_code=504, detail=f"RunningHub 任务超时：{last_payload}")
+        task_id = await runninghub_entry_submit(client, provider, kind, entry_id, api_key, node_info_list, use_wallet)
+        return await runninghub_entry_poll_output(client, provider, api_key, task_id)
 
 async def generate_runninghub_provider_image(prompt, size, model, reference_images=None, provider=None):
     entry = runninghub_entry_config_from_model(provider, model)
