@@ -16091,6 +16091,12 @@ function runningHubPayloadError(stage, data, fallback, extra={}){
     if(code !== '') parts.push(`code=${code}`);
     return smartDetailedError(parts.join('：'), {stage, taskId, code, raw, ...(detailObj || {}), ...extra});
 }
+async function smartRunningHubJson(r, stage, extra){
+    const data = await r.clone().json().catch(async () => ({detail:await r.text().catch(() => '')}));
+    if(!r.ok || data.success === false) throw runningHubPayloadError(stage, data, tr('smart.rhFailed'), extra);
+    return data.data || data;
+}
+
 async function runRunningHubGeneration(prompt, refs, runSettings=settings){
     const ref = selectedRunningHubRef(runSettings);
     if(!ref) throw new Error(tr('smart.rhNeedConfig'));
@@ -16112,28 +16118,20 @@ async function runRunningHubGeneration(prompt, refs, runSettings=settings){
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify(body)
-    }).then(async r => {
-        const data = await r.clone().json().catch(async () => ({detail:await r.text().catch(() => '')}));
-        if(!r.ok || data.success === false) throw runningHubPayloadError('提交', data, tr('smart.rhFailed'), {
-            endpoint,
-            workflowId:body.workflowId || '',
-            webappId:body.webappId || '',
-            nodeInfoList:nodeInfoList.slice(0, 40),
-            hasWorkflow:Boolean(body.workflow)
-        });
-        return data.data || data;
-    });
+    }).then(r => smartRunningHubJson(r, '提交', {
+        endpoint,
+        workflowId:body.workflowId || '',
+        webappId:body.webappId || '',
+        nodeInfoList:nodeInfoList.slice(0, 40),
+        hasWorkflow:Boolean(body.workflow)
+    }));
     const taskId = submit.taskId;
     if(!taskId) throw new Error(tr('smart.rhNoTaskId'));
     runSettings.rhTaskId = taskId;
     const useWallet = runSettings.rhPayment === 'wallet';
     for(let i = 0; i < 720; i++){
         await sleep(2500);
-        const data = await fetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}&useWallet=${useWallet ? '1' : '0'}`).then(async r => {
-            const json = await r.clone().json().catch(async () => ({detail:await r.text().catch(() => '')}));
-            if(!r.ok || json.success === false) throw runningHubPayloadError('查询', json, tr('smart.rhFailed'), {taskId});
-            return json.data || json;
-        });
+        const data = await fetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}&useWallet=${useWallet ? '1' : '0'}`).then(r => smartRunningHubJson(r, '查询', {taskId}));
         if(data.status === 'SUCCESS'){
             const urls = resultMediaUrls(data.image_items?.length ? data.image_items : (data.urls || []));
             if(!urls.length) throw new Error(tr('smart.rhOutputsEmpty'));
