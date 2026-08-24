@@ -134,6 +134,12 @@ async function apiRequestJson(url, init={}, fallback='请求失败'){
     return data;
 }
 
+async function apiRunningHubJson(r, fallback){
+    const data = await r.json();
+    if(!r.ok || data.success === false) throw new Error(data.detail || data.error || fallback);
+    return data.data || data;
+}
+
 function applyCliProtocolDefaults(item, protocol){
     if(!item) return;
     const value = String(protocol || item.protocol || '').toLowerCase();
@@ -1670,11 +1676,7 @@ async function testRhMappedPreview(){
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify(body)
-        }).then(async r => {
-            const data = await r.json();
-            if(!r.ok || data.success === false) throw new Error(data.detail || data.error || 'RunningHub 提交失败');
-            return data.data || data;
-        });
+        }).then(r => apiRunningHubJson(r, 'RunningHub 提交失败'));
         const taskId = submit.taskId;
         if(!taskId) throw new Error('RunningHub 没有返回 taskId');
         rhWorkflowEditorState.previewStatus = `任务已提交：${taskId}`;
@@ -1682,11 +1684,7 @@ async function testRhMappedPreview(){
         let result = null;
         for(let i = 0; i < 720; i++){
             await new Promise(resolve => setTimeout(resolve, 2500));
-            const data = await fetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}`).then(async r => {
-                const json = await r.json();
-                if(!r.ok || json.success === false) throw new Error(json.detail || json.error || 'RunningHub 查询失败');
-                return json.data || json;
-            });
+            const data = await fetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}`).then(r => apiRunningHubJson(r, 'RunningHub 查询失败'));
             if(data.status === 'SUCCESS'){
                 result = data;
                 break;
