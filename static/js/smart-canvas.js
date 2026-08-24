@@ -15413,34 +15413,104 @@ async function runCascadeStepIntoNode(sourceNode, targetNode, inputRefs, ctx=sma
         throw e;
     }
 }
+function prepareSmartLoopRoundRun(loopNode, rootNode, outputSlot, ctx){
+    const edgeKey = `${rootNode.id}->${outputSlot.id}`;
+    const runSettings = smartLoopRoundSettings({...cloneSmartSettings(settings), ...cloneSmartSettings(smartSettingsForNode(rootNode) || {})}, ctx);
+    settings = runSettings;
+    const refsForRequest = outputImagesForNode(loopNode, true, ctx).filter(img => img?.url);
+    const request = buildPromptRequestForNode(rootNode, refsForRequest.length ? refsForRequest : null, ctx);
+    const prompt = (request.prompt || '').trim();
+    const displayPrompt = (request.displayPrompt || '').trim();
+    if((!prompt || !displayPrompt) && smartRunNeedsPrompt(runSettings)) throw new Error('链路节点缺少提示词');
+    const meta = {
+        prompt,
+        displayPrompt:request.displayPrompt || '',
+        promptRefs:(request.refs || []).map(ref => ({url:ref.url || '', name:ref.name || '', nodeId:ref.nodeId || '', imageIndex:ref.imageIndex ?? ''})).filter(ref => ref.url),
+        inputRefs:(request.refs || []).map(ref => ({url:ref.url || '', name:ref.name || '', nodeId:ref.nodeId || '', imageIndex:ref.imageIndex ?? '', kind:ref.kind || ''})).filter(ref => ref.url),
+        sourceNodeId:rootNode.id,
+        settings:JSON.parse(JSON.stringify(runSettings)),
+        createdAt:Date.now()
+    };
+    const logKind = isApiLikeEngine(runSettings.engine) && runSettings.apiKind === 'video' ? 'video' : 'image';
+    const runLog = smartRunSnapshot(rootNode, prompt, request.refs || [], logKind);
+    const runLogStart = nowMs();
+    const expectedCount = isApiLikeEngine(runSettings.engine) && runSettings.apiKind !== 'video'
+        ? Math.max(1, Math.min(8, Number(runSettings.count || 1)))
+        : 1;
+    const runPath = smartCascadePathForCtx(ctx);
+    return {edgeKey, runSettings, prompt, request, meta, logKind, runLog, runLogStart, expectedCount, runPath};
+}
+function archiveSmartLoopSlotImages(outputSlot){
+    const existing = cleanHistoryImages(outputSlot.images || []);
+    if(!existing.length) return;
+    const history = ensureHistoryGroupForNode(outputSlot);
+    history.images = cleanHistoryImages([...existing, ...(history.images || [])]);
+    history.title = '历史分组';
+    history.outputKind = 'image';
+    history.scale = MEDIA_GROUP_DEFAULT_SCALE;
+    delete history.w;
+    delete history.h;
+    outputSlot.images = [];
+}
+async function runSmartLoopApiTask({outputSlot, prompt, request, runSettings, runLog, runLogStart}){
+    const taskResult = await runApiGeneration(prompt, request.refs || [], runSettings);
+    const taskIds = Array.isArray(taskResult?.taskIds) ? taskResult.taskIds : [];
+    if(!taskIds.length) throw new Error(tr('smart.errRunFailed'));
+    archiveSmartLoopSlotImages(outputSlot);
+    outputSlot.pendingTasks = taskIds.map(taskId => ({taskId, kind:'image', providerId:taskResult.providerId, model:taskResult.model}));
+    outputSlot.pending = Math.max(taskIds.length, Number(outputSlot.pending || 0) || taskIds.length);
+    outputSlot.running = false;
+    render();
+    scheduleSave();
+    await saveCanvas();
+    await resumeSmartPendingNode(outputSlot, {run:runLog, runLogStart});
+    if(outputSlot.jimengPending || smartRecoverableImageTask(outputSlot)){
+        outputSlot.queued = false;
+        return null;
+    }
+    return {urls:(outputSlot.images || []).map(img => img?.url ? img : null).filter(Boolean), kind:'image'};
+}
+function completeSmartLoopRoundRun({outputSlot, rootNode, runSettings, result, meta, logKind, runLog, runLogStart, runPath, edgeKey, ctx}){
+    let additions;
+    if(isApiLikeEngine(runSettings.engine) && runSettings.apiKind !== 'video'){
+        additions = (outputSlot.images || []).map(img => stripImageGenerationMeta({...img})).filter(img => img?.url);
+        if(meta) attachRunMeta(outputSlot, meta);
+    } else {
+        const ext = result.kind === 'video' ? 'mp4' : result.kind === 'audio' ? 'mp3' : result.kind === 'text' ? 'txt' : 'png';
+        additions = result.urls.map((item, i) => {
+            const url = typeof item === 'string' ? item : item?.url || '';
+            return stripImageGenerationMeta(copyMediaSizeFields(item, {url, name:(typeof item === 'object' && item.name) || `output-${i + 1}.${ext}`, kind:(typeof item === 'object' && item.kind) || result.kind, generatedResult:true}));
+        }).filter(item => item.url);
+        outputSlot = liveSmartNode(outputSlot);
+        outputSlot.images = nonPreviewOutputImages(outputSlot.images);
+        replaceOutputsToNodeWithHistory(outputSlot, additions, result.kind, meta, {skipShift:Boolean(ctx?.nodeId)});
+    }
+    outputSlot = liveSmartNode(outputSlot);
+    markSmartNodeComplete(outputSlot, meta);
+    clearSourceBusyStateIfDownstreamDone(rootNode);
+    if(runPath?.states) {
+        runPath.states[edgeKey] = 'done';
+        scheduleConnectionLayerRefresh();
+    }
+    addSmartGenerationLog({run:{...runLog, kind:result.kind || logKind}, outputs:result.urls, runMs:nowMs() - runLogStart});
+    return {additions, outputSlot};
+}
+function failSmartLoopRoundRun(outputSlot, e){
+    if(handleJimengPendingSignal(outputSlot, e)){
+        outputSlot.queued = false;
+        return true;
+    }
+    outputSlot.queued = false;
+    outputSlot.pending = 0;
+    outputSlot.running = false;
+    return false;
+}
 async function runLoopRoundIntoSlot(loopNode, rootNode, outputSlot, loopIndex, ctx){
     if(!loopNode || !rootNode || !outputSlot) return [];
     outputSlot = liveSmartNode(outputSlot);
     const previousSettings = cloneSmartSettings(settings);
-    const edgeKey = `${rootNode.id}->${outputSlot.id}`;
-    const runSettings = smartLoopRoundSettings({...cloneSmartSettings(settings), ...cloneSmartSettings(smartSettingsForNode(rootNode) || {})}, ctx);
-    settings = runSettings;
     try {
-        const refsForRequest = outputImagesForNode(loopNode, true, ctx).filter(img => img?.url);
-        const request = buildPromptRequestForNode(rootNode, refsForRequest.length ? refsForRequest : null, ctx);
-        const prompt = (request.prompt || '').trim();
-        const displayPrompt = (request.displayPrompt || '').trim();
-        if((!prompt || !displayPrompt) && smartRunNeedsPrompt(runSettings)) throw new Error('链路节点缺少提示词');
-        const meta = {
-            prompt,
-            displayPrompt:request.displayPrompt || '',
-            promptRefs:(request.refs || []).map(ref => ({url:ref.url || '', name:ref.name || '', nodeId:ref.nodeId || '', imageIndex:ref.imageIndex ?? ''})).filter(ref => ref.url),
-            inputRefs:(request.refs || []).map(ref => ({url:ref.url || '', name:ref.name || '', nodeId:ref.nodeId || '', imageIndex:ref.imageIndex ?? '', kind:ref.kind || ''})).filter(ref => ref.url),
-            sourceNodeId:rootNode.id,
-            settings:JSON.parse(JSON.stringify(runSettings)),
-            createdAt:Date.now()
-        };
-        const logKind = isApiLikeEngine(runSettings.engine) && runSettings.apiKind === 'video' ? 'video' : 'image';
-        const runLog = smartRunSnapshot(rootNode, prompt, request.refs || [], logKind);
-        const runLogStart = nowMs();
-        const expectedCount = isApiLikeEngine(runSettings.engine) && runSettings.apiKind !== 'video'
-            ? Math.max(1, Math.min(8, Number(runSettings.count || 1)))
-            : 1;
+        const {edgeKey, runSettings, prompt, request, meta, logKind, runLog, runLogStart, expectedCount, runPath} = prepareSmartLoopRoundRun(loopNode, rootNode, outputSlot, ctx);
         outputSlot.queued = false;
         outputSlot.running = true;
         outputSlot.pending = expectedCount;
@@ -15448,7 +15518,6 @@ async function runLoopRoundIntoSlot(loopNode, rootNode, outputSlot, loopIndex, c
         delete outputSlot.runFinishedAt;
         delete outputSlot.runElapsedMs;
         outputSlot.runTimerHidden = false;
-        const runPath = smartCascadePathForCtx(ctx);
         if(runPath?.states) {
             runPath.states[edgeKey] = 'active';
             scheduleConnectionLayerRefresh();
@@ -15457,67 +15526,16 @@ async function runLoopRoundIntoSlot(loopNode, rootNode, outputSlot, loopIndex, c
         settings = previousSettings;
         let result;
         if(isApiLikeEngine(runSettings.engine) && runSettings.apiKind !== 'video'){
-            const taskResult = await runApiGeneration(prompt, request.refs || [], runSettings);
-            const taskIds = Array.isArray(taskResult?.taskIds) ? taskResult.taskIds : [];
-            if(!taskIds.length) throw new Error(tr('smart.errRunFailed'));
-            const existing = cleanHistoryImages(outputSlot.images || []);
-            if(existing.length){
-                const history = ensureHistoryGroupForNode(outputSlot);
-                history.images = cleanHistoryImages([...existing, ...(history.images || [])]);
-                history.title = '历史分组';
-                history.outputKind = 'image';
-                history.scale = MEDIA_GROUP_DEFAULT_SCALE;
-                delete history.w;
-                delete history.h;
-                outputSlot.images = [];
-            }
-            outputSlot.pendingTasks = taskIds.map(taskId => ({taskId, kind:'image', providerId:taskResult.providerId, model:taskResult.model}));
-            outputSlot.pending = Math.max(taskIds.length, Number(outputSlot.pending || 0) || taskIds.length);
-            outputSlot.running = false;
-            render();
-            scheduleSave();
-            await saveCanvas();
-            await resumeSmartPendingNode(outputSlot, {run:runLog, runLogStart});
-            if(outputSlot.jimengPending || smartRecoverableImageTask(outputSlot)){
-                outputSlot.queued = false;
-                return [];
-            }
-            result = {urls:(outputSlot.images || []).map(img => img?.url ? img : null).filter(Boolean), kind:'image'};
+            result = await runSmartLoopApiTask({outputSlot, prompt, request, runSettings, runLog, runLogStart});
+            if(!result) return [];
         } else {
             result = await generateUrlsForCurrentSettings(outputSlot, prompt, request.refs || [], runSettings);
         }
         if(!result.urls?.length) throw new Error(result.kind === 'video' ? tr('smart.errNoOutVideos') : tr('smart.errNoOutImages'));
-        let additions;
-        if(isApiLikeEngine(runSettings.engine) && runSettings.apiKind !== 'video'){
-            additions = (outputSlot.images || []).map(img => stripImageGenerationMeta({...img})).filter(img => img?.url);
-            if(meta) attachRunMeta(outputSlot, meta);
-        } else {
-            const ext = result.kind === 'video' ? 'mp4' : result.kind === 'audio' ? 'mp3' : result.kind === 'text' ? 'txt' : 'png';
-            additions = result.urls.map((item, i) => {
-                const url = typeof item === 'string' ? item : item?.url || '';
-                return stripImageGenerationMeta(copyMediaSizeFields(item, {url, name:(typeof item === 'object' && item.name) || `output-${i + 1}.${ext}`, kind:(typeof item === 'object' && item.kind) || result.kind, generatedResult:true}));
-            }).filter(item => item.url);
-            outputSlot = liveSmartNode(outputSlot);
-            outputSlot.images = nonPreviewOutputImages(outputSlot.images);
-            replaceOutputsToNodeWithHistory(outputSlot, additions, result.kind, meta, {skipShift:Boolean(ctx?.nodeId)});
-        }
-        outputSlot = liveSmartNode(outputSlot);
-        markSmartNodeComplete(outputSlot, meta);
-        clearSourceBusyStateIfDownstreamDone(rootNode);
-        if(runPath?.states) {
-            runPath.states[edgeKey] = 'done';
-            scheduleConnectionLayerRefresh();
-        }
-        addSmartGenerationLog({run:{...runLog, kind:result.kind || logKind}, outputs:result.urls, runMs:nowMs() - runLogStart});
-        return rememberRoundOutputs(ctx, outputSlot, additions);
+        const finished = completeSmartLoopRoundRun({outputSlot, rootNode, runSettings, result, meta, logKind, runLog, runLogStart, runPath, edgeKey, ctx});
+        return rememberRoundOutputs(ctx, finished.outputSlot, finished.additions);
     } catch(e) {
-        if(handleJimengPendingSignal(outputSlot, e)){
-            outputSlot.queued = false;
-            return [];
-        }
-        outputSlot.queued = false;
-        outputSlot.pending = 0;
-        outputSlot.running = false;
+        if(failSmartLoopRoundRun(outputSlot, e)) return [];
         throw e;
     } finally {
         settings = previousSettings;
