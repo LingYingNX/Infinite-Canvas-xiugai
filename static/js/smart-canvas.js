@@ -9639,111 +9639,120 @@ function bindNodeThumbBadges(el, id){
 
 
 function bindNodeThumbSelection(el, id){
-        el.querySelectorAll('.thumb-item,.image-wrap').forEach(item => {
-            const thumbTarget = () => {
-                const targetNodeId = item.dataset.refNodeId || id;
-                const imageIndex = Number(item.dataset.refImageIndex ?? item.dataset.imageIndex ?? 0);
-                const owner = nodes.find(n => n.id === targetNodeId);
-                return {targetNodeId, imageIndex, owner, image:owner?.images?.[imageIndex]};
-            };
-            item.setAttribute('draggable', 'false');
-            item.addEventListener('dragstart', e => {
-                e.preventDefault();
-            });
-            item.addEventListener('mousedown', e => {
-                if(e.target.closest('video,audio')) return;
-                if(e.button !== 0 || e.target.closest('.image-delete,.image-name-badge')) return;
-                if(e.detail < 2) return;
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-                clearImageClickTimer();
-                suppressImageClickUntil = Date.now() + 260;
-                const target = thumbTarget();
-                if(mediaKindForItem(target.image || {}) === 'video'){
-                    smartActivateVideoPreview(item);
-                    return;
-                }
-                selectedId = id;
-                selectedIds = [];
-                selectedImage = {nodeId:target.targetNodeId, index:target.imageIndex};
-                openImagePreviewSmart(target.targetNodeId, target.imageIndex);
-            }, true);
-            item.addEventListener('click', e => {
-                if(e.target.closest('video,audio')) return;
-                if(e.target.closest('.image-delete,.image-name-badge')) return;
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-                if(Date.now() < suppressImageClickUntil) return;
-                const target = thumbTarget();
-                const owner = nodes.find(n => n.id === id);
-                if(mediaKindForItem(target.image || {}) === 'video'){
-                    clearImageClickTimer();
-                    suppressImageClickUntil = Date.now() + 260;
-                    hideRunTimerForNode(target.owner || owner);
-                    smartActivateVideoPreview(item);
-                    return;
-                }
-                if(e.detail >= 2){
-                    clearImageClickTimer();
-                    suppressImageClickUntil = Date.now() + 260;
-                    selectedId = id;
-                    selectedIds = [];
-                    selectedImage = {nodeId:target.targetNodeId, index:target.imageIndex};
-                    openImagePreviewSmart(target.targetNodeId, target.imageIndex);
-                    return;
-                }
-                clearImageClickTimer();
-                imageClickTimer = setTimeout(() => {
-                    imageClickTimer = null;
-                hideRunTimerForNode(owner);
-                selectedId = id;
-                selectedIds = [];
-                // Composer 绑定节点本身；这里记录图层焦点，用于交叠时置顶和工具栏目标。
-                selectedImage = {nodeId:target.targetNodeId, index:target.imageIndex};
-                    if(smartCascadeAnyRunning()) smartCascadeSilentSelection = false;
-                    syncSelectionUi();
-                    scheduleComposerUpdate(180);
-                }, 220);
-            });
-        item.addEventListener('dblclick', e => {
-            if(e.target.closest('video,audio')) return;
-            if(e.target.closest('.image-delete,.image-name-badge')) return;
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
+    el.querySelectorAll('.thumb-item,.image-wrap').forEach(item => bindSmartThumbMediaItem(item, id));
+    el.querySelectorAll('.thumb-item,.smart-group-single-thumb').forEach(item => bindSmartThumbDragStart(item, id));
+}
+function smartThumbTarget(item, id){
+    const targetNodeId = item.dataset.refNodeId || id;
+    const imageIndex = Number(item.dataset.refImageIndex ?? item.dataset.imageIndex ?? 0);
+    const owner = nodes.find(n => n.id === targetNodeId);
+    return {targetNodeId, imageIndex, owner, image:owner?.images?.[imageIndex]};
+}
+function bindSmartThumbMediaItem(item, id){
+    item.setAttribute('draggable', 'false');
+    item.addEventListener('dragstart', e => { e.preventDefault(); });
+    bindSmartThumbMousedown(item, id);
+    bindSmartThumbClick(item, id);
+    bindSmartThumbDblclick(item, id);
+}
+function bindSmartThumbMousedown(item, id){
+    item.addEventListener('mousedown', e => {
+        if(e.target.closest('video,audio')) return;
+        if(e.button !== 0 || e.target.closest('.image-delete,.image-name-badge')) return;
+        if(e.detail < 2) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        clearImageClickTimer();
+        suppressImageClickUntil = Date.now() + 260;
+        const target = smartThumbTarget(item, id);
+        if(mediaKindForItem(target.image || {}) === 'video'){
+            smartActivateVideoPreview(item);
+            return;
+        }
+        selectedId = id;
+        selectedIds = [];
+        selectedImage = {nodeId:target.targetNodeId, index:target.imageIndex};
+        openImagePreviewSmart(target.targetNodeId, target.imageIndex);
+    }, true);
+}
+function bindSmartThumbClick(item, id){
+    item.addEventListener('click', e => {
+        if(e.target.closest('video,audio')) return;
+        if(e.target.closest('.image-delete,.image-name-badge')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        if(Date.now() < suppressImageClickUntil) return;
+        const target = smartThumbTarget(item, id);
+        const owner = nodes.find(n => n.id === id);
+        if(mediaKindForItem(target.image || {}) === 'video'){
             clearImageClickTimer();
             suppressImageClickUntil = Date.now() + 260;
-            const target = thumbTarget();
-            if(mediaKindForItem(target.image || {}) === 'video'){
-                smartActivateVideoPreview(item);
-                return;
-            }
+            hideRunTimerForNode(target.owner || owner);
+            smartActivateVideoPreview(item);
+            return;
+        }
+        if(e.detail >= 2){
+            clearImageClickTimer();
+            suppressImageClickUntil = Date.now() + 260;
             selectedId = id;
             selectedIds = [];
             selectedImage = {nodeId:target.targetNodeId, index:target.imageIndex};
             openImagePreviewSmart(target.targetNodeId, target.imageIndex);
-        }, true);
-        });
-        el.querySelectorAll('.thumb-item,.smart-group-single-thumb').forEach(item => {
-            item.addEventListener('mousedown', e => {
-                if(e.target.closest('video,audio')) return;
-                if(e.button !== 0 || e.target.closest('.mini-x')) return;
-                if(e.detail >= 2) return;
-                const node = nodes.find(n => n.id === id);
-                const refNodeId = item.dataset.refNodeId || '';
-                if(refNodeId && refNodeId !== id) return;
-                if(!node) return;
-                const imgIndex = Number(item.dataset.imageIndex || 0);
-                if(isSmartGroupNode(node)){
-                    if(!node.images?.[imgIndex]) return;
-                } else if((node.images || []).length <= 1) return;
-                e.preventDefault(); e.stopPropagation();
-                thumbDragState = {nodeId:id, imgIndex, startX:e.clientX, startY:e.clientY, detached:false};
-                capturePendingUndo();
-            });
-        });
+            return;
+        }
+        clearImageClickTimer();
+        imageClickTimer = setTimeout(() => {
+            imageClickTimer = null;
+            hideRunTimerForNode(owner);
+            selectedId = id;
+            selectedIds = [];
+            // Composer 绑定节点本身；这里记录图层焦点，用于交叠时置顶和工具栏目标。
+            selectedImage = {nodeId:target.targetNodeId, index:target.imageIndex};
+            if(smartCascadeAnyRunning()) smartCascadeSilentSelection = false;
+            syncSelectionUi();
+            scheduleComposerUpdate(180);
+        }, 220);
+    });
+}
+function bindSmartThumbDblclick(item, id){
+    item.addEventListener('dblclick', e => {
+        if(e.target.closest('video,audio')) return;
+        if(e.target.closest('.image-delete,.image-name-badge')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        clearImageClickTimer();
+        suppressImageClickUntil = Date.now() + 260;
+        const target = smartThumbTarget(item, id);
+        if(mediaKindForItem(target.image || {}) === 'video'){
+            smartActivateVideoPreview(item);
+            return;
+        }
+        selectedId = id;
+        selectedIds = [];
+        selectedImage = {nodeId:target.targetNodeId, index:target.imageIndex};
+        openImagePreviewSmart(target.targetNodeId, target.imageIndex);
+    }, true);
+}
+function bindSmartThumbDragStart(item, id){
+    item.addEventListener('mousedown', e => {
+        if(e.target.closest('video,audio')) return;
+        if(e.button !== 0 || e.target.closest('.mini-x')) return;
+        if(e.detail >= 2) return;
+        const node = nodes.find(n => n.id === id);
+        const refNodeId = item.dataset.refNodeId || '';
+        if(refNodeId && refNodeId !== id) return;
+        if(!node) return;
+        const imgIndex = Number(item.dataset.imageIndex || 0);
+        if(isSmartGroupNode(node)){
+            if(!node.images?.[imgIndex]) return;
+        } else if((node.images || []).length <= 1) return;
+        e.preventDefault(); e.stopPropagation();
+        thumbDragState = {nodeId:id, imgIndex, startX:e.clientX, startY:e.clientY, detached:false};
+        capturePendingUndo();
+    });
 }
 
 
