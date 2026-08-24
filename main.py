@@ -17592,6 +17592,74 @@ async def chat_agent(payload: ChatRequest, request: Request, x_user_id: str = He
     save_conversation(user_id, conversation)
     return {"conversation": conversation, "message": assistant_message, "agent": {"action": action, "decision": decision}}
 
+async def cli_chat_stream_events(conversation, user_id, payload, model, chat_text):
+    yield sse_event({"type": "meta", "conversation": conversation})
+    try:
+        text, raw = await chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
+    except HTTPException as exc:
+        yield sse_event({"type": "error", "detail": exc.detail})
+        return
+    assistant_message = chat_assistant_message(text, model, raw=raw)
+    conversation["messages"].append(assistant_message)
+    conversation["updated_at"] = now_ms()
+    save_conversation(user_id, conversation)
+    yield sse_event({"type": "delta", "delta": text})
+    yield sse_event({"type": "done", "conversation": conversation, "message": assistant_message})
+
+def chat_upstream_messages(payload, history):
+    messages = [{"role": "system", "content": chat_system_prompt(payload)}]
+    for item in history:
+        msg = upstream_message_from_record(item)
+        if msg:
+            messages.append(msg)
+    return messages
+
+async def chat_upstream_stream(conversation, user_id, model, chat_base, chat_hdrs, upstream_messages, stream_provider):
+    content_parts = []
+    raw_usage = None
+    yield sse_event({"type": "meta", "conversation": conversation})
+    try:
+        async with httpx.AsyncClient(timeout=AI_REQUEST_TIMEOUT) as client:
+            async with client.stream(
+                "POST",
+                f"{chat_base}/chat/completions",
+                headers=chat_hdrs,
+                json={"model": model, "messages": upstream_messages, "stream": True},
+            ) as response:
+                if response.status_code >= 400:
+                    detail = await response.aread()
+                    body = detail.decode("utf-8", errors="ignore")
+                    friendly = friendly_chat_error_detail(body, model, stream_provider)
+                    yield sse_event({"type": "error", "detail": friendly or f"上游接口错误：{body}"})
+                    return
+                async for line in response.aiter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("data:"):
+                        line = line[5:].strip()
+                    if line == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(chunk, dict) and chunk.get("usage"):
+                        raw_usage = chunk.get("usage")
+                    delta = text_delta_from_chat_chunk(chunk)
+                    if delta:
+                        content_parts.append(delta)
+                        yield sse_event({"type": "delta", "delta": delta})
+    except httpx.HTTPError as exc:
+        log_net_error("对话(流式) 网络/TLS错误", exc)
+        yield sse_event({"type": "error", "detail": f"请求上游接口失败：{exc}"})
+        return
+
+    assistant_message = chat_assistant_message("".join(content_parts).strip() or "接口返回了空回复。", model, raw_usage=raw_usage)
+    conversation["messages"].append(assistant_message)
+    conversation["updated_at"] = now_ms()
+    save_conversation(user_id, conversation)
+    yield sse_event({"type": "done", "conversation": conversation, "message": assistant_message})
+
 @app.post("/api/chat/stream")
 async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = Header(default="")):
     if payload.mode == "image":
@@ -17606,99 +17674,18 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
     if is_codex_provider(_codex_provider):
         model = selected_model(payload.model, (_codex_provider.get("chat_models") or CODEX_DEFAULT_CHAT_MODELS)[0])
         payload.model = model
-
-        async def codex_stream():
-            yield sse_event({"type": "meta", "conversation": conversation})
-            try:
-                text, raw = await codex_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
-            except HTTPException as exc:
-                yield sse_event({"type": "error", "detail": exc.detail})
-                return
-            assistant_message = chat_assistant_message(text, model, raw=raw)
-            conversation["messages"].append(assistant_message)
-            conversation["updated_at"] = now_ms()
-            save_conversation(user_id, conversation)
-            yield sse_event({"type": "delta", "delta": text})
-            yield sse_event({"type": "done", "conversation": conversation, "message": assistant_message})
-
-        return StreamingResponse(codex_stream(), media_type="text/event-stream")
+        return StreamingResponse(cli_chat_stream_events(conversation, user_id, payload, model, codex_chat_text), media_type="text/event-stream")
 
     if is_gemini_cli_provider(_codex_provider):
         model = selected_model(payload.model, (_codex_provider.get("chat_models") or GEMINI_CLI_DEFAULT_CHAT_MODELS)[0])
         payload.model = model
-
-        async def gemini_cli_stream():
-            yield sse_event({"type": "meta", "conversation": conversation})
-            try:
-                text, raw = await gemini_cli_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
-            except HTTPException as exc:
-                yield sse_event({"type": "error", "detail": exc.detail})
-                return
-            assistant_message = chat_assistant_message(text, model, raw=raw)
-            conversation["messages"].append(assistant_message)
-            conversation["updated_at"] = now_ms()
-            save_conversation(user_id, conversation)
-            yield sse_event({"type": "delta", "delta": text})
-            yield sse_event({"type": "done", "conversation": conversation, "message": assistant_message})
-
-        return StreamingResponse(gemini_cli_stream(), media_type="text/event-stream")
+        return StreamingResponse(cli_chat_stream_events(conversation, user_id, payload, model, gemini_cli_chat_text), media_type="text/event-stream")
 
     chat_base, chat_hdrs, model = resolve_chat_provider(payload.provider, payload.model, payload.ms_model)
     _stream_provider = get_api_provider(payload.provider) if payload.provider not in ("modelscope",) else {}
     history = conversation["messages"][-MAX_HISTORY_MESSAGES:]
-    upstream_messages = [{"role": "system", "content": chat_system_prompt(payload)}]
-    for item in history:
-        msg = upstream_message_from_record(item)
-        if msg:
-            upstream_messages.append(msg)
-
-    async def stream():
-        content_parts = []
-        raw_usage = None
-        yield sse_event({"type": "meta", "conversation": conversation})
-        try:
-            async with httpx.AsyncClient(timeout=AI_REQUEST_TIMEOUT) as client:
-                async with client.stream(
-                    "POST",
-                    f"{chat_base}/chat/completions",
-                    headers=chat_hdrs,
-                    json={"model": model, "messages": upstream_messages, "stream": True},
-                ) as response:
-                    if response.status_code >= 400:
-                        detail = await response.aread()
-                        body = detail.decode("utf-8", errors="ignore")
-                        friendly = friendly_chat_error_detail(body, model, _stream_provider)
-                        yield sse_event({"type": "error", "detail": friendly or f"上游接口错误：{body}"})
-                        return
-                    async for line in response.aiter_lines():
-                        if not line:
-                            continue
-                        if line.startswith("data:"):
-                            line = line[5:].strip()
-                        if line == "[DONE]":
-                            break
-                        try:
-                            chunk = json.loads(line)
-                        except json.JSONDecodeError:
-                            continue
-                        if isinstance(chunk, dict) and chunk.get("usage"):
-                            raw_usage = chunk.get("usage")
-                        delta = text_delta_from_chat_chunk(chunk)
-                        if delta:
-                            content_parts.append(delta)
-                            yield sse_event({"type": "delta", "delta": delta})
-        except httpx.HTTPError as exc:
-            log_net_error("对话(流式) 网络/TLS错误", exc)
-            yield sse_event({"type": "error", "detail": f"请求上游接口失败：{exc}"})
-            return
-
-        assistant_message = chat_assistant_message("".join(content_parts).strip() or "接口返回了空回复。", model, raw_usage=raw_usage)
-        conversation["messages"].append(assistant_message)
-        conversation["updated_at"] = now_ms()
-        save_conversation(user_id, conversation)
-        yield sse_event({"type": "done", "conversation": conversation, "message": assistant_message})
-
-    return StreamingResponse(stream(), media_type="text/event-stream")
+    upstream_messages = chat_upstream_messages(payload, history)
+    return StreamingResponse(chat_upstream_stream(conversation, user_id, model, chat_base, chat_hdrs, upstream_messages, _stream_provider), media_type="text/event-stream")
 
 # --- 历史记录 ---
 
