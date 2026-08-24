@@ -17344,262 +17344,278 @@ composerPinBtn?.addEventListener('click', e => {
     refreshIcons();
     updateComposer();
 });
-window.onmousemove = e => {
-    lastMouseWorld = screenToWorld(e);
-    if(smartMinimapDrag){
-        e.preventDefault();
-        centerViewportOnWorldPoint(minimapEventToWorld(e));
-        return;
+function handleSmartMinimapDragMove(e){
+    if(!(smartMinimapDrag)) return false;
+    e.preventDefault();
+    centerViewportOnWorldPoint(minimapEventToWorld(e));
+    return true;
+}
+function handleSmartRightEraseMove(e){
+    if(!(rightEraseGesture)) return false;
+    if(!rightEraseGesture.active && Math.hypot(e.clientX - rightEraseGesture.startX, e.clientY - rightEraseGesture.startY) >= 2){
+        rightEraseGesture.active = true;
+        closeCreateMenu();
+        connectionEraseState = {started:false, count:0, indices:new Set(), lastX:rightEraseGesture.startX, lastY:rightEraseGesture.startY, trail:[]};
+        shell.classList.add('connection-erasing');
     }
-    if(rightEraseGesture){
-        if(!rightEraseGesture.active && Math.hypot(e.clientX - rightEraseGesture.startX, e.clientY - rightEraseGesture.startY) >= 2){
-            rightEraseGesture.active = true;
-            closeCreateMenu();
-            connectionEraseState = {started:false, count:0, indices:new Set(), lastX:rightEraseGesture.startX, lastY:rightEraseGesture.startY, trail:[]};
-            shell.classList.add('connection-erasing');
-        }
-        if(rightEraseGesture.active && connectionEraseState){
-            e.preventDefault();
-            updateConnectionEraseTrail(e);
-            eraseConnectionsAlongPointer(e);
-        }
-        return;
-    }
-    if(connectionEraseState){
+    if(rightEraseGesture.active && connectionEraseState){
         e.preventDefault();
         updateConnectionEraseTrail(e);
         eraseConnectionsAlongPointer(e);
-        return;
     }
-    if(portDragState){
-        e.preventDefault();
-        const p = screenToWorld(e);
-        portDragState.currentWorld = p;
-        portDragState.moved = true;
-        const hitEl = document.elementFromPoint(e.clientX, e.clientY);
-        const portEl = hitEl?.closest?.('.node-port');
-        const nodeEl = portEl?.closest?.('.image-node') || hitEl?.closest?.('.image-node');
-        let targetId = '', targetPort = '';
-        if(nodeEl && nodeEl.dataset.id && nodeEl.dataset.id !== portDragState.fromId){
-            targetId = nodeEl.dataset.id;
-            if(portEl){
-                targetPort = portEl.dataset.port;
-            } else {
-                const rect = nodeEl.getBoundingClientRect();
-                targetPort = (e.clientX - rect.left) < rect.width / 2 ? 'in' : 'out';
-            }
-            const compatible = (portDragState.fromPort === 'out' && targetPort === 'in') || (portDragState.fromPort === 'in' && targetPort === 'out');
-            if(!compatible){ targetId = ''; targetPort = ''; }
-        }
-        portDragState.hoverTargetId = targetId;
-        portDragState.hoverPort = targetPort;
-        updatePortDragVisual();
-        return;
-    }
-    if(promptResizeState){
-        e.preventDefault();
-        const dy = e.clientY - promptResizeState.startY;
-        settings.promptH = Math.max(60, Math.min(380, promptResizeState.startH + dy));
-        promptInput.style.setProperty('--prompt-h', `${settings.promptH}px`);
-        persistActiveSmartSettings();
-        return;
-    }
-    if(selectionState){
-        e.preventDefault();
-        updateSelectionBox(e);
-        return;
-    }
-    if(previewCompareDrag){
-        e.preventDefault();
-        setPreviewComparePos(e.clientX);
-        return;
-    }
-    if(panoramaState.drag){
-        e.preventDefault();
-        const dx = e.clientX - panoramaState.drag.clientX;
-        const dy = e.clientY - panoramaState.drag.clientY;
-        panoramaState.yaw = panoramaState.drag.yaw - dx * 0.18;
-        panoramaState.pitch = Math.max(-85, Math.min(85, panoramaState.drag.pitch + dy * 0.18));
-        document.getElementById('previewStage')?.classList.add('panning');
-        return;
-    }
-    if(previewPanDrag){
-        const stage = document.getElementById('previewStage');
-        previewPan = {
-            x:previewPanDrag.startX + (e.clientX - previewPanDrag.clientX),
-            y:previewPanDrag.startY + (e.clientY - previewPanDrag.clientY)
-        };
-        stage?.classList.add('panning');
-        applyPreviewTransform();
-        return;
-    }
-    if(imageEditPanDrag){
-        const stage = document.getElementById('imageEditStage');
-        if(stage){
-            stage.scrollLeft = imageEditPanDrag.scrollLeft - (e.clientX - imageEditPanDrag.clientX);
-            stage.scrollTop = imageEditPanDrag.scrollTop - (e.clientY - imageEditPanDrag.clientY);
-        }
-        return;
-    }
-    if(cropDrag && cropState){
-        const dx = e.clientX - cropDrag.sx;
-        const dy = e.clientY - cropDrag.sy;
-        if(cropDrag.mode === 'move'){
-            cropState.x = cropDrag.start.x + dx;
-            cropState.y = cropDrag.start.y + dy;
-        } else if(cropDrag.mode === 'image'){
-            cropState.x = cropDrag.start.x + dx;
-            cropState.y = cropDrag.start.y + dy;
-        } else if(String(cropDrag.mode || '').startsWith('outpaint-')){
-            resizeOutpaintFromDrag(dx, dy);
+    return true;
+}
+function handleSmartConnectionEraseMove(e){
+    if(!(connectionEraseState)) return false;
+    e.preventDefault();
+    updateConnectionEraseTrail(e);
+    eraseConnectionsAlongPointer(e);
+    return true;
+}
+function handleSmartPortDragMove(e){
+    if(!(portDragState)) return false;
+    e.preventDefault();
+    const p = screenToWorld(e);
+    portDragState.currentWorld = p;
+    portDragState.moved = true;
+    const hitEl = document.elementFromPoint(e.clientX, e.clientY);
+    const portEl = hitEl?.closest?.('.node-port');
+    const nodeEl = portEl?.closest?.('.image-node') || hitEl?.closest?.('.image-node');
+    let targetId = '', targetPort = '';
+    if(nodeEl && nodeEl.dataset.id && nodeEl.dataset.id !== portDragState.fromId){
+        targetId = nodeEl.dataset.id;
+        if(portEl){
+            targetPort = portEl.dataset.port;
         } else {
-            resizeCropFromDrag(dx, dy);
+            const rect = nodeEl.getBoundingClientRect();
+            targetPort = (e.clientX - rect.left) < rect.width / 2 ? 'in' : 'out';
         }
-        clampCrop();
-        renderCropBox();
-        return;
+        const compatible = (portDragState.fromPort === 'out' && targetPort === 'in') || (portDragState.fromPort === 'in' && targetPort === 'out');
+        if(!compatible){ targetId = ''; targetPort = ''; }
     }
-    if(resizeState){
-        const node = nodes.find(n => n.id === resizeState.id);
-        if(!node) return;
-        const dx = (e.clientX - resizeState.startX) / viewport.scale;
-        const dy = (e.clientY - resizeState.startY) / viewport.scale;
-        const minW = node.type === 'smart-prompt' ? 260 : node.type === 'smart-loop' ? 252 : node.type === 'smart-group' ? SMART_GROUP_MIN_WIDTH : 48;
-        const minH = node.type === 'smart-prompt' ? 170 : node.type === 'smart-loop' ? 132 : node.type === 'smart-group' ? SMART_GROUP_MIN_HEIGHT : 48;
-        if(node.type === 'smart-group' && smartGroupImageRefs(node).some(ref => ref.item?.url)){
-            // 图片分组：和普通节点一样直接改 w/h，缩略图网格按新尺寸实时重排。不要走下面的“成员缩放”那套，
-            // 否则拖动过程里会按成员包围盒/缩放比例收缩，松手才回到拖动宽度（用户反馈的“变宽时先缩小”）。
-            node.w = Math.max(minW, Math.round(resizeState.startW + dx));
-            node.h = Math.max(minH, Math.round(resizeState.startH + dy));
-            if(smartGroupCompactMembers(node).length) arrangeSmartGroupMembers(node, {skipUndo:true, syncDom:true});
-            updateNodeElementDuringResize(node);
-            return;
-        }
-        if(node.type === 'smart-group'){
-            // 分组当“画布中的画布”：拖手柄按宽度方向算出统一缩放比例，组内所有成员（图片+提示词）按相对手势
-            // 起点的快照整体缩放+重排，然后把分组框自动收紧到成员的包围盒——盒子始终贴合内容，右侧不会留空白。
-            const startZoom = resizeState.startZoom || 1;
-            // 目标框宽 = 手柄拖出的框宽；缩放映射以“贴合内容的框宽”为基准，保证两个阶段都线性跟随手柄、衔接连续。
-            const targetW = resizeState.startW + dx;
-            const fitBase = resizeState.contentFitW || resizeState.startW || 1;
-            const desiredZoom = startZoom * (targetW / fitBase);
-            // 成员缩放上限 SMART_GROUP_MAX_MEMBER_ZOOM（默认 1=原始尺寸）：到上限就不再放大成员，改为让分组框继续扩大。
-            const effectiveZoom = Math.max(0.2, Math.min(SMART_GROUP_MAX_MEMBER_ZOOM, desiredZoom));
-            const memberRatio = effectiveZoom / startZoom;
-            const capped = desiredZoom > SMART_GROUP_MAX_MEMBER_ZOOM;
-            node._memberZoom = effectiveZoom;
-            const gx = Number(node.x) || 0, gy = Number(node.y) || 0;
-            const SMART_GROUP_PAD = 16;
-            let maxRight = gx, maxBottom = gy, hasMember = false;
-            (resizeState.members || []).forEach(snap => {
-                const member = nodes.find(n => n.id === snap.id);
-                if(!member) return;
-                hasMember = true;
-                member.x = gx + (snap.sx - gx) * memberRatio;
-                member.y = gy + (snap.sy - gy) * memberRatio;
-                member.w = Math.max(40, Math.round(snap.sw * memberRatio));
-                member.h = Math.max(40, Math.round(snap.sh * memberRatio));
-                if(snap.isImage) member.scale = 1;
-                maxRight = Math.max(maxRight, member.x + member.w);
-                maxBottom = Math.max(maxBottom, member.y + member.h);
-                const memberEl = world.querySelector(`.image-node[data-id="${CSS.escape(member.id)}"]`);
-                if(memberEl){
-                    memberEl.style.left = `${member.x}px`;
-                    memberEl.style.top = `${member.y}px`;
-                }
-                updateNodeElementDuringResize(member);
-            });
-            if(capped || !hasMember){
-                // 成员已到上限（或空分组）：分组框随手柄继续扩大，成员不再放大。
-                node.w = Math.max(minW, Math.round(resizeState.startW + dx));
-                node.h = Math.max(minH, Math.round(resizeState.startH + dy));
-            } else {
-                // 未到上限：分组框收紧到成员包围盒，贴合内容无空白。
-                node.w = Math.max(minW, Math.round(maxRight - gx + SMART_GROUP_PAD));
-                node.h = Math.max(minH, Math.round(maxBottom - gy + SMART_GROUP_PAD));
-            }
-            node.scale = 1;
-            updateNodeElementDuringResize(node);
-            return;
-        }
+    portDragState.hoverTargetId = targetId;
+    portDragState.hoverPort = targetPort;
+    updatePortDragVisual();
+    return true;
+}
+function handleSmartPromptResizeMove(e){
+    if(!(promptResizeState)) return false;
+    e.preventDefault();
+    const dy = e.clientY - promptResizeState.startY;
+    settings.promptH = Math.max(60, Math.min(380, promptResizeState.startH + dy));
+    promptInput.style.setProperty('--prompt-h', `${settings.promptH}px`);
+    persistActiveSmartSettings();
+    return true;
+}
+function handleSmartSelectionBoxMove(e){
+    if(!(selectionState)) return false;
+    e.preventDefault();
+    updateSelectionBox(e);
+    return true;
+}
+function handleSmartPreviewCompareMove(e){
+    if(!(previewCompareDrag)) return false;
+    e.preventDefault();
+    setPreviewComparePos(e.clientX);
+    return true;
+}
+function handleSmartPanoramaDragMove(e){
+    if(!(panoramaState.drag)) return false;
+    e.preventDefault();
+    const dx = e.clientX - panoramaState.drag.clientX;
+    const dy = e.clientY - panoramaState.drag.clientY;
+    panoramaState.yaw = panoramaState.drag.yaw - dx * 0.18;
+    panoramaState.pitch = Math.max(-85, Math.min(85, panoramaState.drag.pitch + dy * 0.18));
+    document.getElementById('previewStage')?.classList.add('panning');
+    return true;
+}
+function handleSmartPreviewPanMove(e){
+    if(!(previewPanDrag)) return false;
+    const stage = document.getElementById('previewStage');
+    previewPan = {
+        x:previewPanDrag.startX + (e.clientX - previewPanDrag.clientX),
+        y:previewPanDrag.startY + (e.clientY - previewPanDrag.clientY)
+    };
+    stage?.classList.add('panning');
+    applyPreviewTransform();
+    return true;
+}
+function handleSmartImageEditPanMove(e){
+    if(!(imageEditPanDrag)) return false;
+    const stage = document.getElementById('imageEditStage');
+    if(stage){
+        stage.scrollLeft = imageEditPanDrag.scrollLeft - (e.clientX - imageEditPanDrag.clientX);
+        stage.scrollTop = imageEditPanDrag.scrollTop - (e.clientY - imageEditPanDrag.clientY);
+    }
+    return true;
+}
+function handleSmartCropDragMove(e){
+    if(!(cropDrag && cropState)) return false;
+    const dx = e.clientX - cropDrag.sx;
+    const dy = e.clientY - cropDrag.sy;
+    if(cropDrag.mode === 'move'){
+        cropState.x = cropDrag.start.x + dx;
+        cropState.y = cropDrag.start.y + dy;
+    } else if(cropDrag.mode === 'image'){
+        cropState.x = cropDrag.start.x + dx;
+        cropState.y = cropDrag.start.y + dy;
+    } else if(String(cropDrag.mode || '').startsWith('outpaint-')){
+        resizeOutpaintFromDrag(dx, dy);
+    } else {
+        resizeCropFromDrag(dx, dy);
+    }
+    clampCrop();
+    renderCropBox();
+    return true;
+}
+function handleSmartNodeResizeMove(e){
+    if(!(resizeState)) return false;
+    const node = nodes.find(n => n.id === resizeState.id);
+    if(!node) return true;
+    const dx = (e.clientX - resizeState.startX) / viewport.scale;
+    const dy = (e.clientY - resizeState.startY) / viewport.scale;
+    const minW = node.type === 'smart-prompt' ? 260 : node.type === 'smart-loop' ? 252 : node.type === 'smart-group' ? SMART_GROUP_MIN_WIDTH : 48;
+    const minH = node.type === 'smart-prompt' ? 170 : node.type === 'smart-loop' ? 132 : node.type === 'smart-group' ? SMART_GROUP_MIN_HEIGHT : 48;
+    if(node.type === 'smart-group' && smartGroupImageRefs(node).some(ref => ref.item?.url)){
+        // 图片分组：和普通节点一样直接改 w/h，缩略图网格按新尺寸实时重排。不要走下面的“成员缩放”那套，
+        // 否则拖动过程里会按成员包围盒/缩放比例收缩，松手才回到拖动宽度（用户反馈的“变宽时先缩小”）。
         node.w = Math.max(minW, Math.round(resizeState.startW + dx));
         node.h = Math.max(minH, Math.round(resizeState.startH + dy));
+        if(smartGroupCompactMembers(node).length) arrangeSmartGroupMembers(node, {skipUndo:true, syncDom:true});
+        updateNodeElementDuringResize(node);
+        return true;
+    }
+    if(node.type === 'smart-group'){
+        // 分组当“画布中的画布”：拖手柄按宽度方向算出统一缩放比例，组内所有成员（图片+提示词）按相对手势
+        // 起点的快照整体缩放+重排，然后把分组框自动收紧到成员的包围盒——盒子始终贴合内容，右侧不会留空白。
+        const startZoom = resizeState.startZoom || 1;
+        // 目标框宽 = 手柄拖出的框宽；缩放映射以“贴合内容的框宽”为基准，保证两个阶段都线性跟随手柄、衔接连续。
+        const targetW = resizeState.startW + dx;
+        const fitBase = resizeState.contentFitW || resizeState.startW || 1;
+        const desiredZoom = startZoom * (targetW / fitBase);
+        // 成员缩放上限 SMART_GROUP_MAX_MEMBER_ZOOM（默认 1=原始尺寸）：到上限就不再放大成员，改为让分组框继续扩大。
+        const effectiveZoom = Math.max(0.2, Math.min(SMART_GROUP_MAX_MEMBER_ZOOM, desiredZoom));
+        const memberRatio = effectiveZoom / startZoom;
+        const capped = desiredZoom > SMART_GROUP_MAX_MEMBER_ZOOM;
+        node._memberZoom = effectiveZoom;
+        const gx = Number(node.x) || 0, gy = Number(node.y) || 0;
+        const SMART_GROUP_PAD = 16;
+        let maxRight = gx, maxBottom = gy, hasMember = false;
+        (resizeState.members || []).forEach(snap => {
+            const member = nodes.find(n => n.id === snap.id);
+            if(!member) return true;
+            hasMember = true;
+            member.x = gx + (snap.sx - gx) * memberRatio;
+            member.y = gy + (snap.sy - gy) * memberRatio;
+            member.w = Math.max(40, Math.round(snap.sw * memberRatio));
+            member.h = Math.max(40, Math.round(snap.sh * memberRatio));
+            if(snap.isImage) member.scale = 1;
+            maxRight = Math.max(maxRight, member.x + member.w);
+            maxBottom = Math.max(maxBottom, member.y + member.h);
+            const memberEl = world.querySelector(`.image-node[data-id="${CSS.escape(member.id)}"]`);
+            if(memberEl){
+                memberEl.style.left = `${member.x}px`;
+                memberEl.style.top = `${member.y}px`;
+            }
+            updateNodeElementDuringResize(member);
+        });
+        if(capped || !hasMember){
+            // 成员已到上限（或空分组）：分组框随手柄继续扩大，成员不再放大。
+            node.w = Math.max(minW, Math.round(resizeState.startW + dx));
+            node.h = Math.max(minH, Math.round(resizeState.startH + dy));
+        } else {
+            // 未到上限：分组框收紧到成员包围盒，贴合内容无空白。
+            node.w = Math.max(minW, Math.round(maxRight - gx + SMART_GROUP_PAD));
+            node.h = Math.max(minH, Math.round(maxBottom - gy + SMART_GROUP_PAD));
+        }
         node.scale = 1;
         updateNodeElementDuringResize(node);
-        return;
+        return true;
     }
-    if(llmInstructionResizeState){
-        const node = nodes.find(n => n.id === llmInstructionResizeState.id);
-        if(!node) return;
-        const dy = (e.clientY - llmInstructionResizeState.startY) / viewport.scale;
-        const newInstrH = Math.max(PROMPT_LLM_INSTRUCTION_MIN_H, Math.min(PROMPT_LLM_INSTRUCTION_MAX_H, Math.round(llmInstructionResizeState.startH + dy)));
-        node.llmInstructionHeight = newInstrH;
-        // 只把“指令框的高度变化量”叠加到节点总高度上，保留用户手动拉大的上方区域，避免上方被重置变小。
-        node.h = Math.max(promptNodeExpandedHeight(node), Math.round(llmInstructionResizeState.startNodeH + (newInstrH - llmInstructionResizeState.startH)));
-        node.w = Math.max(Number(node.w) || 0, 316);
-        node.scale = 1;
-        updateNodeElementDuringResize(node);
-        const ta = world.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"] .prompt-llm-instruction`);
-        if(ta) ta.style.height = `${promptLlmInstructionHeight(node)}px`;
-        return;
-    }
-    if(promptSplitResizeState){
-        const node = nodes.find(n => n.id === promptSplitResizeState.id);
-        if(!node) return;
-        const dy = (e.clientY - promptSplitResizeState.startY) / viewport.scale;
-        const newPreviewH = Math.max(PROMPT_SPLIT_PREVIEW_MIN_H, Math.min(PROMPT_SPLIT_PREVIEW_MAX_H, Math.round(promptSplitResizeState.startH + dy)));
-        node.promptSplitPreviewHeight = newPreviewH;
-        node.h = Math.max(promptNodeMinHeight(node), Math.round(promptSplitResizeState.startNodeH + (newPreviewH - promptSplitResizeState.startH)));
-        node.w = Math.max(Number(node.w) || 0, 316);
-        node.scale = 1;
-        updateNodeElementDuringResize(node);
-        const list = world.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"] .prompt-node-segments`);
-        if(list) list.style.height = `${promptNodeSplitPreviewHeight(node)}px`;
-        return;
-    }
-    if(thumbDragState){
-        const dx = e.clientX - thumbDragState.startX;
-        const dy = e.clientY - thumbDragState.startY;
-        const source = nodes.find(n => n.id === thumbDragState.nodeId);
-        if(!thumbDragState.detached && Math.abs(dx) + Math.abs(dy) > 6){
-            const canDetachThumb = source && (isSmartGroupNode(source) ? (source.images || []).length >= 1 : (source.images || []).length > 1);
-            if(canDetachThumb){
-                const img = source.images[thumbDragState.imgIndex];
-                if(img){
-                    commitPendingUndo();
-                    undoSuppressed = true;
-                    applyNodeMetaToImage(img, source);
-                    source.images.splice(thumbDragState.imgIndex, 1);
-                    if(isSmartGroupNode(source)){
-                        arrangeSmartGroupMembers(source, {skipUndo:true, syncDom:true});
-                    } else if(source.images.length <= 1){
-                        source.title = 'Image';
-                        delete source.w; delete source.h;
-                        inheritNodeMetaFromImage(source);
-                    }
-                    const point = screenToWorld(e);
-                    selectedId = '';
-                    selectedImage = {nodeId:'', index:-1};
-                    const newNode = createImageNodeAt(point, [img], {select:false, skipUndo:true});
-                    undoSuppressed = false;
-                    dragState = {id:newNode.id, startX:e.clientX, startY:e.clientY, ox:newNode.x, oy:newNode.y, thumbDetached:true};
-                    thumbDragState.detached = true;
-                    render();
+    node.w = Math.max(minW, Math.round(resizeState.startW + dx));
+    node.h = Math.max(minH, Math.round(resizeState.startH + dy));
+    node.scale = 1;
+    updateNodeElementDuringResize(node);
+    return true;
+}
+function handleSmartLlmInstructionResizeMove(e){
+    if(!(llmInstructionResizeState)) return false;
+    const node = nodes.find(n => n.id === llmInstructionResizeState.id);
+    if(!node) return true;
+    const dy = (e.clientY - llmInstructionResizeState.startY) / viewport.scale;
+    const newInstrH = Math.max(PROMPT_LLM_INSTRUCTION_MIN_H, Math.min(PROMPT_LLM_INSTRUCTION_MAX_H, Math.round(llmInstructionResizeState.startH + dy)));
+    node.llmInstructionHeight = newInstrH;
+    // 只把“指令框的高度变化量”叠加到节点总高度上，保留用户手动拉大的上方区域，避免上方被重置变小。
+    node.h = Math.max(promptNodeExpandedHeight(node), Math.round(llmInstructionResizeState.startNodeH + (newInstrH - llmInstructionResizeState.startH)));
+    node.w = Math.max(Number(node.w) || 0, 316);
+    node.scale = 1;
+    updateNodeElementDuringResize(node);
+    const ta = world.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"] .prompt-llm-instruction`);
+    if(ta) ta.style.height = `${promptLlmInstructionHeight(node)}px`;
+    return true;
+}
+function handleSmartPromptSplitResizeMove(e){
+    if(!(promptSplitResizeState)) return false;
+    const node = nodes.find(n => n.id === promptSplitResizeState.id);
+    if(!node) return true;
+    const dy = (e.clientY - promptSplitResizeState.startY) / viewport.scale;
+    const newPreviewH = Math.max(PROMPT_SPLIT_PREVIEW_MIN_H, Math.min(PROMPT_SPLIT_PREVIEW_MAX_H, Math.round(promptSplitResizeState.startH + dy)));
+    node.promptSplitPreviewHeight = newPreviewH;
+    node.h = Math.max(promptNodeMinHeight(node), Math.round(promptSplitResizeState.startNodeH + (newPreviewH - promptSplitResizeState.startH)));
+    node.w = Math.max(Number(node.w) || 0, 316);
+    node.scale = 1;
+    updateNodeElementDuringResize(node);
+    const list = world.querySelector(`.image-node[data-id="${CSS.escape(node.id)}"] .prompt-node-segments`);
+    if(list) list.style.height = `${promptNodeSplitPreviewHeight(node)}px`;
+    return true;
+}
+function handleSmartThumbDragMove(e){
+    if(!(thumbDragState)) return false;
+    const dx = e.clientX - thumbDragState.startX;
+    const dy = e.clientY - thumbDragState.startY;
+    const source = nodes.find(n => n.id === thumbDragState.nodeId);
+    if(!thumbDragState.detached && Math.abs(dx) + Math.abs(dy) > 6){
+        const canDetachThumb = source && (isSmartGroupNode(source) ? (source.images || []).length >= 1 : (source.images || []).length > 1);
+        if(canDetachThumb){
+            const img = source.images[thumbDragState.imgIndex];
+            if(img){
+                commitPendingUndo();
+                undoSuppressed = true;
+                applyNodeMetaToImage(img, source);
+                source.images.splice(thumbDragState.imgIndex, 1);
+                if(isSmartGroupNode(source)){
+                    arrangeSmartGroupMembers(source, {skipUndo:true, syncDom:true});
+                } else if(source.images.length <= 1){
+                    source.title = 'Image';
+                    delete source.w; delete source.h;
+                    inheritNodeMetaFromImage(source);
                 }
+                const point = screenToWorld(e);
+                selectedId = '';
+                selectedImage = {nodeId:'', index:-1};
+                const newNode = createImageNodeAt(point, [img], {select:false, skipUndo:true});
+                undoSuppressed = false;
+                dragState = {id:newNode.id, startX:e.clientX, startY:e.clientY, ox:newNode.x, oy:newNode.y, thumbDetached:true};
+                thumbDragState.detached = true;
+                render();
             }
         }
-        if(thumbDragState.detached) thumbDragState = null;
-        else return;
     }
-    if(panState){
-        const dx = e.clientX - panState.startX;
-        const dy = e.clientY - panState.startY;
-        if(Math.abs(dx) + Math.abs(dy) > 3) didPan = true;
-        viewport.x = panState.ox + dx;
-        viewport.y = panState.oy + dy;
-        applyViewport();
-        return;
-    }
+    if(thumbDragState.detached) thumbDragState = null;
+    else return true;
+    return false;
+}
+function handleSmartPanMove(e){
+    if(!(panState)) return false;
+    const dx = e.clientX - panState.startX;
+    const dy = e.clientY - panState.startY;
+    if(Math.abs(dx) + Math.abs(dy) > 3) didPan = true;
+    viewport.x = panState.ox + dx;
+    viewport.y = panState.oy + dy;
+    applyViewport();
+    return true;
+}
+function handleSmartNodeDragMove(e){
     if(!dragState) return;
     const node = nodes.find(n => n.id === dragState.id);
     if(!node) return;
@@ -17632,39 +17648,61 @@ window.onmousemove = e => {
     moveNodeElementsDuringDrag();
     updateLoopInsertPreview();
     if(target) setDropHighlight(target.id);
+}
+window.onmousemove = e => {
+    lastMouseWorld = screenToWorld(e);
+    if(handleSmartMinimapDragMove(e)) return;
+    if(handleSmartRightEraseMove(e)) return;
+    if(handleSmartConnectionEraseMove(e)) return;
+    if(handleSmartPortDragMove(e)) return;
+    if(handleSmartPromptResizeMove(e)) return;
+    if(handleSmartSelectionBoxMove(e)) return;
+    if(handleSmartPreviewCompareMove(e)) return;
+    if(handleSmartPanoramaDragMove(e)) return;
+    if(handleSmartPreviewPanMove(e)) return;
+    if(handleSmartImageEditPanMove(e)) return;
+    if(handleSmartCropDragMove(e)) return;
+    if(handleSmartNodeResizeMove(e)) return;
+    if(handleSmartLlmInstructionResizeMove(e)) return;
+    if(handleSmartPromptSplitResizeMove(e)) return;
+    if(handleSmartThumbDragMove(e)) return;
+    if(handleSmartPanMove(e)) return;
+    handleSmartNodeDragMove(e);
 };
-window.onmouseup = e => {
-    document.body.classList.remove('smart-node-drag');
-    document.body.classList.remove('smart-node-resize');
-    if(rightEraseGesture){
-        rightEraseGesture = null;
-        if(connectionEraseState){
-            const changed = finishConnectionErase();
-            connectionEraseState = null;
-            shell.classList.remove('connection-erasing');
-            clearConnectionEraseTrail();
-            if(changed) scheduleSave();
-            rightEraseJustFinished = true;
-            setTimeout(() => { rightEraseJustFinished = false; }, 250);
-            return;
-        }
-    }
+function handleSmartRightEraseUp(e){
+    if(!(rightEraseGesture)) return false;
+    rightEraseGesture = null;
     if(connectionEraseState){
         const changed = finishConnectionErase();
         connectionEraseState = null;
         shell.classList.remove('connection-erasing');
         clearConnectionEraseTrail();
         if(changed) scheduleSave();
-        return;
+        rightEraseJustFinished = true;
+        setTimeout(() => { rightEraseJustFinished = false; }, 250);
+        return true;
     }
-    if(portDragState){
-        const drag = portDragState;
-        portDragState = null;
-        shell.classList.remove('port-dragging');
-        clearPortDragVisual();
-        handlePortDrop(drag, e);
-        return;
-    }
+    return false;
+}
+function handleSmartConnectionEraseUp(e){
+    if(!(connectionEraseState)) return false;
+    const changed = finishConnectionErase();
+    connectionEraseState = null;
+    shell.classList.remove('connection-erasing');
+    clearConnectionEraseTrail();
+    if(changed) scheduleSave();
+    return true;
+}
+function handleSmartPortDragUp(e){
+    if(!(portDragState)) return false;
+    const drag = portDragState;
+    portDragState = null;
+    shell.classList.remove('port-dragging');
+    clearPortDragVisual();
+    handlePortDrop(drag, e);
+    return true;
+}
+function handleSmartMiscDragUp(e){
     if(promptResizeState){ promptResizeState = null; scheduleSave(); }
     if(selectionState) finishSelection(e);
     if(previewCompareDrag) previewCompareDrag = false;
@@ -17723,112 +17761,122 @@ window.onmouseup = e => {
     if(smartMinimapDrag){
         smartMinimapDrag = false;
     }
-    if(dragState){
-        const draggedNode = nodes.find(n => n.id === dragState.id);
-        let stateChanged = false;
-        const hit = document.elementFromPoint(e.clientX, e.clientY);
-        const droppedOnAssetPanel = assetLibraryOpen && hit && assetPanel?.contains(hit);
-        if(droppedOnAssetPanel && draggedNode && (draggedNode.images || []).length){
-            const imagesToSave = (draggedNode.images || []).filter(img => img?.url);
-            imagesToSave.forEach(img => addUrlToAssetLibrary(img.url, img.name || draggedNode.title || 'image'));
-            (dragState.group || [{id:dragState.id, ox:dragState.ox, oy:dragState.oy}]).forEach(item => {
-                const n = nodes.find(x => x.id === item.id);
-                if(n){ n.x = item.ox; n.y = item.oy; }
-            });
-            setAssetDragOver(false);
-            discardPendingUndo();
-            clearDropHighlight();
-            dragState = null;
-            document.body.classList.remove('smart-node-drag');
-            render();
-            scheduleSave();
-            return;
-        }
-        const autoTarget = draggedNode && dragState.ctrlGroup ? dragConnectTargetFor(draggedNode, screenToWorld(e)) : null;
-        const insertHit = draggedNode?.type === 'smart-loop' && dragState.ctrlGroup && (dragState.group || []).length <= 1
-            ? insertionConnectionForNode(draggedNode)
-            : null;
-        const draggedRect = draggedNode ? nodeRect(draggedNode) : null;
-        const groupTarget = draggedNode && (draggedNode.images || []).length && (dragState.group || []).length <= 1 && draggedRect
-            ? rectOverlapNode(draggedNode.id, draggedRect.x, draggedRect.y, draggedRect.width, draggedRect.height, dragState.groupIds)
-            : null;
-        // 拖入分组：单个节点、多选（批量拖入）或整个分组（其成员会并入目标分组）都允许并入主分组下的目标分组。
-        // 目标分组由主拖动节点的中心命中决定；smartGroupTargetForDraggedNode 已排除正在被拖动的节点/分组。
-        const draggedNodes = (dragState.group || []).map(item => nodes.find(n => n.id === item.id)).filter(Boolean);
-        const smartGroupTarget = draggedNode ? smartGroupTargetForDraggedNode(draggedNode) : null;
-        if(
-            insertHit &&
-            insertLoopNodeIntoConnection(draggedNode, insertHit)
-        ){
-            stateChanged = true;
-            render();
-        } else if(
-            smartGroupTarget &&
-            addDraggedNodesToSmartGroup(draggedNodes.length ? draggedNodes : [draggedNode], smartGroupTarget)
-        ){
-            stateChanged = true;
-            render();
-        } else if(
-            groupTarget &&
-            dragState.ctrlGroup &&
-            (groupTarget.images || []).length > 1 &&
-            mergeImageNodesIntoGroup(draggedNode.id, groupTarget.id)
-        ){
-            stateChanged = true;
-            render();
-        } else if(
-            draggedNode &&
-            autoTarget &&
-            dragState.ctrlGroup &&
-            (dragState.group || []).length <= 1 &&
-            canAutoConnectDraggedNode(draggedNode, autoTarget) &&
-            connectInputNode(draggedNode.id, autoTarget.id)
-        ){
-            stateChanged = true;
-            restoreDraggedNodePosition();
-            if(selectedId === draggedNode.id) selectedId = '';
-            render();
-        } else if(draggedNode && (draggedNode.images || []).length && (dragState.group || []).length <= 1){
-            const r = nodeRect(draggedNode);
-            const target = rectOverlapNode(draggedNode.id, r.x, r.y, r.width, r.height, dragState.groupIds);
-            if(target && isSmartGroupNode(target)){
-                if((dragState.group || []).some(item => {
-                    const n = nodes.find(x => x.id === item.id);
-                    return n && (Math.abs((Number(n.x) || 0) - item.ox) > 1 || Math.abs((Number(n.y) || 0) - item.oy) > 1);
-                })) stateChanged = true;
-            } else if(target && dragState.ctrlGroup && !isSmartGroupNode(target) && canAutoConnectDraggedNode(draggedNode, target)){
-                stateChanged = true;
-                connectInputNode(draggedNode.id, target.id);
-                if(!dragState.thumbDetached) restoreDraggedNodePosition();
-                if(selectedId === draggedNode.id) selectedId = '';
-                render();
-            } else if((dragState.group || []).some(item => {
+}
+function handleSmartNodeDragUp(e){
+    if(!dragState) return;
+    const draggedNode = nodes.find(n => n.id === dragState.id);
+    let stateChanged = false;
+    const hit = document.elementFromPoint(e.clientX, e.clientY);
+    const droppedOnAssetPanel = assetLibraryOpen && hit && assetPanel?.contains(hit);
+    if(droppedOnAssetPanel && draggedNode && (draggedNode.images || []).length){
+        const imagesToSave = (draggedNode.images || []).filter(img => img?.url);
+        imagesToSave.forEach(img => addUrlToAssetLibrary(img.url, img.name || draggedNode.title || 'image'));
+        (dragState.group || [{id:dragState.id, ox:dragState.ox, oy:dragState.oy}]).forEach(item => {
+            const n = nodes.find(x => x.id === item.id);
+            if(n){ n.x = item.ox; n.y = item.oy; }
+        });
+        setAssetDragOver(false);
+        discardPendingUndo();
+        clearDropHighlight();
+        dragState = null;
+        document.body.classList.remove('smart-node-drag');
+        render();
+        scheduleSave();
+        return;
+    }
+    const autoTarget = draggedNode && dragState.ctrlGroup ? dragConnectTargetFor(draggedNode, screenToWorld(e)) : null;
+    const insertHit = draggedNode?.type === 'smart-loop' && dragState.ctrlGroup && (dragState.group || []).length <= 1
+        ? insertionConnectionForNode(draggedNode)
+        : null;
+    const draggedRect = draggedNode ? nodeRect(draggedNode) : null;
+    const groupTarget = draggedNode && (draggedNode.images || []).length && (dragState.group || []).length <= 1 && draggedRect
+        ? rectOverlapNode(draggedNode.id, draggedRect.x, draggedRect.y, draggedRect.width, draggedRect.height, dragState.groupIds)
+        : null;
+    // 拖入分组：单个节点、多选（批量拖入）或整个分组（其成员会并入目标分组）都允许并入主分组下的目标分组。
+    // 目标分组由主拖动节点的中心命中决定；smartGroupTargetForDraggedNode 已排除正在被拖动的节点/分组。
+    const draggedNodes = (dragState.group || []).map(item => nodes.find(n => n.id === item.id)).filter(Boolean);
+    const smartGroupTarget = draggedNode ? smartGroupTargetForDraggedNode(draggedNode) : null;
+    if(
+        insertHit &&
+        insertLoopNodeIntoConnection(draggedNode, insertHit)
+    ){
+        stateChanged = true;
+        render();
+    } else if(
+        smartGroupTarget &&
+        addDraggedNodesToSmartGroup(draggedNodes.length ? draggedNodes : [draggedNode], smartGroupTarget)
+    ){
+        stateChanged = true;
+        render();
+    } else if(
+        groupTarget &&
+        dragState.ctrlGroup &&
+        (groupTarget.images || []).length > 1 &&
+        mergeImageNodesIntoGroup(draggedNode.id, groupTarget.id)
+    ){
+        stateChanged = true;
+        render();
+    } else if(
+        draggedNode &&
+        autoTarget &&
+        dragState.ctrlGroup &&
+        (dragState.group || []).length <= 1 &&
+        canAutoConnectDraggedNode(draggedNode, autoTarget) &&
+        connectInputNode(draggedNode.id, autoTarget.id)
+    ){
+        stateChanged = true;
+        restoreDraggedNodePosition();
+        if(selectedId === draggedNode.id) selectedId = '';
+        render();
+    } else if(draggedNode && (draggedNode.images || []).length && (dragState.group || []).length <= 1){
+        const r = nodeRect(draggedNode);
+        const target = rectOverlapNode(draggedNode.id, r.x, r.y, r.width, r.height, dragState.groupIds);
+        if(target && isSmartGroupNode(target)){
+            if((dragState.group || []).some(item => {
                 const n = nodes.find(x => x.id === item.id);
                 return n && (Math.abs((Number(n.x) || 0) - item.ox) > 1 || Math.abs((Number(n.y) || 0) - item.oy) > 1);
-            })){
-                stateChanged = true;
-            }
+            })) stateChanged = true;
+        } else if(target && dragState.ctrlGroup && !isSmartGroupNode(target) && canAutoConnectDraggedNode(draggedNode, target)){
+            stateChanged = true;
+            connectInputNode(draggedNode.id, target.id);
+            if(!dragState.thumbDetached) restoreDraggedNodePosition();
+            if(selectedId === draggedNode.id) selectedId = '';
+            render();
         } else if((dragState.group || []).some(item => {
             const n = nodes.find(x => x.id === item.id);
             return n && (Math.abs((Number(n.x) || 0) - item.ox) > 1 || Math.abs((Number(n.y) || 0) - item.oy) > 1);
-        }) || (draggedNode && (Math.abs((draggedNode.x || 0) - dragState.ox) > 1 || Math.abs((draggedNode.y || 0) - dragState.oy) > 1))){
+        })){
             stateChanged = true;
         }
-        if(dragState.thumbDetached) stateChanged = true;
-        // 拖出（没落到任何分组上）：普通节点退出所在分组；子分组退出时把它并入过的成员从主分组里撤掉。
-        if(draggedNode && !smartGroupTarget && pruneSmartGroupMembershipsForNode(draggedNode)){
-            stateChanged = true;
-            render();
-        }
-        if(stateChanged) commitPendingUndo();
-        else discardPendingUndo();
-        if(stateChanged || dragState.thumbDetached) suppressNodeClickUntil = Date.now() + 180;
-        clearDropHighlight();
-        loopInsertPreview = null;
-        dragState = null;
-        scheduleSave();
-        scheduleConnectionLayerRefresh();
+    } else if((dragState.group || []).some(item => {
+        const n = nodes.find(x => x.id === item.id);
+        return n && (Math.abs((Number(n.x) || 0) - item.ox) > 1 || Math.abs((Number(n.y) || 0) - item.oy) > 1);
+    }) || (draggedNode && (Math.abs((draggedNode.x || 0) - dragState.ox) > 1 || Math.abs((draggedNode.y || 0) - dragState.oy) > 1))){
+        stateChanged = true;
     }
+    if(dragState.thumbDetached) stateChanged = true;
+    // 拖出（没落到任何分组上）：普通节点退出所在分组；子分组退出时把它并入过的成员从主分组里撤掉。
+    if(draggedNode && !smartGroupTarget && pruneSmartGroupMembershipsForNode(draggedNode)){
+        stateChanged = true;
+        render();
+    }
+    if(stateChanged) commitPendingUndo();
+    else discardPendingUndo();
+    if(stateChanged || dragState.thumbDetached) suppressNodeClickUntil = Date.now() + 180;
+    clearDropHighlight();
+    loopInsertPreview = null;
+    dragState = null;
+    scheduleSave();
+    scheduleConnectionLayerRefresh();
+}
+window.onmouseup = e => {
+    document.body.classList.remove('smart-node-drag');
+    document.body.classList.remove('smart-node-resize');
+    if(handleSmartRightEraseUp(e)) return;
+    if(handleSmartConnectionEraseUp(e)) return;
+    if(handleSmartPortDragUp(e)) return;
+    handleSmartMiscDragUp(e);
+    handleSmartNodeDragUp(e);
 };
 shell.addEventListener('wheel', e => {
     if(e.target.closest('.composer,.smart-back,.image-edit-modal,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,.minimax-library-list,.minimax-ref-track,[data-thumb-scroll]')) return;
