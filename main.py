@@ -13551,56 +13551,52 @@ def apply_agnes_model_defaults(base_url, grouped, ids):
     grouped["video"] = sorted(set(grouped.get("video") or []))
     return grouped, ids
 
-@app.post("/api/providers/test-connection")
-async def test_provider_connection(payload: TestConnectionPayload):
-    """测试请求地址是否可用：调上游 /v1/models。验证通过时同时把模型清单按类别返回，避免再调一次拉取接口。"""
-    protocol = protocol_from_payload(payload)
+async def cli_provider_models_payload(protocol):
     if protocol == "codex":
         status = await codex_status()
         payload_models = codex_models_payload(raw={"status": status})
-        payload_models.update({
-            "ok": bool(status.get("installed")),
-            "status": 200 if status.get("installed") else 0,
-            "message": status.get("message") or ("OpenAI Codex CLI 可用" if status.get("installed") else "未找到 OpenAI Codex CLI"),
-        })
-        return payload_models
-    if protocol == "gemini-cli":
+        ok_message, missing_message = "OpenAI Codex CLI 可用", "未找到 OpenAI Codex CLI"
+    else:
         status = await gemini_cli_status()
         payload_models = gemini_cli_models_payload(raw={"status": status})
-        payload_models.update({
-            "ok": bool(status.get("installed")),
-            "status": 200 if status.get("installed") else 0,
-            "message": status.get("message") or ("Antigravity CLI 可用" if status.get("installed") else "未找到 Antigravity CLI"),
-        })
-        return payload_models
-    if protocol == "jimeng":
-        status = await jimeng_status()
-        return {
-            "ok": bool(status.get("installed") and status.get("logged_in")),
-            "status": 200 if status.get("logged_in") else 0,
-            "message": status.get("message") or "即梦 CLI 已登录",
-            "model_count": len(JIMENG_DEFAULT_IMAGE_MODELS) + len(JIMENG_DEFAULT_VIDEO_MODELS),
-            "image_models": JIMENG_DEFAULT_IMAGE_MODELS,
-            "chat_models": [],
-            "video_models": JIMENG_DEFAULT_VIDEO_MODELS,
-            "all": [*JIMENG_DEFAULT_IMAGE_MODELS, *JIMENG_DEFAULT_VIDEO_MODELS],
-            "raw": status.get("raw"),
-        }
-    if protocol == "runninghub":
-        provider = {"id": "runninghub", "name": "RunningHub", "base_url": (payload.base_url or RUNNINGHUB_DEFAULT_BASE_URL).strip().rstrip("/"), "protocol": "runninghub", "api_key": api_key_from_payload(payload, protocol)}
-        payload_models = await runninghub_models_payload(provider)
-        return {
-            "ok": True,
-            "status": 200,
-            "message": "RunningHub OpenAPI 可用，已拉取官方直连模型注册表。",
-            "model_count": payload_models["total"],
-            "image_models": payload_models["image_models"],
-            "chat_models": payload_models["chat_models"],
-            "video_models": payload_models["video_models"],
-            "all": payload_models["all"],
-            "protocol": "runninghub",
-            "raw": payload_models.get("raw"),
-        }
+        ok_message, missing_message = "Antigravity CLI 可用", "未找到 Antigravity CLI"
+    payload_models.update({
+        "ok": bool(status.get("installed")),
+        "status": 200 if status.get("installed") else 0,
+        "message": status.get("message") or (ok_message if status.get("installed") else missing_message),
+    })
+    return payload_models
+
+def jimeng_connection_payload(status):
+    return {
+        "ok": bool(status.get("installed") and status.get("logged_in")),
+        "status": 200 if status.get("logged_in") else 0,
+        "message": status.get("message") or "即梦 CLI 已登录",
+        "model_count": len(JIMENG_DEFAULT_IMAGE_MODELS) + len(JIMENG_DEFAULT_VIDEO_MODELS),
+        "image_models": JIMENG_DEFAULT_IMAGE_MODELS,
+        "chat_models": [],
+        "video_models": JIMENG_DEFAULT_VIDEO_MODELS,
+        "all": [*JIMENG_DEFAULT_IMAGE_MODELS, *JIMENG_DEFAULT_VIDEO_MODELS],
+        "raw": status.get("raw"),
+    }
+
+async def runninghub_connection_payload(payload):
+    provider = {"id": "runninghub", "name": "RunningHub", "base_url": (payload.base_url or RUNNINGHUB_DEFAULT_BASE_URL).strip().rstrip("/"), "protocol": "runninghub", "api_key": api_key_from_payload(payload, "runninghub")}
+    payload_models = await runninghub_models_payload(provider)
+    return {
+        "ok": True,
+        "status": 200,
+        "message": "RunningHub OpenAPI 可用，已拉取官方直连模型注册表。",
+        "model_count": payload_models["total"],
+        "image_models": payload_models["image_models"],
+        "chat_models": payload_models["chat_models"],
+        "video_models": payload_models["video_models"],
+        "all": payload_models["all"],
+        "protocol": "runninghub",
+        "raw": payload_models.get("raw"),
+    }
+
+def upstream_connection_credentials(payload, protocol):
     base_url = (payload.base_url or "").strip().rstrip("/")
     if not base_url:
         raise HTTPException(status_code=400, detail="请先填写请求地址")
@@ -13610,59 +13606,87 @@ async def test_provider_connection(payload: TestConnectionPayload):
     if not api_key:
         key_name = "方舟 API Key" if protocol == "volcengine" else "API Key"
         raise HTTPException(status_code=400, detail=f"请先填写或保存 {key_name}")
+    return base_url, api_key
+
+def upstream_models_redirect_payload(resp, protocol):
+    location = resp.headers.get("Location") or resp.headers.get("location") or ""
+    suffix = f"：{location}" if location else ""
+    endpoint_label = upstream_models_endpoint_label(protocol)
+    return {"ok": False, "status": resp.status_code, "message": f"上游 {endpoint_label} 发生跳转{suffix}，请填写 API Base URL，不要填写网页登录地址"}
+
+def upstream_models_html_payload(resp, protocol):
+    endpoint_label = upstream_models_endpoint_label(protocol)
+    return {"ok": False, "status": resp.status_code, "message": f"上游 {endpoint_label} 返回网页 HTML，请检查请求地址是否为 API Base URL"}
+
+async def upstream_models_error_payload(client, resp, protocol, base_url, api_key):
+    if protocol == "volcengine":
+        detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
+        if detected:
+            message = f"{probe.get('message') or '方舟任务接口可达'}；但 /api/v3/models 不可用。请按实际方舟控制台模型名称手动填写视频模型。"
+            return volcengine_default_model_payload(status=probe.get("status") or resp.status_code, message=message, raw={"models_error": resp.text[:300], **(probe.get("raw") or {})})
+    elif protocol == "openai":
+        detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
+        if detected:
+            message = f"{probe.get('message') or '检测到方舟/Ark 兼容入口'}；OpenAI /v1/models 不可用，已自动切换为方舟协议。请按实际方舟控制台模型名称手动填写视频模型。"
+            return volcengine_default_model_payload(status=probe.get("status") or resp.status_code, message=message, raw={"models_error": resp.text[:300], **(probe.get("raw") or {})})
+    return {"ok": False, "status": resp.status_code, "message": resp.text[:300]}
+
+async def upstream_models_success_payload(client, resp, data, base_url, api_key, protocol, payload):
+    grouped, ids = parse_upstream_models(data, protocol)
+    grouped, ids = apply_agnes_model_defaults(base_url, grouped, ids)
+    grouped = apply_locked_recommended_model_rules(base_url, grouped)
+    if protocol == "volcengine" and not ids:
+        detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
+        if detected:
+            return volcengine_default_model_payload(status=resp.status_code, raw=data)
+    return {
+        "ok": True,
+        "status": resp.status_code,
+        "model_count": len(ids),
+        "image_models": grouped["image"],
+        "chat_models": grouped["chat"],
+        "video_models": grouped["video"],
+        "all": ids,
+        "image_request_mode": detect_image_request_mode(base_url, ids) or normalize_image_request_mode(getattr(payload, "image_request_mode", "")),
+    }
+
+async def upstream_models_http_error_payload(protocol, base_url, api_key, error):
+    if protocol == "volcengine":
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
+                if detected:
+                    message = f"{probe.get('message') or '方舟任务接口可达'}；但模型列表请求失败。请按实际方舟控制台模型名称手动填写视频模型。"
+                    return volcengine_default_model_payload(status=probe.get("status") or 0, message=message, raw={"models_error": str(error)[:300], **(probe.get("raw") or {})})
+        except Exception:
+            pass
+    return {"ok": False, "status": 0, "message": str(error)[:300]}
+
+@app.post("/api/providers/test-connection")
+async def test_provider_connection(payload: TestConnectionPayload):
+    """测试请求地址是否可用：调上游 /v1/models。验证通过时同时把模型清单按类别返回，避免再调一次拉取接口。"""
+    protocol = protocol_from_payload(payload)
+    if protocol in ("codex", "gemini-cli"):
+        return await cli_provider_models_payload(protocol)
+    if protocol == "jimeng":
+        return jimeng_connection_payload(await jimeng_status())
+    if protocol == "runninghub":
+        return await runninghub_connection_payload(payload)
+    base_url, api_key = upstream_connection_credentials(payload, protocol)
     url = upstream_models_url(base_url, protocol)
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(url, headers=upstream_model_headers(api_key, protocol))
             if resp.status_code in (301, 302, 303, 307, 308):
-                location = resp.headers.get("Location") or resp.headers.get("location") or ""
-                suffix = f"：{location}" if location else ""
-                endpoint_label = upstream_models_endpoint_label(protocol)
-                return {"ok": False, "status": resp.status_code, "message": f"上游 {endpoint_label} 发生跳转{suffix}，请填写 API Base URL，不要填写网页登录地址"}
+                return upstream_models_redirect_payload(resp, protocol)
             if looks_like_html_response(resp.text):
-                endpoint_label = upstream_models_endpoint_label(protocol)
-                return {"ok": False, "status": resp.status_code, "message": f"上游 {endpoint_label} 返回网页 HTML，请检查请求地址是否为 API Base URL"}
+                return upstream_models_html_payload(resp, protocol)
             if resp.status_code >= 400:
-                if protocol == "volcengine":
-                    detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
-                    if detected:
-                        message = f"{probe.get('message') or '方舟任务接口可达'}；但 /api/v3/models 不可用。请按实际方舟控制台模型名称手动填写视频模型。"
-                        return volcengine_default_model_payload(status=probe.get("status") or resp.status_code, message=message, raw={"models_error": resp.text[:300], **(probe.get("raw") or {})})
-                elif protocol == "openai":
-                    detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
-                    if detected:
-                        message = f"{probe.get('message') or '检测到方舟/Ark 兼容入口'}；OpenAI /v1/models 不可用，已自动切换为方舟协议。请按实际方舟控制台模型名称手动填写视频模型。"
-                        return volcengine_default_model_payload(status=probe.get("status") or resp.status_code, message=message, raw={"models_error": resp.text[:300], **(probe.get("raw") or {})})
-                return {"ok": False, "status": resp.status_code, "message": resp.text[:300]}
+                return await upstream_models_error_payload(client, resp, protocol, base_url, api_key)
             data = resp.json() if resp.text else {}
-            grouped, ids = parse_upstream_models(data, protocol)
-            grouped, ids = apply_agnes_model_defaults(base_url, grouped, ids)
-            grouped = apply_locked_recommended_model_rules(base_url, grouped)
-            if protocol == "volcengine" and not ids:
-                detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
-                if detected:
-                    return volcengine_default_model_payload(status=resp.status_code, raw=data)
-            return {
-                "ok": True,
-                "status": resp.status_code,
-                "model_count": len(ids),
-                "image_models": grouped["image"],
-                "chat_models": grouped["chat"],
-                "video_models": grouped["video"],
-                "all": ids,
-                "image_request_mode": detect_image_request_mode(base_url, ids) or normalize_image_request_mode(getattr(payload, "image_request_mode", "")),
-            }
+            return await upstream_models_success_payload(client, resp, data, base_url, api_key, protocol, payload)
     except httpx.HTTPError as e:
-        if protocol == "volcengine":
-            try:
-                async with httpx.AsyncClient(timeout=15) as client:
-                    detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
-                    if detected:
-                        message = f"{probe.get('message') or '方舟任务接口可达'}；但模型列表请求失败。请按实际方舟控制台模型名称手动填写视频模型。"
-                        return volcengine_default_model_payload(status=probe.get("status") or 0, message=message, raw={"models_error": str(e)[:300], **(probe.get("raw") or {})})
-            except Exception:
-                pass
-        return {"ok": False, "status": 0, "message": str(e)[:300]}
+        return await upstream_models_http_error_payload(protocol, base_url, api_key, e)
 
 @app.post("/api/providers/probe-async")
 async def probe_local_cli_endpoint(protocol: str):
