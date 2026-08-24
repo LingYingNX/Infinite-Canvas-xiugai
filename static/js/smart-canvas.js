@@ -7773,7 +7773,7 @@ function smartMinimaxAssetsHtml(node){
     return {libraryW, assetHtml, materialHtml};
 }
 
-function smartMinimaxBodyHtml(node){
+function smartMinimaxBodyMetrics(node){
     const selected = smartMinimaxSelectedSegment(node);
     const total = Math.max(Number(node.duration || 0), ...node.segments.map(seg => Number(seg.start || 0) + Number(seg.duration || 0)));
     const fmt = value => {
@@ -7783,11 +7783,19 @@ function smartMinimaxBodyHtml(node){
     const timeLabel = value => `${fmt(value)}s`;
     const playhead = Math.max(0, Math.min(total || 1, Number(node.playhead || selected?.start || 0) || 0));
     const playheadPct = total > 0 ? (playhead / total) * 100 : 0;
-    const ticks = Array.from({length:9}).map((_, index) => {
+    const previewH = Math.max(130, Math.min(760, Number(node.minimaxPreviewH || 190)));
+    const videoTrackH = Math.max(44, Math.min(160, Number(node.minimaxVideoTrackH || 70)));
+    const refLaneH = Math.max(28, Math.min(160, Number(node.minimaxRefLaneH || 42)));
+    return {selected, total, fmt, timeLabel, playhead, playheadPct, previewH, videoTrackH, refLaneH};
+}
+function smartMinimaxTimelineTicksHtml(total, timeLabel){
+    return Array.from({length:9}).map((_, index) => {
         const pct = index * 12.5;
         return `<span class="minimax-tick" style="left:${pct}%"><b>${timeLabel((total || 0) * pct / 100)}</b></span>`;
     }).join('');
-    const timeline = node.segments.map((seg, index) => {
+}
+function smartMinimaxSegmentsHtml(node, total, fmt, timeLabel){
+    return node.segments.map((seg, index) => {
         const start = Number(seg.start || 0);
         const duration = Math.max(0.5, Number(seg.duration || 1));
         const left = total > 0 ? (start / total) * 100 : 0;
@@ -7808,6 +7816,8 @@ function smartMinimaxBodyHtml(node){
             <span class="minimax-trim minimax-trim-right" data-minimax-trim="right" data-minimax-trim-segment="${escapeAttr(seg.id)}" style="left:${(trimOut / duration) * 100}%"></span>
         </div>`;
     }).join('');
+}
+function smartMinimaxRefTrackHtml(node, total){
     const refsForSegment = seg => (seg.refItems || []).map((ref, refIndex) => ({...ref, __index:refIndex, kind:mediaKindForItem(ref)}))
         .filter(item => item?.url)
         .slice(0, SMART_MINIMAX_REF_IMAGE_MAX + SMART_MINIMAX_REF_VIDEO_MAX + SMART_MINIMAX_REF_AUDIO_MAX);
@@ -7831,57 +7841,69 @@ function smartMinimaxBodyHtml(node){
         }).join('');
         return `<div class="minimax-ref-lane">${laneClips}</div>`;
     }).join('');
-    const selectedResult = selected?.result?.url ? selected.result : null;
-    const previewH = Math.max(130, Math.min(760, Number(node.minimaxPreviewH || 190)));
-    const videoTrackH = Math.max(44, Math.min(160, Number(node.minimaxVideoTrackH || 70)));
-    const refLaneH = Math.max(28, Math.min(160, Number(node.minimaxRefLaneH || 42)));
-    const assetsModule = smartMinimaxAssetsHtml(node);
-    const { libraryW, assetHtml, materialHtml } = assetsModule;
-    const refTrackH = Math.max(72, refLaneCount * refLaneH);
+    return {refLaneCount, refTrack};
+}
+function smartMinimaxToolbarHtml(timeLabel, playhead, total, selectedResult){
+    return `<div class="minimax-wb-toolbar">
+        <div class="minimax-brand">
+            <i data-lucide="clapperboard"></i>
+            <span>MiniMax H3</span>
+            <b data-minimax-time-label="1">${timeLabel(playhead)} / ${timeLabel(total)}</b>
+        </div>
+        <div class="minimax-transport"></div>
+        <div class="minimax-top-actions">
+            <button type="button" data-minimax-export-selected="1" ${selectedResult ? '' : 'disabled'} title="Export selected clip"><i data-lucide="download"></i></button>
+            <button type="button" data-minimax-export-full="1" title="Export timeline"><i data-lucide="file-down"></i></button>
+        </div>
+    </div>`;
+}
+function smartMinimaxLibraryHtml(assetHtml, materialHtml){
+    return `<div class="minimax-library minimax-asset-bin" data-minimax-asset-library="1">
+        <span class="minimax-pane-resize minimax-library-resize" data-minimax-pane-resize="library"></span>
+        <div class="minimax-library-head"><i data-lucide="database"></i><span>Assets</span></div>
+        <div class="minimax-library-list">${assetHtml}</div>
+        <div class="minimax-library-head minimax-output-head"><i data-lucide="folder-output"></i><span>Output</span></div>
+        <div class="minimax-library-list minimax-output-list">${materialHtml}</div>
+    </div>`;
+}
+function smartMinimaxTimelineHtml(node, selected, ticks, playheadPct, timeline, refTrack, refLaneCount, timelineWidth){
+    return `<div class="minimax-edit-timeline" data-minimax-scrub-track="1">
+        <span class="minimax-pane-resize minimax-video-resize" data-minimax-pane-resize="video"></span>
+        <span class="minimax-pane-resize minimax-ref-resize" data-minimax-pane-resize="refs"></span>
+        <div class="minimax-timeline-controls">
+            <button type="button" data-minimax-play-timeline="1" title="Play / pause"><i data-lucide="play"></i></button>
+            <button type="button" data-minimax-toggle-mute="1" title="${node.minimaxMuted ? 'Unmute' : 'Mute'}"><i data-lucide="${node.minimaxMuted ? 'volume-x' : 'volume-2'}"></i></button>
+        </div>
+        <div class="minimax-ruler"><div class="minimax-track-content" style="width:${timelineWidth}">${ticks}<span class="minimax-playhead" data-minimax-playhead="1" style="left:${playheadPct}%"></span></div></div>
+        <div class="minimax-add-gutter minimax-ruler-gutter"></div>
+        <div class="minimax-track-label minimax-video-label">Video</div>
+        <div class="minimax-track minimax-video-track"><div class="minimax-track-content" style="width:${timelineWidth}">${timeline}</div></div>
+        <button type="button" class="minimax-video-add" data-minimax-add-segment="1" title="Add blank segment"><i data-lucide="plus"></i></button>
+        <div class="minimax-track-label minimax-ref-label">Refs</div>
+        <div class="minimax-ref-track" data-minimax-ref-track="1" data-minimax-active-segment="${escapeAttr(selected?.id || '')}" style="--ref-lanes:${refLaneCount}"><div class="minimax-ref-content" style="width:${timelineWidth}">${refTrack}</div></div>
+        <div class="minimax-add-gutter minimax-ref-gutter"></div>
+    </div>`;
+}
+function smartMinimaxBodyHtml(node){
+    const m = smartMinimaxBodyMetrics(node);
+    const ticks = smartMinimaxTimelineTicksHtml(m.total, m.timeLabel);
+    const timeline = smartMinimaxSegmentsHtml(node, m.total, m.fmt, m.timeLabel);
+    const {refLaneCount, refTrack} = smartMinimaxRefTrackHtml(node, m.total);
+    const {libraryW, assetHtml, materialHtml} = smartMinimaxAssetsHtml(node);
+    const refTrackH = Math.max(72, refLaneCount * m.refLaneH);
     const timelineZoom = Math.max(1, Math.min(8, Number(node.timelineZoom || 1)));
     const timelineWidth = `${Math.round(timelineZoom * 100)}%`;
+    const selectedResult = m.selected?.result?.url ? m.selected.result : null;
     return `<div class="minimax-card minimax-workbench">
-        <div class="minimax-wb-toolbar">
-            <div class="minimax-brand">
-                <i data-lucide="clapperboard"></i>
-                <span>MiniMax H3</span>
-                <b data-minimax-time-label="1">${timeLabel(playhead)} / ${timeLabel(total)}</b>
-            </div>
-            <div class="minimax-transport"></div>
-            <div class="minimax-top-actions">
-                <button type="button" data-minimax-export-selected="1" ${selectedResult ? '' : 'disabled'} title="Export selected clip"><i data-lucide="download"></i></button>
-                <button type="button" data-minimax-export-full="1" title="Export timeline"><i data-lucide="file-down"></i></button>
-            </div>
-        </div>
+        ${smartMinimaxToolbarHtml(m.timeLabel, m.playhead, m.total, selectedResult)}
         <div class="minimax-wb-body" style="--minimax-library-w:${libraryW}px">
-            <div class="minimax-library minimax-asset-bin" data-minimax-asset-library="1">
-                <span class="minimax-pane-resize minimax-library-resize" data-minimax-pane-resize="library"></span>
-                <div class="minimax-library-head"><i data-lucide="database"></i><span>Assets</span></div>
-                <div class="minimax-library-list">${assetHtml}</div>
-                <div class="minimax-library-head minimax-output-head"><i data-lucide="folder-output"></i><span>Output</span></div>
-                <div class="minimax-library-list minimax-output-list">${materialHtml}</div>
-            </div>
-            <div class="minimax-wb-main" style="--minimax-preview-h:${previewH}px;--minimax-video-h:${videoTrackH}px;--minimax-ref-h:${refTrackH}px;--minimax-ref-lane-h:${refLaneH}px">
-                <div class="minimax-player-stage" data-minimax-player-stage="1" data-minimax-player-segment="${escapeAttr(selected?.id || '')}" data-minimax-player-url="${escapeAttr(selectedResult?.url || '')}">
-                    ${smartMinimaxPlayerStageHtml(selected)}
+            ${smartMinimaxLibraryHtml(assetHtml, materialHtml)}
+            <div class="minimax-wb-main" style="--minimax-preview-h:${m.previewH}px;--minimax-video-h:${m.videoTrackH}px;--minimax-ref-h:${refTrackH}px;--minimax-ref-lane-h:${m.refLaneH}px">
+                <div class="minimax-player-stage" data-minimax-player-stage="1" data-minimax-player-segment="${escapeAttr(m.selected?.id || '')}" data-minimax-player-url="${escapeAttr(selectedResult?.url || '')}">
+                    ${smartMinimaxPlayerStageHtml(m.selected)}
                     <span class="minimax-pane-resize minimax-preview-resize" data-minimax-pane-resize="preview"></span>
                 </div>
-                <div class="minimax-edit-timeline" data-minimax-scrub-track="1">
-                    <span class="minimax-pane-resize minimax-video-resize" data-minimax-pane-resize="video"></span>
-                    <span class="minimax-pane-resize minimax-ref-resize" data-minimax-pane-resize="refs"></span>
-                    <div class="minimax-timeline-controls">
-                        <button type="button" data-minimax-play-timeline="1" title="Play / pause"><i data-lucide="play"></i></button>
-                        <button type="button" data-minimax-toggle-mute="1" title="${node.minimaxMuted ? 'Unmute' : 'Mute'}"><i data-lucide="${node.minimaxMuted ? 'volume-x' : 'volume-2'}"></i></button>
-                    </div>
-                    <div class="minimax-ruler"><div class="minimax-track-content" style="width:${timelineWidth}">${ticks}<span class="minimax-playhead" data-minimax-playhead="1" style="left:${playheadPct}%"></span></div></div>
-                    <div class="minimax-add-gutter minimax-ruler-gutter"></div>
-                    <div class="minimax-track-label minimax-video-label">Video</div>
-                    <div class="minimax-track minimax-video-track"><div class="minimax-track-content" style="width:${timelineWidth}">${timeline}</div></div>
-                    <button type="button" class="minimax-video-add" data-minimax-add-segment="1" title="Add blank segment"><i data-lucide="plus"></i></button>
-                    <div class="minimax-track-label minimax-ref-label">Refs</div>
-                    <div class="minimax-ref-track" data-minimax-ref-track="1" data-minimax-active-segment="${escapeAttr(selected?.id || '')}" style="--ref-lanes:${refLaneCount}"><div class="minimax-ref-content" style="width:${timelineWidth}">${refTrack}</div></div>
-                    <div class="minimax-add-gutter minimax-ref-gutter"></div>
-                </div>
+                ${smartMinimaxTimelineHtml(node, m.selected, ticks, m.playheadPct, timeline, refTrack, refLaneCount, timelineWidth)}
                 ${smartMinimaxCurrentPanelHtml(node)}
             </div>
         </div>
