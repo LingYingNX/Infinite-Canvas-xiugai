@@ -1504,6 +1504,19 @@ async def modelscope_submit_image_task(client, api_root, headers, payload):
         raise HTTPException(status_code=submit_res.status_code, detail=detail)
     return submit_res.json().get("task_id")
 
+async def modelscope_poll_task_once(client, api_root, task_id, headers, raise_for_status=True, normalize_status=True):
+    result = await client.get(
+        f"{api_root}/tasks/{task_id}",
+        headers={**headers, "X-ModelScope-Task-Type": "image_generation"},
+    )
+    if raise_for_status:
+        result.raise_for_status()
+    data = result.json()
+    status = data.get("task_status")
+    if normalize_status:
+        status = str(status or "").upper()
+    return data, status
+
 def env_quote(value):
     text = str(value or "")
     if not text or re.search(r"\s|#|['\"]", text):
@@ -17797,13 +17810,7 @@ async def poll_angle_cloud(req: CloudPollRequest):
         async with httpx.AsyncClient(timeout=30) as client:
             for i in range(300):
                 await asyncio.sleep(2)
-                result = await client.get(
-                    f"{api_root}/tasks/{task_id}",
-                    headers={**headers, "X-ModelScope-Task-Type": "image_generation"},
-                )
-                result.raise_for_status()
-                data = result.json()
-                status = str(data.get("task_status") or "").upper()
+                data, status = await modelscope_poll_task_once(client, api_root, task_id, headers)
 
                 if status == "SUCCEED":
                     img_url = data["output_images"][0]
@@ -17866,13 +17873,7 @@ async def generate_angle_cloud(req: CloudGenRequest):
 
             for i in range(300):
                 await asyncio.sleep(2)
-                result = await client.get(
-                    f"{api_root}/tasks/{task_id}",
-                    headers={**headers, "X-ModelScope-Task-Type": "image_generation"},
-                )
-                result.raise_for_status()
-                data = result.json()
-                status = str(data.get("task_status") or "").upper()
+                data, status = await modelscope_poll_task_once(client, api_root, task_id, headers)
 
                 if status == "SUCCEED":
                     img_url = data["output_images"][0]
@@ -17936,13 +17937,7 @@ async def generate_cloud(req: CloudGenRequest):
 
             for i in range(200):
                 await asyncio.sleep(3)
-                result = await client.get(
-                    f"{api_root}/tasks/{task_id}",
-                    headers={**headers, "X-ModelScope-Task-Type": "image_generation"},
-                )
-                result.raise_for_status()
-                data = result.json()
-                status = str(data.get("task_status") or "").upper()
+                data, status = await modelscope_poll_task_once(client, api_root, task_id, headers)
 
                 if i % 5 == 0:
                     print(f"Task {task_id} status check {i}: {status}")
@@ -18008,12 +18003,7 @@ async def ms_generate(req: MsGenerateRequest):
             for i in range(300):
                 await asyncio.sleep(2)
                 try:
-                    result = await client.get(
-                        f"{api_root}/tasks/{task_id}",
-                        headers={**headers, "X-ModelScope-Task-Type": "image_generation"},
-                    )
-                    data = result.json()
-                    status = data.get("task_status")
+                    data, status = await modelscope_poll_task_once(client, api_root, task_id, headers, raise_for_status=False, normalize_status=False)
                     print(f"MS Task {task_id} poll {i}: status={status}")
 
                     if status == "SUCCEED":
