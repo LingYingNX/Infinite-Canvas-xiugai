@@ -14228,71 +14228,70 @@ async def get_midjourney_task(task_id: str, provider_id: str):
     return await midjourney_result(provider, task_id)
 
 @app.post("/api/image-task-query")
-async def query_image_task(payload: ImageTaskQueryRequest):
-    provider = get_api_provider(payload.provider_id)
-    task_id = str(payload.task_id or "").strip()
-    if is_runninghub_provider(provider):
-        api_key = runninghub_api_key(provider)
-        url = runninghub_endpoint_url(provider, "/task/openapi/outputs")
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=240.0, write=30.0, pool=20.0)) as client:
-                response = await client.post(url, headers=runninghub_app_headers(True), json={"apiKey": api_key, "taskId": task_id})
-                response.raise_for_status()
-                raw = response.json()
-                code = raw.get("code") if isinstance(raw, dict) else None
-                if code in (0, "0"):
-                    local_urls = []
-                    local_items = []
-                    for remote in runninghub_extract_outputs(raw.get("data")):
-                        try:
-                            local_url = await runninghub_store_remote_output(client, remote)
-                        except Exception:
-                            local_url = rewrite_runninghub_file_url(remote)
-                        if local_url:
-                            local_urls.append(local_url)
-                            local_items.append(image_output_meta(local_url))
-                    result = {
-                        "status": "succeeded",
-                        "prompt": "",
-                        "images": local_urls,
-                        "image_items": local_items,
-                        "timestamp": time.time(),
-                        "type": "online",
-                        "model": "",
-                        "provider_id": provider["id"],
-                        "provider_name": provider.get("name") or provider["id"],
-                        "task_id": task_id,
-                        "request_id": "",
-                        "params": {"provider_id": provider["id"]},
-                        "raw": raw,
-                    }
-                    return save_and_broadcast_image(result)
-                if code in (805, "805"):
-                    return {
-                        "status": "failed",
-                        "task_id": task_id,
-                        "provider_id": provider["id"],
-                        "provider_name": provider.get("name") or provider["id"],
-                        "error": runninghub_fail_reason(raw),
-                        "raw": raw,
-                    }
+async def query_runninghub_image_task(provider, task_id):
+    api_key = runninghub_api_key(provider)
+    url = runninghub_endpoint_url(provider, "/task/openapi/outputs")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=240.0, write=30.0, pool=20.0)) as client:
+            response = await client.post(url, headers=runninghub_app_headers(True), json={"apiKey": api_key, "taskId": task_id})
+            response.raise_for_status()
+            raw = response.json()
+            code = raw.get("code") if isinstance(raw, dict) else None
+            if code in (0, "0"):
+                local_urls = []
+                local_items = []
+                for remote in runninghub_extract_outputs(raw.get("data")):
+                    try:
+                        local_url = await runninghub_store_remote_output(client, remote)
+                    except Exception:
+                        local_url = rewrite_runninghub_file_url(remote)
+                    if local_url:
+                        local_urls.append(local_url)
+                        local_items.append(image_output_meta(local_url))
+                result = {
+                    "status": "succeeded",
+                    "prompt": "",
+                    "images": local_urls,
+                    "image_items": local_items,
+                    "timestamp": time.time(),
+                    "type": "online",
+                    "model": "",
+                    "provider_id": provider["id"],
+                    "provider_name": provider.get("name") or provider["id"],
+                    "task_id": task_id,
+                    "request_id": "",
+                    "params": {"provider_id": provider["id"]},
+                    "raw": raw,
+                }
+                return save_and_broadcast_image(result)
+            if code in (805, "805"):
                 return {
-                    "status": "running",
+                    "status": "failed",
                     "task_id": task_id,
                     "provider_id": provider["id"],
                     "provider_name": provider.get("name") or provider["id"],
-                    "message": "RunningHub 任务仍在生成中",
+                    "error": runninghub_fail_reason(raw),
                     "raw": raw,
                 }
-        except httpx.HTTPStatusError as exc:
-            text = exc.response.text or ""
-            raise HTTPException(status_code=exc.response.status_code, detail=f"查询 RunningHub 任务失败：{text[:300]}") from exc
-        except httpx.HTTPError as exc:
-            raise HTTPException(status_code=502, detail=f"查询 RunningHub 任务失败：{exc}") from exc
+            return {
+                "status": "running",
+                "task_id": task_id,
+                "provider_id": provider["id"],
+                "provider_name": provider.get("name") or provider["id"],
+                "message": "RunningHub 任务仍在生成中",
+                "raw": raw,
+            }
+    except httpx.HTTPStatusError as exc:
+        text = exc.response.text or ""
+        raise HTTPException(status_code=exc.response.status_code, detail=f"查询 RunningHub 任务失败：{text[:300]}") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"查询 RunningHub 任务失败：{exc}") from exc
+
+async def fetch_image_task_raw(provider, task_id):
     timeout = httpx.Timeout(connect=20.0, read=300.0, write=60.0, pool=20.0)
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            raw = await fetch_image_task_payload(client, task_id, provider)
+            return await fetch_image_task_payload(client, task_id, provider)
     except httpx.HTTPStatusError as exc:
         log_net_error(f"查询生图任务 HTTP状态错误 provider={provider.get('id')} task_id={task_id}", exc)
         text = exc.response.text or ""
@@ -14301,6 +14300,7 @@ async def query_image_task(payload: ImageTaskQueryRequest):
         log_net_error(f"查询生图任务 网络/TLS错误 provider={provider.get('id')} task_id={task_id}", exc)
         raise HTTPException(status_code=502, detail=f"查询上游生图任务失败：{exc}") from exc
 
+async def build_image_task_result(provider, task_id, raw):
     status = image_task_status(raw)
     image_items = []
     try:
@@ -14348,6 +14348,14 @@ async def query_image_task(payload: ImageTaskQueryRequest):
         "message": "任务仍在生成中",
         "raw": raw,
     }
+
+async def query_image_task(payload: ImageTaskQueryRequest):
+    provider = get_api_provider(payload.provider_id)
+    task_id = str(payload.task_id or "").strip()
+    if is_runninghub_provider(provider):
+        return await query_runninghub_image_task(provider, task_id)
+    raw = await fetch_image_task_raw(provider, task_id)
+    return await build_image_task_result(provider, task_id, raw)
 
 def create_canvas_task(task_id: str, task_type: str, **extra) -> None:
     with CANVAS_TASK_LOCK:
