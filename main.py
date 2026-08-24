@@ -3430,6 +3430,12 @@ def save_to_history(record):
         with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
             json.dump(history[:5000], f, ensure_ascii=False, indent=4)
 
+def save_and_broadcast_image(result):
+    save_to_history(result)
+    if GLOBAL_LOOP:
+        asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(result), GLOBAL_LOOP)
+    return result
+
 def get_comfy_history(comfy_address, prompt_id):
     try:
         with urllib.request.urlopen(f"http://{comfy_address}/history/{prompt_id}") as response:
@@ -3459,6 +3465,17 @@ def conversation_path(user_id, conversation_id):
 
 def now_ms():
     return int(time.time() * 1000)
+
+def chat_assistant_message(content, model, raw):
+    return {
+        "id": uuid.uuid4().hex,
+        "role": "assistant",
+        "content": content,
+        "created_at": now_ms(),
+        "model": model,
+        "raw_usage": None,
+        "raw": raw,
+    }
 
 def save_conversation(user_id, conversation):
     with CONVERSATION_LOCK:
@@ -13891,10 +13908,7 @@ async def build_online_image_result(payload: OnlineImageRequest):
         "params": {"provider_id": provider["id"], "model": model, "size": request_size, "requested_size": payload.size, "quality": payload.quality, "n": count, "reference_images": refs},
         "raw_usage": raw.get("usage") if isinstance(raw, dict) else None,
     }
-    save_to_history(result)
-    if GLOBAL_LOOP:
-        asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(result), GLOBAL_LOOP)
-    return result
+    return save_and_broadcast_image(result)
 
 @app.post("/api/online-image")
 async def online_image(payload: OnlineImageRequest):
@@ -14223,10 +14237,7 @@ async def query_image_task(payload: ImageTaskQueryRequest):
                         "params": {"provider_id": provider["id"]},
                         "raw": raw,
                     }
-                    save_to_history(result)
-                    if GLOBAL_LOOP:
-                        asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(result), GLOBAL_LOOP)
-                    return result
+                    return save_and_broadcast_image(result)
                 if code in (805, "805"):
                     return {
                         "status": "failed",
@@ -14290,10 +14301,7 @@ async def query_image_task(payload: ImageTaskQueryRequest):
             "params": {"provider_id": provider["id"]},
             "raw": raw,
         }
-        save_to_history(result)
-        if GLOBAL_LOOP:
-            asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(result), GLOBAL_LOOP)
-        return result
+        return save_and_broadcast_image(result)
     if status in IMAGE_TASK_FAILED_STATUSES:
         return {
             "status": "failed",
@@ -17359,15 +17367,7 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
             model = selected_model(payload.model, (_codex_provider.get("chat_models") or CODEX_DEFAULT_CHAT_MODELS)[0])
             payload.model = model
             text, raw = await codex_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
-            assistant_message = {
-                "id": uuid.uuid4().hex,
-                "role": "assistant",
-                "content": text,
-                "created_at": now_ms(),
-                "model": model,
-                "raw_usage": None,
-                "raw": raw,
-            }
+            assistant_message = chat_assistant_message(text, model, raw)
             conversation["messages"].append(assistant_message)
             conversation["updated_at"] = now_ms()
             save_conversation(user_id, conversation)
@@ -17376,15 +17376,7 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
             model = selected_model(payload.model, (_codex_provider.get("chat_models") or GEMINI_CLI_DEFAULT_CHAT_MODELS)[0])
             payload.model = model
             text, raw = await gemini_cli_chat_text(payload, conversation["messages"][-MAX_HISTORY_MESSAGES:])
-            assistant_message = {
-                "id": uuid.uuid4().hex,
-                "role": "assistant",
-                "content": text,
-                "created_at": now_ms(),
-                "model": model,
-                "raw_usage": None,
-                "raw": raw,
-            }
+            assistant_message = chat_assistant_message(text, model, raw)
             conversation["messages"].append(assistant_message)
             conversation["updated_at"] = now_ms()
             save_conversation(user_id, conversation)
@@ -17565,15 +17557,7 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
             except HTTPException as exc:
                 yield sse_event({"type": "error", "detail": exc.detail})
                 return
-            assistant_message = {
-                "id": uuid.uuid4().hex,
-                "role": "assistant",
-                "content": text,
-                "created_at": now_ms(),
-                "model": model,
-                "raw_usage": None,
-                "raw": raw,
-            }
+            assistant_message = chat_assistant_message(text, model, raw)
             conversation["messages"].append(assistant_message)
             conversation["updated_at"] = now_ms()
             save_conversation(user_id, conversation)
@@ -17593,15 +17577,7 @@ async def chat_stream(payload: ChatRequest, request: Request, x_user_id: str = H
             except HTTPException as exc:
                 yield sse_event({"type": "error", "detail": exc.detail})
                 return
-            assistant_message = {
-                "id": uuid.uuid4().hex,
-                "role": "assistant",
-                "content": text,
-                "created_at": now_ms(),
-                "model": model,
-                "raw_usage": None,
-                "raw": raw,
-            }
+            assistant_message = chat_assistant_message(text, model, raw)
             conversation["messages"].append(assistant_message)
             conversation["updated_at"] = now_ms()
             save_conversation(user_id, conversation)
@@ -18213,10 +18189,7 @@ def generate(req: GenerateRequest):
             "backend": target_backend,
             "params": req.params
         }
-        save_to_history(result)
-        if GLOBAL_LOOP:
-            asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(result), GLOBAL_LOOP)
-        return result
+        return save_and_broadcast_image(result)
 
     except Exception as e:
         return {"images": [], "error": str(e)}
