@@ -59,7 +59,6 @@ const newProjectCancel = document.getElementById('newProjectCancel');
 const newCanvasBtn = document.getElementById('newCanvasBtn');
 const boardRefreshBtn = document.getElementById('boardRefresh');
 const boardResetViewBtn = document.getElementById('boardResetView');
-const pasteCanvasBtn = document.getElementById('pasteCanvasBtn');
 const emptyCreateCanvasBtn = document.getElementById('emptyCreateCanvasBtn');
 const statusEl = document.getElementById('boardStatus');
 
@@ -70,7 +69,6 @@ let deletedCanvases = [];
 let currentProjectId = rememberedProjectId();
 let pendingDeleteProjectId = null;
 let statusTimer = null;
-let clipboardCanvasId = null;   // 剪切的画布（切到别的项目后粘贴）
 let selectedIds = new Set();
 let lastSelectedId = null;
 
@@ -477,7 +475,6 @@ function renderBoard(){
     boardWorld.innerHTML = '';
     items.forEach(c => boardWorld.appendChild(buildCard(c)));
     boardEmptyHint.classList.toggle('hidden', items.length > 0);
-    updatePasteBtn();
     refreshIcons();
 }
 
@@ -486,7 +483,6 @@ function buildCard(c){
     const card = document.createElement('div');
     card.className = 'ws-card'
         + (String(c.color || '').trim() ? ' cc-marked' : '')
-        + (clipboardCanvasId === c.id ? ' cut' : '')
         + (selectedIds.has(c.id) ? ' selected' : '');
     card.dataset.canvasId = c.id;
     card.tabIndex = -1;
@@ -1056,22 +1052,6 @@ async function exportCanvasWithResources(id){
     } catch(e){ console.error(e); setStatus(L('导出失败','Export failed')); }
 }
 
-/* ===== Cut / paste a canvas across projects ===== */
-function updatePasteBtn(){
-    if(!pasteCanvasBtn) return;
-    const show = !!clipboardCanvasId && canvases.some(x => x.id === clipboardCanvasId);
-    pasteCanvasBtn.style.display = show ? 'inline-flex' : 'none';
-}
-async function pasteCanvas(){
-    if(!clipboardCanvasId) return;
-    const c = canvases.find(x => x.id === clipboardCanvasId);
-    const targetPid = currentProjectId;
-    clipboardCanvasId = null;
-    if(!c){ updatePasteBtn(); renderBoard(); return; }
-    if((c.project || 'default') === targetPid){ renderBoard(); setStatus(L('已在当前项目','Already in this project')); return; }
-    await moveCanvasToProject(c.id, targetPid);
-}
-
 function startCardRename(canvasId){
     const card = boardWorld.querySelector(`.ws-card[data-canvas-id="${CSS.escape(canvasId)}"]`);
     const c = canvases.find(x => x.id === canvasId);
@@ -1297,7 +1277,6 @@ emptyCreateCanvasBtn?.addEventListener('click', e => {
 });
 boardRefreshBtn.addEventListener('click', loadAll);
 boardResetViewBtn.addEventListener('click', resetView);
-pasteCanvasBtn?.addEventListener('click', pasteCanvas);
 
 newProjectBtn.addEventListener('click', openNewProject);
 newProjectConfirm.addEventListener('click', createProject);
