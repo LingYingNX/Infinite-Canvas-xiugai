@@ -2657,6 +2657,78 @@ class RollbackRequest(BaseModel):
     auto_restart: bool = False
     restart_delay: int = 3
 
+def create_rollback_safety_backup(name, root_files, manifest):
+    # Restoring is itself a risky operation. Preserve the live version first so
+    # the user can roll forward again if the selected historical build is worse.
+    rollback_backup_dir = next_update_backup_dir("rollback-")
+    rollback_backup = create_update_backup(
+        rollback_backup_dir,
+        root_files,
+        [],
+        kind="rollback_safety",
+        source="local-rollback",
+        target_version=str(manifest.get("from_version") or "").strip(),
+        parent_backup=name,
+        update_notes={
+            "version": current_app_version(),
+            "items": [{"type": "rollback", "text": f"还原恢复点 {name}"}],
+        },
+    )
+    return rollback_backup_dir, rollback_backup
+
+def restore_update_backup_static(backup_dir, manifest, restored, removed):
+    backup_static_dir = os.path.join(backup_dir, "static")
+    if os.path.isdir(backup_static_dir):
+        static_dir = safe_static_dir()
+        if os.path.isdir(static_dir):
+            shutil.rmtree(static_dir)
+        try:
+            shutil.copytree(backup_static_dir, static_dir)
+        except Exception:
+            if os.path.isdir(static_dir):
+                shutil.rmtree(static_dir, ignore_errors=True)
+            raise
+        for dirpath, _, filenames in os.walk(backup_static_dir):
+            for fn in filenames:
+                src = os.path.join(dirpath, fn)
+                restored.append(os.path.relpath(src, backup_dir).replace("\\", "/"))
+    elif manifest and isinstance(manifest.get("static_snapshot"), dict) and not manifest["static_snapshot"].get("exists"):
+        static_dir = safe_static_dir()
+        if os.path.isdir(static_dir):
+            shutil.rmtree(static_dir)
+            removed.append("static/")
+
+def restore_update_backup_root_files(backup_dir, manifest_roots, restored, skipped, removed):
+    for dirpath, _, filenames in os.walk(backup_dir):
+        for fn in filenames:
+            src = os.path.join(dirpath, fn)
+            rel = os.path.relpath(src, backup_dir).replace("\\", "/")
+            if rel.startswith("static/"):
+                continue
+            if not update_allowed_file(rel):
+                skipped.append(rel)
+                continue
+            try:
+                target = safe_update_target(rel)
+            except ValueError:
+                skipped.append(rel)
+                continue
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            temp_path = f"{target}.rollback_tmp"
+            with open(src, "rb") as fin, open(temp_path, "wb") as fout:
+                shutil.copyfileobj(fin, fout)
+            os.replace(temp_path, target)
+            restored.append(rel)
+    for rel, info in manifest_roots.items():
+        if not update_allowed_file(rel) or str(rel).startswith("static/"):
+            continue
+        if bool((info or {}).get("existed")):
+            continue
+        target = safe_update_target(rel)
+        if os.path.isfile(target):
+            os.remove(target)
+            removed.append(rel)
+
 @app.post("/api/update-rollback")
 def rollback_update(req: RollbackRequest):
     if not req.name:
@@ -2675,74 +2747,12 @@ def rollback_update(req: RollbackRequest):
             raise HTTPException(status_code=409, detail="备份尚未完整创建，不能还原")
         manifest_roots = manifest.get("root_files") if isinstance(manifest.get("root_files"), dict) else {}
         root_files = sorted(manifest_roots.keys()) if manifest_roots else ["main.py", "VERSION"]
-        # Restoring is itself a risky operation. Preserve the live version first so
-        # the user can roll forward again if the selected historical build is worse.
-        rollback_backup_dir = next_update_backup_dir("rollback-")
-        rollback_backup = create_update_backup(
-            rollback_backup_dir,
-            root_files,
-            [],
-            kind="rollback_safety",
-            source="local-rollback",
-            target_version=str(manifest.get("from_version") or "").strip(),
-            parent_backup=req.name,
-            update_notes={
-                "version": current_app_version(),
-                "items": [{"type": "rollback", "text": f"还原恢复点 {req.name}"}],
-            },
-        )
+        rollback_backup_dir, rollback_backup = create_rollback_safety_backup(req.name, root_files, manifest)
         restored = []
         skipped = []
         removed = []
-        backup_static_dir = os.path.join(backup_dir, "static")
-        if os.path.isdir(backup_static_dir):
-            static_dir = safe_static_dir()
-            if os.path.isdir(static_dir):
-                shutil.rmtree(static_dir)
-            try:
-                shutil.copytree(backup_static_dir, static_dir)
-            except Exception:
-                if os.path.isdir(static_dir):
-                    shutil.rmtree(static_dir, ignore_errors=True)
-                raise
-            for dirpath, _, filenames in os.walk(backup_static_dir):
-                for fn in filenames:
-                    src = os.path.join(dirpath, fn)
-                    restored.append(os.path.relpath(src, backup_dir).replace("\\", "/"))
-        elif manifest and isinstance(manifest.get("static_snapshot"), dict) and not manifest["static_snapshot"].get("exists"):
-            static_dir = safe_static_dir()
-            if os.path.isdir(static_dir):
-                shutil.rmtree(static_dir)
-                removed.append("static/")
-        for dirpath, _, filenames in os.walk(backup_dir):
-            for fn in filenames:
-                src = os.path.join(dirpath, fn)
-                rel = os.path.relpath(src, backup_dir).replace("\\", "/")
-                if rel.startswith("static/"):
-                    continue
-                if not update_allowed_file(rel):
-                    skipped.append(rel)
-                    continue
-                try:
-                    target = safe_update_target(rel)
-                except ValueError:
-                    skipped.append(rel)
-                    continue
-                os.makedirs(os.path.dirname(target), exist_ok=True)
-                temp_path = f"{target}.rollback_tmp"
-                with open(src, "rb") as fin, open(temp_path, "wb") as fout:
-                    shutil.copyfileobj(fin, fout)
-                os.replace(temp_path, target)
-                restored.append(rel)
-        for rel, info in manifest_roots.items():
-            if not update_allowed_file(rel) or str(rel).startswith("static/"):
-                continue
-            if bool((info or {}).get("existed")):
-                continue
-            target = safe_update_target(rel)
-            if os.path.isfile(target):
-                os.remove(target)
-                removed.append(rel)
+        restore_update_backup_static(backup_dir, manifest, restored, removed)
+        restore_update_backup_root_files(backup_dir, manifest_roots, restored, skipped, removed)
         restart_scheduled = False
         if req.auto_restart and restored:
             restart_scheduled = schedule_self_restart(req.restart_delay)
