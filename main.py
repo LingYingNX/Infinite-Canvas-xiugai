@@ -13253,6 +13253,21 @@ def volcengine_default_model_payload(status=200, message="", raw=None):
         "raw": raw,
     }
 
+def volcengine_default_models_payload(payload, include_protocol=True):
+    result = {
+        "total": payload["model_count"],
+        "protocol": payload["protocol"],
+        "image_models": payload["image_models"],
+        "chat_models": payload["chat_models"],
+        "video_models": payload["video_models"],
+        "all": payload["all"],
+        "message": payload["message"],
+        "raw": payload["raw"],
+    }
+    if not include_protocol:
+        del result["protocol"]
+    return result
+
 def volcengine_task_probe_url(base_url: str):
     base = str(base_url or "").strip().rstrip("/")
     if not base:
@@ -13745,16 +13760,7 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
                             message=f"{probe.get('message') or '方舟任务接口可达'}；但 /api/v3/models 不可用。请按实际方舟控制台模型名称手动填写视频模型。",
                             raw={"models_error": resp.text[:300], **(probe.get("raw") or {})},
                         )
-                        return {
-                            "total": payload["model_count"],
-                            "protocol": payload["protocol"],
-                            "image_models": payload["image_models"],
-                            "chat_models": payload["chat_models"],
-                            "video_models": payload["video_models"],
-                            "all": payload["all"],
-                            "message": payload["message"],
-                            "raw": payload["raw"],
-                        }
+                        return volcengine_default_models_payload(payload)
                 elif protocol == "openai":
                     detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
                     if detected:
@@ -13763,16 +13769,7 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
                             message=f"{probe.get('message') or '检测到方舟/Ark 兼容入口'}；OpenAI /v1/models 不可用，已自动切换为方舟协议。请按实际方舟控制台模型名称手动填写视频模型。",
                             raw={"models_error": resp.text[:300], **(probe.get("raw") or {})},
                         )
-                        return {
-                            "total": payload["model_count"],
-                            "protocol": payload["protocol"],
-                            "image_models": payload["image_models"],
-                            "chat_models": payload["chat_models"],
-                            "video_models": payload["video_models"],
-                            "all": payload["all"],
-                            "message": payload["message"],
-                            "raw": payload["raw"],
-                        }
+                        return volcengine_default_models_payload(payload)
                 raise HTTPException(status_code=resp.status_code, detail=f"上游 {endpoint_label} 失败：{resp.text[:300]}")
             raw = resp.json()
     except httpx.HTTPError as e:
@@ -13786,16 +13783,7 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
                             message=f"{probe.get('message') or '方舟任务接口可达'}；但模型列表请求失败。请按实际方舟控制台模型名称手动填写视频模型。",
                             raw={"models_error": str(e)[:300], **(probe.get("raw") or {})},
                         )
-                        return {
-                            "total": payload["model_count"],
-                            "protocol": payload["protocol"],
-                            "image_models": payload["image_models"],
-                            "chat_models": payload["chat_models"],
-                            "video_models": payload["video_models"],
-                            "all": payload["all"],
-                            "message": payload["message"],
-                            "raw": payload["raw"],
-                        }
+                        return volcengine_default_models_payload(payload)
             except Exception:
                 pass
         raise HTTPException(status_code=502, detail=f"请求上游模型列表失败：{e}")
@@ -13804,15 +13792,7 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
     grouped = apply_locked_recommended_model_rules(base_url, grouped)
     if protocol == "volcengine" and not ids:
         payload = volcengine_default_model_payload(raw=raw)
-        return {
-            "total": payload["model_count"],
-            "image_models": payload["image_models"],
-            "chat_models": payload["chat_models"],
-            "video_models": payload["video_models"],
-            "all": payload["all"],
-            "message": payload["message"],
-            "raw": payload["raw"],
-        }
+        return volcengine_default_models_payload(payload, include_protocol=False)
     return {
         "total": len(ids),
         "image_models": grouped["image"],
