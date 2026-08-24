@@ -6888,6 +6888,21 @@ def output_path_for(filename, category="output"):
     folder, _ = output_storage(category)
     return os.path.join(folder, filename)
 
+async def save_remote_image_to_output(img_url: str, filename: str, log_errors: bool = False) -> str:
+    local_path = img_url
+    try:
+        async with httpx.AsyncClient() as dl_client:
+            img_res = await dl_client.get(img_url)
+            if img_res.status_code == 200:
+                file_path = output_path_for(filename, "output")
+                with open(file_path, "wb") as f:
+                    f.write(img_res.content)
+                local_path = output_url_for(filename, "output")
+    except Exception as dl_e:
+        if log_errors:
+            print(f"Download error: {dl_e}")
+    return local_path
+
 def storage_kind_dir(kind):
     kind = str(kind or "").strip().lower()
     if kind == "upload":
@@ -17935,20 +17950,7 @@ async def poll_angle_cloud(req: CloudPollRequest):
 
                 if status == "SUCCEED":
                     img_url = data["output_images"][0]
-                    local_path = ""
-                    try:
-                        async with httpx.AsyncClient() as dl_client:
-                            img_res = await dl_client.get(img_url)
-                            if img_res.status_code == 200:
-                                filename = f"cloud_angle_{int(time.time())}.png"
-                                file_path = output_path_for(filename, "output")
-                                with open(file_path, "wb") as f:
-                                    f.write(img_res.content)
-                                local_path = output_url_for(filename, "output")
-                            else:
-                                local_path = img_url
-                    except Exception:
-                        local_path = img_url
+                    local_path = await save_remote_image_to_output(img_url, f"cloud_angle_{int(time.time())}.png")
 
                     record = {"timestamp": time.time(), "prompt": f"Resumed {task_id}", "images": [local_path], "type": "angle"}
                     save_to_history(record)
@@ -18025,20 +18027,7 @@ async def generate_angle_cloud(req: CloudGenRequest):
 
                 if status == "SUCCEED":
                     img_url = data["output_images"][0]
-                    local_path = ""
-                    try:
-                        async with httpx.AsyncClient() as dl_client:
-                            img_res = await dl_client.get(img_url)
-                            if img_res.status_code == 200:
-                                filename = f"cloud_angle_{int(time.time())}.png"
-                                file_path = output_path_for(filename, "output")
-                                with open(file_path, "wb") as f:
-                                    f.write(img_res.content)
-                                local_path = output_url_for(filename, "output")
-                            else:
-                                local_path = img_url
-                    except Exception:
-                        local_path = img_url
+                    local_path = await save_remote_image_to_output(img_url, f"cloud_angle_{int(time.time())}.png")
 
                     record = {"timestamp": time.time(), "prompt": req.prompt, "images": [local_path], "type": "angle"}
                     save_to_history(record)
@@ -18123,21 +18112,7 @@ async def generate_cloud(req: CloudGenRequest):
 
                 if status == "SUCCEED":
                     img_url = data["output_images"][0]
-                    local_path = ""
-                    try:
-                        async with httpx.AsyncClient() as dl_client:
-                            img_res = await dl_client.get(img_url)
-                            if img_res.status_code == 200:
-                                filename = f"cloud_{int(time.time())}.png"
-                                file_path = output_path_for(filename, "output")
-                                with open(file_path, "wb") as f:
-                                    f.write(img_res.content)
-                                local_path = output_url_for(filename, "output")
-                            else:
-                                local_path = img_url
-                    except Exception as dl_e:
-                        print(f"Download error: {dl_e}")
-                        local_path = img_url
+                    local_path = await save_remote_image_to_output(img_url, f"cloud_{int(time.time())}.png", log_errors=True)
 
                     record = {"timestamp": time.time(), "prompt": req.prompt, "images": [local_path], "type": "cloud"}
                     save_to_history(record)
@@ -18219,20 +18194,7 @@ async def ms_generate(req: MsGenerateRequest):
 
                     if status == "SUCCEED":
                         img_url = data["output_images"][0]
-                        local_path = ""
-                        try:
-                            async with httpx.AsyncClient() as dl_client:
-                                img_res = await dl_client.get(img_url)
-                                if img_res.status_code == 200:
-                                    filename = f"ms_{req.model.replace('/', '_').replace(':', '_')}_{int(time.time())}.png"
-                                    file_path = output_path_for(filename, "output")
-                                    with open(file_path, "wb") as f:
-                                        f.write(img_res.content)
-                                    local_path = output_url_for(filename, "output")
-                                else:
-                                    local_path = img_url
-                        except Exception:
-                            local_path = img_url
+                        local_path = await save_remote_image_to_output(img_url, f"ms_{req.model.replace('/', '_').replace(':', '_')}_{int(time.time())}.png")
 
                         record = {
                             "timestamp": time.time(),
