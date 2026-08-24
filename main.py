@@ -2444,6 +2444,114 @@ def create_update_backup(
             shutil.rmtree(backup_dir, ignore_errors=True)
         raise
 
+def download_update_staging(source_order: List[str]):
+    source = source_order[0] if source_order else ""
+    root_files = static_files = files = None
+    download_errors: List[str] = []
+    fallback_used = False
+    staging_root = ""
+    for idx, candidate in enumerate(source_order):
+        attempt_staging = os.path.join(
+            DATA_DIR, "update_staging",
+            f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}-{candidate}",
+        )
+        if os.path.isdir(attempt_staging):
+            shutil.rmtree(attempt_staging, ignore_errors=True)
+        label = UPDATE_SOURCE_LABELS.get(candidate, candidate)
+        print(f"[update] 尝试下载源 [{idx + 1}/{len(source_order)}] {label}（{candidate}）→ {attempt_staging}")
+        try:
+            root_files, static_files, files = stage_update_from_source(candidate, attempt_staging)
+            source = candidate
+            staging_root = attempt_staging
+            fallback_used = idx > 0
+            print(f"[update] 下载源 {label} 成功，共 {len(files or [])} 个文件")
+            break
+        except Exception as exc:  # noqa: BLE001 — 记录后尝试下一个源
+            if os.path.isdir(attempt_staging):
+                shutil.rmtree(attempt_staging, ignore_errors=True)
+            print(f"[update] 下载源 {label} 失败：{exc}")
+            traceback.print_exc()
+            download_errors.append(f"{label}：{exc}")
+    if not staging_root:
+        detail = "；".join(download_errors) or "未知错误"
+        print(f"[update] 所有下载源均失败 → {detail}")
+        raise HTTPException(status_code=502, detail=f"所有下载源均失败 → {detail}")
+    return source, staging_root, root_files, static_files, files, fallback_used, download_errors
+
+def read_staged_update_meta(staging_root: str):
+    new_version = ""
+    try:
+        with open(os.path.join(staging_root, "VERSION"), "r", encoding="utf-8") as f:
+            new_version = (f.read().strip().splitlines() or [""])[0].strip()
+    except Exception:
+        pass
+    notes_file = os.path.join(staging_root, "static", "update-notes.json")
+    update_notes: Dict[str, Any] = {}
+    try:
+        if os.path.exists(notes_file):
+            with open(notes_file, "r", encoding="utf-8") as f:
+                update_notes = safe_update_notes(json.load(f), new_version)
+    except Exception:
+        update_notes = {}
+    return new_version, update_notes
+
+def replace_static_update_dir(staging_root: str, backup_root: str, static_files) -> List[str]:
+    staged_static_dir = os.path.join(staging_root, "static")
+    if not os.path.isdir(staged_static_dir):
+        raise RuntimeError("GitHub static 暂存目录不存在，已取消更新")
+    static_dir = safe_static_dir()
+    backup_static_dir = os.path.join(backup_root, "static")
+    if os.path.isdir(static_dir):
+        shutil.rmtree(static_dir)
+    try:
+        shutil.copytree(staged_static_dir, static_dir)
+    except Exception:
+        if os.path.isdir(static_dir):
+            shutil.rmtree(static_dir, ignore_errors=True)
+        if os.path.isdir(backup_static_dir):
+            shutil.copytree(backup_static_dir, static_dir)
+        raise
+    return list(static_files or [])
+
+def replace_root_update_files(staging_root: str, backup_root: str, root_files, backup_manifest: Dict[str, Any]) -> List[str]:
+    replaced_root_files = []
+    updated: List[str] = []
+    try:
+        for rel in root_files:
+            target = safe_update_target(rel)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            temp_path = f"{target}.update_tmp"
+            shutil.copy2(os.path.join(staging_root, *rel.split("/")), temp_path)
+            os.replace(temp_path, target)
+            replaced_root_files.append(rel)
+            updated.append(rel)
+    except Exception:
+        for rel in reversed(replaced_root_files):
+            backup_path = os.path.join(backup_root, *rel.split("/"))
+            target = safe_update_target(rel)
+            if os.path.exists(backup_path):
+                temp_path = f"{target}.rollback_tmp"
+                shutil.copy2(backup_path, temp_path)
+                os.replace(temp_path, target)
+            elif not bool((backup_manifest.get("root_files") or {}).get(rel, {}).get("existed")) and os.path.exists(target):
+                os.remove(target)
+        raise
+    return updated
+
+def apply_staged_update(staging_root: str, backup_root: str, root_files, static_files, backup_manifest: Dict[str, Any]) -> List[str]:
+    updated = replace_static_update_dir(staging_root, backup_root, static_files)
+    try:
+        updated += replace_root_update_files(staging_root, backup_root, root_files, backup_manifest)
+    except Exception:
+        static_dir = safe_static_dir()
+        backup_static_dir = os.path.join(backup_root, "static")
+        if os.path.isdir(static_dir):
+            shutil.rmtree(static_dir, ignore_errors=True)
+        if os.path.isdir(backup_static_dir):
+            shutil.copytree(backup_static_dir, static_dir)
+        raise
+    return updated
+
 @app.post("/api/update-from-github")
 def update_from_github(req: UpdateRequest = UpdateRequest()):
     if not UPDATE_LOCK.acquire(blocking=False):
@@ -2460,53 +2568,11 @@ def update_from_github(req: UpdateRequest = UpdateRequest()):
         backup_manifest: Dict[str, Any] = {}
 
         # 下载阶段（带兜底切换），任意源成功即停止
-        source = requested_source
-        root_files = static_files = files = None
-        download_errors: List[str] = []
-        fallback_used = False
-        for idx, candidate in enumerate(source_order):
-            attempt_staging = os.path.join(
-                DATA_DIR, "update_staging",
-                f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}-{candidate}",
-            )
-            if os.path.isdir(attempt_staging):
-                shutil.rmtree(attempt_staging, ignore_errors=True)
-            label = UPDATE_SOURCE_LABELS.get(candidate, candidate)
-            print(f"[update] 尝试下载源 [{idx + 1}/{len(source_order)}] {label}（{candidate}）→ {attempt_staging}")
-            try:
-                root_files, static_files, files = stage_update_from_source(candidate, attempt_staging)
-                source = candidate
-                staging_root = attempt_staging
-                fallback_used = idx > 0
-                print(f"[update] 下载源 {label} 成功，共 {len(files or [])} 个文件")
-                break
-            except Exception as exc:  # noqa: BLE001 — 记录后尝试下一个源
-                if os.path.isdir(attempt_staging):
-                    shutil.rmtree(attempt_staging, ignore_errors=True)
-                print(f"[update] 下载源 {label} 失败：{exc}")
-                traceback.print_exc()
-                download_errors.append(f"{label}：{exc}")
-        if not staging_root:
-            detail = "；".join(download_errors) or "未知错误"
-            print(f"[update] 所有下载源均失败 → {detail}")
-            raise HTTPException(status_code=502, detail=f"所有下载源均失败 → {detail}")
+        source, staging_root, root_files, static_files, files, fallback_used, download_errors = download_update_staging(source_order)
 
         validate_staged_update(staging_root, root_files, static_files)
 
-        new_version = ""
-        try:
-            with open(os.path.join(staging_root, "VERSION"), "r", encoding="utf-8") as f:
-                new_version = (f.read().strip().splitlines() or [""])[0].strip()
-        except Exception:
-            pass
-        notes_file = os.path.join(staging_root, "static", "update-notes.json")
-        update_notes: Dict[str, Any] = {}
-        try:
-            if os.path.exists(notes_file):
-                with open(notes_file, "r", encoding="utf-8") as f:
-                    update_notes = safe_update_notes(json.load(f), new_version)
-        except Exception:
-            update_notes = {}
+        new_version, update_notes = read_staged_update_meta(staging_root)
         # A restore point must be complete before any live file is replaced.
         backup_root = next_update_backup_dir()
         backup_manifest = create_update_backup(
@@ -2518,50 +2584,7 @@ def update_from_github(req: UpdateRequest = UpdateRequest()):
             target_version=new_version,
             update_notes=update_notes,
         )
-        updated = []
-
-        staged_static_dir = os.path.join(staging_root, "static")
-        if not os.path.isdir(staged_static_dir):
-            raise RuntimeError("GitHub static 暂存目录不存在，已取消更新")
-        static_dir = safe_static_dir()
-        backup_static_dir = os.path.join(backup_root, "static")
-        if os.path.isdir(static_dir):
-            shutil.rmtree(static_dir)
-        try:
-            shutil.copytree(staged_static_dir, static_dir)
-        except Exception:
-            if os.path.isdir(static_dir):
-                shutil.rmtree(static_dir, ignore_errors=True)
-            if os.path.isdir(backup_static_dir):
-                shutil.copytree(backup_static_dir, static_dir)
-            raise
-        updated.extend(static_files)
-
-        replaced_root_files = []
-        try:
-            for rel in root_files:
-                target = safe_update_target(rel)
-                os.makedirs(os.path.dirname(target), exist_ok=True)
-                temp_path = f"{target}.update_tmp"
-                shutil.copy2(os.path.join(staging_root, *rel.split("/")), temp_path)
-                os.replace(temp_path, target)
-                replaced_root_files.append(rel)
-                updated.append(rel)
-        except Exception:
-            for rel in reversed(replaced_root_files):
-                backup_path = os.path.join(backup_root, *rel.split("/"))
-                target = safe_update_target(rel)
-                if os.path.exists(backup_path):
-                    temp_path = f"{target}.rollback_tmp"
-                    shutil.copy2(backup_path, temp_path)
-                    os.replace(temp_path, target)
-                elif not bool((backup_manifest.get("root_files") or {}).get(rel, {}).get("existed")) and os.path.exists(target):
-                    os.remove(target)
-            if os.path.isdir(static_dir):
-                shutil.rmtree(static_dir, ignore_errors=True)
-            if os.path.isdir(backup_static_dir):
-                shutil.copytree(backup_static_dir, static_dir)
-            raise
+        updated = apply_staged_update(staging_root, backup_root, root_files, static_files, backup_manifest)
 
         restart_scheduled = False
         if req.auto_restart and updated:
