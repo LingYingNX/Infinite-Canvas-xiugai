@@ -3126,22 +3126,39 @@ function renderMsGenBody(node){
 }
 async function runMsGenNode(nodeId, opts={}){
     const node = nodes.find(n => n.id === nodeId);
-    if(!node || (node.running && !opts.cascade)) return;
+    const ctx = prepareMsGenRun(node, opts);
+    if(!ctx) return;
+    refreshMsGenRunningState(node, ctx.out, Boolean(opts.cascade));
+    try {
+        const imageUrls = await collectMsGenImageRefs(ctx.refs, ctx.msModel);
+        const apiBody = buildMsGenApiBody(ctx, imageUrls);
+        const results = await Promise.all(Array.from({length:ctx.count}, () => submitMsGenJob(ctx.msModel, apiBody, ctx.cascadeTargetId)));
+        completeMsGenRun({node, out:ctx.out, opts, run:ctx.run, refs:ctx.refs, pendingIds:ctx.pendingIds, results});
+    } catch(err){
+        failMsGenRun({node, out:ctx.out, opts, run:ctx.run, pendingIds:ctx.pendingIds, err});
+    }
+}
+function prepareMsGenRun(node, opts={}){
+    if(!node || (node.running && !opts.cascade)) return null;
     const cascadeTargetId = cascadeTargetIdFromOptions(opts);
     const sources = orderedSources(node, generatorSources(node));
     const prompt = sources.map(s => s.prompt).filter(Boolean).join('\n\n');
     const refs = imageRefsOnly(sources.flatMap(s => s.refs || []));
     const modelKey = node.msgenModel || 'zimage';
     const msModel = MS_GEN_MODELS[modelKey] || MS_GEN_MODELS.zimage;
-    const msModelId = currentMsModelId(modelKey, node);
-    const msLoras = modelscopeLorasForModel(msModelId);
-    if(!prompt){ alert(tr('canvas.needPrompt')); return; }
-    if(msModel.supportsImage && !refs.length){ alert(tr('canvas.needImage')); return; }
+    const msLoras = modelscopeLorasForModel(currentMsModelId(modelKey, node));
+    if(!prompt){ alert(tr('canvas.needPrompt')); return null; }
+    if(msModel.supportsImage && !refs.length){ alert(tr('canvas.needImage')); return null; }
     const count = Math.max(1, Math.min(8, Number(node.count || 1)));
     // 链路中间节点默认不创建 Output；链尾、手动开启或已有 Output 连接时才输出。
-    let out = outputForNode(node, 460);
+    const out = outputForNode(node, 460);
     const pendingIds = Array.from({length:count}, () => uid('p'));
     const run = runSnapshot(node, prompt, refs);
+    const requestSize = msGenRequestSize(node);
+    if(out) out._pending = [...(out._pending || []), ...pendingIds.map(id => makePendingForRun(id, run, node, {refs, requestSize, cascadeTargetId}))];
+    return {node, cascadeTargetId, prompt, refs, modelKey, msModel, msLoras, count, out, pendingIds, run, requestSize};
+}
+function msGenRequestSize(node){
     const size = apiImageSize(node.msRatio ?? 'square', node.msResolution || '1k', node.msCustomRatio || '', node.msCustomSize || '');
     const parsed = parseSizeValue(size);
     let width = Number(parsed?.width) || 1024;
@@ -3150,80 +3167,88 @@ async function runMsGenNode(nodeId, opts={}){
         width = Number(node.msWidth) || width;
         height = Number(node.msHeight) || height;
     }
-    const requestSize = {width, height};
-    if(out) out._pending = [...(out._pending || []), ...pendingIds.map(id => makePendingForRun(id, run, node, {refs, requestSize, cascadeTargetId}))];
-    if(!opts.cascade){
+    return {width, height, requestSize:{width, height}};
+}
+function refreshMsGenRunningState(node, out, cascade){
+    if(!cascade){
         node.running = true;
         refreshRunNodes(node, out);
         setTimeout(() => { node.running = false; refreshRunNodes(node, out); }, 2000);
     }
     else refreshRunNodes(node, out);
-    try {
-        const imageUrls = [];
-        if(msModel.supportsImage || msModel.acceptsImage){
-            for(const ref of refs.slice(0, CANVAS_REFERENCE_IMAGE_MAX)){
-                if(ref.url){
-                    try { imageUrls.push(await urlToBase64(ref.url)); }
-                    catch(e){ imageUrls.push(ref.url); }
-                }
+}
+async function collectMsGenImageRefs(refs, msModel){
+    const imageUrls = [];
+    if(msModel.supportsImage || msModel.acceptsImage){
+        for(const ref of refs.slice(0, CANVAS_REFERENCE_IMAGE_MAX)){
+            if(ref.url){
+                try { imageUrls.push(await urlToBase64(ref.url)); }
+                catch(e){ imageUrls.push(ref.url); }
             }
         }
-        const submitMs = async () => {
-            let apiBody;
-            if(modelKey === 'zimage'){
-                apiBody = { prompt, resolution: `${width}x${height}`, client_id: CLIENT_ID };
-            } else if(modelKey === 'qwen_edit'){
-                apiBody = { prompt, image_urls: imageUrls, resolution: `${width}x${height}`, client_id: CLIENT_ID };
-            } else if(modelKey === 'custom'){
-                apiBody = {
-                    prompt,
-                    model: node.msCustomModel || modelscopeImageModels()[0] || 'Tongyi-MAI/Z-Image-Turbo',
-                    image_urls: imageUrls,
-                    width,
-                    height,
-                    size: `${width}x${height}`,
-                    client_id: CLIENT_ID
-                };
-            } else {
-                apiBody = { prompt, model: msModel.modelId, image_urls: imageUrls, width, height, size:`${width}x${height}`, client_id: CLIENT_ID };
-            }
-            if(node.msLoraEnabled){
-                const selected = msLoras.find(lora => String(lora.id || '').trim() === String(node.msLoraId || '').trim()) || msLoras[0];
-                const loraId = String(selected?.id || node.msLoraId || '').trim();
-                if(!loraId) throw new Error(tr('canvas.noLoraBoundError'));
-                apiBody.loras = { [loraId]: Number(node.msLoraStrength ?? selected?.strength ?? 0.8) };
-            }
-            const res = await cascadeFetch(msModel.endpoint, {
-                method:'POST', headers:{'Content-Type':'application/json'},
-                body:JSON.stringify(apiBody)
-            }, {cascadeTargetId});
-            if(!res.ok) await assertCanvasResponseMessage(res, tr('canvas.msFailed'));
-            return await res.json();
-        };
-        const results = await Promise.all(Array.from({length:count}, submitMs));
-        const metas = collectRunMetas(out, pendingIds);
-        const outputUrls = results.map(data => data.url).filter(Boolean);
-        run.request = results[0] ? requestMetaFromResult(results[0]) : {};
-        if(out) out._pending = (out._pending || []).filter(p => !pendingIds.includes(p.id));
-        appendOutputImages(out, outputUrls, refs[0], metas);
-        mergeGeneratedOutputs(node, outputUrls, Boolean(opts.cascade));
-        addGenerationLog({run, outputs:outputUrls, runMs:Math.max(...metas.map(m => m.runMs || 0), 0)});
-        node.runStatus = 'done'; node.runError = '';
-        refreshRunNodes(node, out);
-        scheduleSave();
-    } catch(err){
-        const metas = collectRunMetas(out, pendingIds);
-        addGenerationLog({run, outputs:[], runMs:Math.max(...metas.map(m => m.runMs || 0), 0), error:err.message || String(err)});
-        if(out) out._pending = (out._pending || []).filter(p => !pendingIds.includes(p.id));
-        if(isCascadeAbortError(err)){
-            if(opts.cascade) throw err;
-            return;
-        }
-        node.runStatus = 'failed'; node.runError = err.message || String(err);
-        refreshRunNodes(node, out);
-        if(opts.cascade) throw err;
-        alert(err.message || tr('canvas.msFailed'));
     }
+    return imageUrls;
+}
+function buildMsGenApiBody({modelKey, node, prompt, msModel, msLoras, requestSize}, imageUrls){
+    const {width, height} = requestSize;
+    let apiBody;
+    if(modelKey === 'zimage'){
+        apiBody = { prompt, resolution: `${width}x${height}`, client_id: CLIENT_ID };
+    } else if(modelKey === 'qwen_edit'){
+        apiBody = { prompt, image_urls: imageUrls, resolution: `${width}x${height}`, client_id: CLIENT_ID };
+    } else if(modelKey === 'custom'){
+        apiBody = {
+            prompt,
+            model: node.msCustomModel || modelscopeImageModels()[0] || 'Tongyi-MAI/Z-Image-Turbo',
+            image_urls: imageUrls,
+            width,
+            height,
+            size: `${width}x${height}`,
+            client_id: CLIENT_ID
+        };
+    } else {
+        apiBody = { prompt, model: msModel.modelId, image_urls: imageUrls, width, height, size:`${width}x${height}`, client_id: CLIENT_ID };
+    }
+    if(node.msLoraEnabled){
+        const selected = msLoras.find(lora => String(lora.id || '').trim() === String(node.msLoraId || '').trim()) || msLoras[0];
+        const loraId = String(selected?.id || node.msLoraId || '').trim();
+        if(!loraId) throw new Error(tr('canvas.noLoraBoundError'));
+        apiBody.loras = { [loraId]: Number(node.msLoraStrength ?? selected?.strength ?? 0.8) };
+    }
+    return apiBody;
+}
+async function submitMsGenJob(msModel, apiBody, cascadeTargetId){
+    const res = await cascadeFetch(msModel.endpoint, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(apiBody)
+    }, {cascadeTargetId});
+    if(!res.ok) await assertCanvasResponseMessage(res, tr('canvas.msFailed'));
+    return await res.json();
+}
+function completeMsGenRun({node, out, opts, run, refs, pendingIds, results}){
+    const metas = collectRunMetas(out, pendingIds);
+    const outputUrls = results.map(data => data.url).filter(Boolean);
+    run.request = results[0] ? requestMetaFromResult(results[0]) : {};
+    if(out) out._pending = (out._pending || []).filter(p => !pendingIds.includes(p.id));
+    appendOutputImages(out, outputUrls, refs[0], metas);
+    mergeGeneratedOutputs(node, outputUrls, Boolean(opts.cascade));
+    addGenerationLog({run, outputs:outputUrls, runMs:Math.max(...metas.map(m => m.runMs || 0), 0)});
+    node.runStatus = 'done'; node.runError = '';
+    refreshRunNodes(node, out);
+    scheduleSave();
+}
+function failMsGenRun({node, out, opts, run, pendingIds, err}){
+    const metas = collectRunMetas(out, pendingIds);
+    addGenerationLog({run, outputs:[], runMs:Math.max(...metas.map(m => m.runMs || 0), 0), error:err.message || String(err)});
+    if(out) out._pending = (out._pending || []).filter(p => !pendingIds.includes(p.id));
+    if(isCascadeAbortError(err)){
+        if(opts.cascade) throw err;
+        return;
+    }
+    node.runStatus = 'failed'; node.runError = err.message || String(err);
+    refreshRunNodes(node, out);
+    if(opts.cascade) throw err;
+    alert(err.message || tr('canvas.msFailed'));
 }
 function addComfyNode(point){
     const p = point || defaultPoint(160, 0);
