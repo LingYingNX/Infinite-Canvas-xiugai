@@ -6246,18 +6246,20 @@ function bindNodeElementEvents(el, node, body){
     if(inp) inp.onmousedown = e => { if(e.button === 0 && !e.shiftKey) startLink(e, node.id, 'in'); };
 }
 
-function renderNode(node){
-    normalizeApiNodeLayout(node);
-    if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
-    const el = document.createElement('div');
-    const size = defaultNodeSize(node.type);
-    const hasFixedSize = Boolean(node.h || size.h);
-    el.className = `node ${node.type}-node ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
-    el.style.left = `${node.x}px`;
-    el.style.top = `${node.y}px`;
-    el.style.width = `${node.w || size.w}px`;
-    if(node.h || size.h) el.style.height = `${node.h || size.h}px`;
-    el.dataset.id = node.id;
+function renderNodeStatusHtml(node){
+    // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
+    const showStatus = ['generator','midjourney','msgen','comfy','ltxDirector','llm','video','rh','minimax'].includes(node.type) && node.runStatus
+        && (node.runStatus !== 'failed' || node._cascadeFailed);
+    if(!showStatus) return '';
+    const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
+    return `<span class="node-run-status ${node.runStatus}"><span class="dot"></span>${escapeHtml(label)}${node._cascadeIdx?' '+node._cascadeIdx:''}</span>`;
+}
+function renderNodeHeadHtml(node){
+    const title = canvasNodeTitle(node);
+    const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
+    return `<div class="node-head"><span class="node-title">${displayTitle}</span><div style="display:flex;align-items:center;gap:8px">${renderNodeStatusHtml(node)}<button onclick="deleteNodeFromButton('${node.id}', event)" class="text-gray-300 hover:text-red-500"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
+}
+function bindNodeElementActions(el, node){
     el.onclick = (e) => {
         e.stopPropagation();
         if(isNodeControl(e.target)) return;
@@ -6266,25 +6268,14 @@ function renderNode(node){
         refreshSelectionVisuals();
     };
     el.oncontextmenu = e => {
-    if(!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'output') return;
+        if(!CANVAS_GENERATOR_TYPES.includes(node.type) && node.type !== 'output') return;
         e.preventDefault();
         e.stopPropagation();
         if(node.type === 'output') openOutputNodeMenu(node.id, e.clientX, e.clientY);
         else openGeneratorNodeMenu(node.id, e.clientX, e.clientY);
     };
-    const title = canvasNodeTitle(node);
-    const displayTitle = node.type === 'image' && node.url ? nodeTitleForMedia(node) : title;
-    // 失败徽章只在一键运行模式中显示，单节点失败已通过 alert 提示
-    const showStatus = ['generator','midjourney','msgen','comfy','ltxDirector','llm','video','rh','minimax'].includes(node.type) && node.runStatus
-        && (node.runStatus !== 'failed' || node._cascadeFailed);
-    const statusHtml = showStatus ? (() => {
-        const label = { queued:'排队中', running:'运行中', done:'完成', failed:'失败' }[node.runStatus] || '';
-        return `<span class="node-run-status ${node.runStatus}"><span class="dot"></span>${escapeHtml(label)}${node._cascadeIdx?' '+node._cascadeIdx:''}</span>`;
-    })() : '';
-    el.innerHTML = `<div class="node-head"><span class="node-title">${displayTitle}</span><div style="display:flex;align-items:center;gap:8px">${statusHtml}<button onclick="deleteNodeFromButton('${node.id}', event)" class="text-gray-300 hover:text-red-500"><i data-lucide="x" class="w-4 h-4"></i></button></div></div>`;
-    const body = document.createElement('div');
-    body.className = 'node-body';
-    renderImageNodeBody(body, node);
+}
+function appendNodeBody(body, node){
     if(node.type === 'prompt') {
         const templateActive = promptTemplateModal?.classList.contains('open') && promptTemplateNodeId === node.id;
         body.innerHTML = `<div class="prompt-editor"><div class="prompt-toolbar"><button class="prompt-template-btn ${templateActive ? 'active' : ''}" type="button" data-prompt-template-open data-prompt-template-node-id="${escapeAttr(node.id)}" aria-pressed="${templateActive ? 'true' : 'false'}" title="${escapeAttr(tr('canvas.promptTemplateLibrary'))}"><i data-lucide="library"></i><span>${escapeHtml(tr('canvas.promptTemplateShort'))}</span></button>${promptCounterHtml(node.text || '')}</div><textarea placeholder="${tr('canvas.promptPlaceholder')}">${escapeHtml(node.text || '')}</textarea></div>`;
@@ -6302,8 +6293,9 @@ function renderNode(node){
             scheduleSave();
             scheduleGeneratorInputSync();
         };
+        return;
     }
-    if(node.type === 'loop') body.appendChild(renderLoopBody(node));
+    if(node.type === 'loop') { body.appendChild(renderLoopBody(node)); return; }
     if(node.type === 'group') {
         const items = (node.items || []).map(id => nodes.find(n => n.id === id)).filter(Boolean);
         const imgCount = items.filter(n => n.type === 'image').length;
@@ -6332,10 +6324,12 @@ function renderNode(node){
             };
             body.ondblclick = openGroupPreview;
         }
+        return;
     }
     if(node.type === 'promptGroup') {
         const promptNodes = (node.items || []).map(id => nodes.find(n => n.id === id)).filter(Boolean);
         body.innerHTML = `<div class="text-[11px] text-gray-400">${promptNodes.length} ${tr('canvas.promptCount')} ${tr('canvas.grouped')}</div>`;
+        return;
     }
     if(node.type === 'llm') body.appendChild(renderLLMBody(node));
     if(node.type === 'generator') body.appendChild(renderGeneratorBody(node));
@@ -6356,6 +6350,25 @@ function renderNode(node){
         };
         body.querySelectorAll('.output-img-wrap').forEach(wrap => bindOutputWrap(wrap, node));
     }
+}
+function renderNode(node){
+    normalizeApiNodeLayout(node);
+    if(node.type === 'rh' && Number(node.h) === 560) delete node.h;
+    const el = document.createElement('div');
+    const size = defaultNodeSize(node.type);
+    const hasFixedSize = Boolean(node.h || size.h);
+    el.className = `node ${node.type}-node ${node.url ? 'has-image' : ''} ${hasFixedSize ? 'sized' : ''} ${selected.has(node.id) ? 'selected' : ''}`;
+    el.style.left = `${node.x}px`;
+    el.style.top = `${node.y}px`;
+    el.style.width = `${node.w || size.w}px`;
+    if(node.h || size.h) el.style.height = `${node.h || size.h}px`;
+    el.dataset.id = node.id;
+    bindNodeElementActions(el, node);
+    el.innerHTML = renderNodeHeadHtml(node);
+    const body = document.createElement('div');
+    body.className = 'node-body';
+    renderImageNodeBody(body, node);
+    appendNodeBody(body, node);
     bindNodeElementEvents(el, node, body);
     return el;
 }
