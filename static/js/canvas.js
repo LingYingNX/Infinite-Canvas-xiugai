@@ -881,6 +881,9 @@ async function responseErrorMessage(response, fallback='请求失败'){
         }
     }
 }
+function assertCanvasResponseOk(response, message){
+    if(!response.ok) throw new Error(message);
+}
 function closeErrorModal(){
     if(errorModal) errorModal.classList.remove('open');
 }
@@ -1490,7 +1493,7 @@ async function saveCanvas(){
             setStatus('Synced');
             return;
         }
-        if(!res.ok) throw new Error('save failed');
+        assertCanvasResponseOk(res, 'save failed');
         const data = await res.json().catch(() => ({}));
         const localViewport = {...viewport};
         if(data.canvas) canvas = {...canvas, ...data.canvas, viewport:localViewport};
@@ -1978,7 +1981,7 @@ async function setCanvasIcon(id, icon, event){
                 viewport:target.viewport || {x:0, y:0, scale:1}
             })
         });
-        if(!res.ok) throw new Error('图标保存失败');
+        assertCanvasResponseOk(res, '图标保存失败');
         if(canvas?.id === id) canvas.icon = target.icon;
         await loadCanvasList(false);
     } catch(e) {
@@ -2042,7 +2045,7 @@ async function setCanvasTitle(id, title){
                 viewport:target.viewport || {x:0, y:0, scale:1}
             })
         });
-        if(!res.ok) throw new Error('重命名失败');
+        assertCanvasResponseOk(res, '重命名失败');
         if(currentCanvasTitle && canvas?.id === id) currentCanvasTitle.textContent = title;
         await loadCanvasList(false);
     } catch(e){
@@ -2268,7 +2271,7 @@ async function deleteCanvas(id, event){
     setStatus('Moving to trash...');
     try {
         const res = await fetch(`/api/canvases/${id}`, {method:'DELETE'});
-        if(!res.ok) throw new Error(tr('canvas.moveToTrashFailed'));
+        assertCanvasResponseOk(res, tr('canvas.moveToTrashFailed'));
         const deletingCurrent = canvas?.id === id;
         pendingDeleteCanvasId = null;
         canvases = canvases.filter(item => item.id !== id);
@@ -2294,7 +2297,7 @@ async function restoreCanvas(id, event){
     setStatus('Restoring...');
     try {
         const res = await fetch(`/api/canvases/${id}/restore`, {method:'POST'});
-        if(!res.ok) throw new Error(tr('canvas.restoreFailed'));
+        assertCanvasResponseOk(res, tr('canvas.restoreFailed'));
         pendingPurgeCanvasId = null;
         deletedCanvases = deletedCanvases.filter(item => item.id !== id);
         await loadCanvasList(false);
@@ -2311,7 +2314,7 @@ async function purgeCanvas(id, event){
     setStatus('Deleting...');
     try {
         const res = await fetch(`/api/canvases/${id}/purge`, {method:'DELETE'});
-        if(!res.ok) throw new Error(tr('canvas.purgeFailed'));
+        assertCanvasResponseOk(res, tr('canvas.purgeFailed'));
         pendingPurgeCanvasId = null;
         deletedCanvases = deletedCanvases.filter(item => item.id !== id);
         renderCanvasList();
@@ -2703,7 +2706,7 @@ async function getImageDimensions(url){
 }
 async function urlToBase64(url){
     const res = await fetch(url);
-    if(!res.ok) throw new Error('图片读取失败');
+    assertCanvasResponseOk(res, '图片读取失败');
     const blob = await res.blob();
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -11762,7 +11765,7 @@ async function runMiniMaxNode(nodeId, opts={}){
 }
 async function uploadCanvasUrlToComfy(url){
     const blob = await fetch(url).then(r => {
-        if(!r.ok) throw new Error(langIsEn() ? 'Image read failed' : '图片读取失败');
+        assertCanvasResponseOk(r, langIsEn() ? 'Image read failed' : '图片读取失败');
         return r.blob();
     });
     const filename = (url || '').split('/').pop()?.split('?')[0] || `canvas_${Date.now()}.png`;
@@ -13292,7 +13295,7 @@ async function importWorkflowAssetUrl(url, name='workflow'){
     if(!canvas || !url) return;
     try {
         const res = await fetch(url, {cache:'no-store'});
-        if(!res.ok) throw new Error('读取工作流资产失败');
+        assertCanvasResponseOk(res, '读取工作流资产失败');
         const blob = await res.blob();
         const fileName = name && /\.(json|zip)$/i.test(name) ? name : (url.split('/').pop()?.split('?')[0] || `${name || 'workflow'}.zip`);
         await importWorkflowFile(new File([blob], fileName, {type:blob.type || 'application/octet-stream'}));
@@ -13765,7 +13768,7 @@ function createImageCardFromOutput(url, point){
 }
 async function downloadUrl(url, filename){
     const res = await fetch(url);
-    if(!res.ok) throw new Error('下载失败');
+    assertCanvasResponseOk(res, '下载失败');
     const blob = await res.blob();
     downloadBlob(blob, filename, 1000);
 }
