@@ -603,6 +603,7 @@ TUDOU_ASYNC_IMAGE_TASK_TIMEOUT = float(os.getenv("TUDOU_ASYNC_IMAGE_TASK_TIMEOUT
 TUDOU_ASYNC_IMAGE_POLL_INTERVAL = float(os.getenv("TUDOU_ASYNC_IMAGE_POLL_INTERVAL", "4"))
 TUDOU_ASYNC_IMAGE_INITIAL_POLL_DELAY = float(os.getenv("TUDOU_ASYNC_IMAGE_INITIAL_POLL_DELAY", "12"))
 VIDEO_POLL_TIMEOUT = float(os.getenv("VIDEO_POLL_TIMEOUT", "1800"))
+MODELSCOPE_FAILED_STATUSES = {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED", "TIMEOUT", "REVOKED"}
 ONLINE_IMAGE_PROMPT_MAX_LENGTH = int(os.getenv("ONLINE_IMAGE_PROMPT_MAX_LENGTH", "20000"))
 VIDEO_PROMPT_MAX_LENGTH = int(os.getenv("VIDEO_PROMPT_MAX_LENGTH", "4000"))
 LLM_MESSAGE_MAX_LENGTH = int(os.getenv("LLM_MESSAGE_MAX_LENGTH", "20000"))
@@ -1493,6 +1494,16 @@ def modelscope_api_root(provider=None):
 
 def modelscope_image_api_root():
     return MODELSCOPE_CHAT_BASE_URL.rstrip("/")
+
+async def modelscope_submit_image_task(client, api_root, headers, payload):
+    submit_res = await client.post(f"{api_root}/images/generations", headers=headers, json=payload)
+    if submit_res.status_code != 200:
+        try:
+            detail = submit_res.json()
+        except:
+            detail = submit_res.text
+        raise HTTPException(status_code=submit_res.status_code, detail=detail)
+    return submit_res.json().get("task_id")
 
 def env_quote(value):
     text = str(value or "")
@@ -9767,7 +9778,7 @@ async def generate_modelscope_provider_image(prompt, size, model, reference_imag
                 if not images:
                     raise HTTPException(status_code=502, detail=f"ModelScope 成功但没有返回图片：{data}")
                 return {"type": "url", "value": images[0]}, data
-            if status in {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED", "TIMEOUT", "REVOKED"}:
+            if status in MODELSCOPE_FAILED_STATUSES:
                 detail = data.get("error_info") or data.get("message") or data.get("detail") or str(data)
                 raise HTTPException(status_code=502, detail=f"ModelScope 任务失败：{detail}")
         raise HTTPException(status_code=504, detail=f"ModelScope 生图任务超时：{last_payload}")
@@ -17802,7 +17813,7 @@ async def poll_angle_cloud(req: CloudPollRequest):
                         await manager.send_personal_message({"type": "cloud_status", "status": "SUCCEED", "task_id": task_id}, req.client_id)
                     return {"url": local_path}
 
-                elif status in {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED", "TIMEOUT", "REVOKED"}:
+                elif status in MODELSCOPE_FAILED_STATUSES:
                     if req.client_id:
                         await manager.send_personal_message({"type": "cloud_status", "status": "FAILED", "task_id": task_id}, req.client_id)
                     raise HTTPException(status_code=502, detail=f"ModelScope task failed: {data}")
@@ -17848,15 +17859,7 @@ async def generate_angle_cloud(req: CloudGenRequest):
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            submit_res = await client.post(f"{api_root}/images/generations", headers=headers, json=payload)
-            if submit_res.status_code != 200:
-                try:
-                    detail = submit_res.json()
-                except:
-                    detail = submit_res.text
-                raise HTTPException(status_code=submit_res.status_code, detail=detail)
-
-            task_id = submit_res.json().get("task_id")
+            task_id = await modelscope_submit_image_task(client, api_root, headers, payload)
             print(f"Angle Task submitted, ID: {task_id}")
 
             for i in range(300):
@@ -17881,7 +17884,7 @@ async def generate_angle_cloud(req: CloudGenRequest):
                         asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(record), GLOBAL_LOOP)
                     return {"url": local_path, "task_id": task_id}
 
-                elif status in {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED", "TIMEOUT", "REVOKED"}:
+                elif status in MODELSCOPE_FAILED_STATUSES:
                     if req.client_id:
                         await manager.send_personal_message({"type": "cloud_status", "status": "FAILED", "task_id": task_id}, req.client_id)
                     raise HTTPException(status_code=502, detail=f"ModelScope task failed: {data}")
@@ -17926,19 +17929,7 @@ async def generate_cloud(req: CloudGenRequest):
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            submit_res = await client.post(
-                f"{api_root}/images/generations",
-                headers={**headers, "X-ModelScope-Async-Mode": "true"},
-                json=payload
-            )
-            if submit_res.status_code != 200:
-                try:
-                    detail = submit_res.json()
-                except:
-                    detail = submit_res.text
-                raise HTTPException(status_code=submit_res.status_code, detail=detail)
-
-            task_id = submit_res.json().get("task_id")
+            task_id = await modelscope_submit_image_task(client, api_root, {**headers, "X-ModelScope-Async-Mode": "true"}, payload)
             print(f"Z-Image Task submitted, ID: {task_id}")
 
             for i in range(200):
@@ -17966,7 +17957,7 @@ async def generate_cloud(req: CloudGenRequest):
                         pass
                     return {"url": local_path}
 
-                elif status in {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED", "TIMEOUT", "REVOKED"}:
+                elif status in MODELSCOPE_FAILED_STATUSES:
                     raise HTTPException(status_code=502, detail=f"ModelScope task failed: {data}")
 
             raise Exception("Cloud generation timeout")
@@ -18008,22 +17999,9 @@ async def ms_generate(req: MsGenerateRequest):
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            submit_res = await client.post(
-                f"{api_root}/images/generations",
-                headers=headers,
-                json=payload
-            )
-            if submit_res.status_code != 200:
-                try:
-                    detail = submit_res.json()
-                except:
-                    detail = submit_res.text
-                raise HTTPException(status_code=submit_res.status_code, detail=detail)
-
-            task_id = submit_res.json().get("task_id")
+            task_id = await modelscope_submit_image_task(client, api_root, headers, payload)
             print(f"MS Generate Task submitted ({req.model}), ID: {task_id}")
 
-            TERMINAL_FAILED_STATUSES = {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED", "TIMEOUT", "REVOKED"}
 
             for i in range(300):
                 await asyncio.sleep(2)
@@ -18052,7 +18030,7 @@ async def ms_generate(req: MsGenerateRequest):
                             asyncio.run_coroutine_threadsafe(manager.broadcast_new_image(record), GLOBAL_LOOP)
                         return {"url": local_path, "task_id": task_id}
 
-                    elif status in TERMINAL_FAILED_STATUSES:
+                    elif status in MODELSCOPE_FAILED_STATUSES:
                         error_info = data.get("error_info") or data.get("message") or data.get("detail") or str(data)
                         raise HTTPException(status_code=502, detail=f"MS task {status}: {error_info}")
 
