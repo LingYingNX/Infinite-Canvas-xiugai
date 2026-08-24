@@ -14035,143 +14035,152 @@ assetManagerModal?.addEventListener('change', event => {
     }
     if(shouldRender) renderAssetManager();
 });
-assetManagerModal?.addEventListener('click', async event => {
+async function handleCanvasAssetManagerSelection(event){
     const assetLib = event.target.closest?.('[data-manager-asset-lib]');
-    if(assetLib){ activeCanvasAssetLibraryId = assetLib.dataset.managerAssetLib || ''; activeCanvasAssetCategoryId = ''; managerSelectedAssetIds.clear(); renderAssetManager(); return; }
+    if(assetLib){ activeCanvasAssetLibraryId = assetLib.dataset.managerAssetLib || ''; activeCanvasAssetCategoryId = ''; managerSelectedAssetIds.clear(); renderAssetManager(); return true; }
     const assetCat = event.target.closest?.('[data-manager-asset-cat]');
-    if(assetCat){ activeCanvasAssetCategoryId = assetCat.dataset.managerAssetCat || ''; managerSelectedAssetIds.clear(); renderAssetManager(); return; }
+    if(assetCat){ activeCanvasAssetCategoryId = assetCat.dataset.managerAssetCat || ''; managerSelectedAssetIds.clear(); renderAssetManager(); return true; }
     const workflowLib = event.target.closest?.('[data-manager-workflow-lib]');
-    if(workflowLib){ activeCanvasAssetLibraryId = workflowLib.dataset.managerWorkflowLib || ''; activeCanvasWorkflowCategoryId = ''; managerSelectedWorkflowIds.clear(); renderAssetManager(); return; }
+    if(workflowLib){ activeCanvasAssetLibraryId = workflowLib.dataset.managerWorkflowLib || ''; activeCanvasWorkflowCategoryId = ''; managerSelectedWorkflowIds.clear(); renderAssetManager(); return true; }
     const workflowCat = event.target.closest?.('[data-manager-workflow-cat]');
-    if(workflowCat){ activeCanvasWorkflowCategoryId = workflowCat.dataset.managerWorkflowCat || ''; managerSelectedWorkflowIds.clear(); renderAssetManager(); return; }
+    if(workflowCat){ activeCanvasWorkflowCategoryId = workflowCat.dataset.managerWorkflowCat || ''; managerSelectedWorkflowIds.clear(); renderAssetManager(); return true; }
     const promptLib = event.target.closest?.('[data-manager-prompt-lib]');
-    if(promptLib){ activePromptLibraryId = promptLib.dataset.managerPromptLib || 'system'; managerSelectedPromptIds.clear(); renderAssetManager(); return; }
+    if(promptLib){ activePromptLibraryId = promptLib.dataset.managerPromptLib || 'system'; managerSelectedPromptIds.clear(); renderAssetManager(); return true; }
+    return false;
+}
+async function handleCanvasAssetManagerItemEdit(event){
     const workflowRename = event.target.closest?.('[data-manager-workflow-rename]');
     if(workflowRename){
         const itemId = workflowRename.dataset.managerWorkflowRename || '';
         const item = (activeCanvasWorkflowCategory()?.items || []).find(entry => entry.id === itemId);
         const name = window.prompt('工作流名称', item?.name || '');
-        if(!item || !String(name || '').trim()) return;
+        if(!item || !String(name || '').trim()) return true;
         const data = await fetch(`/api/asset-library/items/${encodeURIComponent(item.id)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}).then(r => r.json());
         canvasAssetLibrary = data.library || canvasAssetLibrary;
-        renderAssetManager(); renderCanvasAssetLibrary(); return;
+        renderAssetManager(); renderCanvasAssetLibrary(); return true;
     }
     const workflowRemove = event.target.closest?.('[data-manager-workflow-remove]');
     if(workflowRemove){
         const itemId = workflowRemove.dataset.managerWorkflowRemove || '';
         const item = (activeCanvasWorkflowCategory()?.items || []).find(entry => entry.id === itemId);
-        if(!item || !window.confirm(`删除工作流「${item.name || 'workflow'}」？`)) return;
+        if(!item || !window.confirm(`删除工作流「${item.name || 'workflow'}」？`)) return true;
         const data = await fetch(`/api/asset-library/items/${encodeURIComponent(item.id)}`, {method:'DELETE'}).then(r => r.json());
         canvasAssetLibrary = data.library || canvasAssetLibrary;
         managerSelectedWorkflowIds.delete(item.id);
-        renderAssetManager(); renderCanvasAssetLibrary(); return;
+        renderAssetManager(); renderCanvasAssetLibrary(); return true;
     }
     const assetRename = event.target.closest?.('[data-manager-asset-rename]');
     if(assetRename){
         const itemId = assetRename.dataset.managerAssetRename || '';
         const item = (activeCanvasMediaCategory()?.items || []).find(entry => entry.id === itemId);
         const name = window.prompt('资产名称', item?.name || '');
-        if(!item || !String(name || '').trim()) return;
+        if(!item || !String(name || '').trim()) return true;
         const data = await fetch(`/api/asset-library/items/${encodeURIComponent(item.id)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}).then(r => r.json());
         canvasAssetLibrary = data.library || canvasAssetLibrary;
-        renderAssetManager(); renderCanvasAssetLibrary(); return;
+        renderAssetManager(); renderCanvasAssetLibrary(); return true;
     }
     const assetRemove = event.target.closest?.('[data-manager-asset-remove]');
     if(assetRemove){
         const itemId = assetRemove.dataset.managerAssetRemove || '';
         const item = (activeCanvasMediaCategory()?.items || []).find(entry => entry.id === itemId);
-        if(!item || !window.confirm(`删除资产「${item.name || 'asset'}」？`)) return;
+        if(!item || !window.confirm(`删除资产「${item.name || 'asset'}」？`)) return true;
         const data = await fetch(`/api/asset-library/items/${encodeURIComponent(item.id)}`, {method:'DELETE'}).then(r => r.json());
         canvasAssetLibrary = data.library || canvasAssetLibrary;
         managerSelectedAssetIds.delete(item.id);
-        renderAssetManager(); renderCanvasAssetLibrary(); return;
+        renderAssetManager(); renderCanvasAssetLibrary(); return true;
     }
     const promptEdit = event.target.closest?.('[data-manager-prompt-edit]');
     if(promptEdit){
         const lib = activeCanvasPromptLibrary();
-        if(!lib || lib.readonly) return;
+        if(!lib || lib.readonly) return true;
         const itemId = promptEdit.dataset.managerPromptEdit || '';
         const item = (lib.items || []).find(entry => entry.id === itemId);
-        if(!item) return;
+        if(!item) return true;
         const name = window.prompt('提示词名称', item.name || '提示词');
-        if(!String(name || '').trim()) return;
+        if(!String(name || '').trim()) return true;
         const positive = window.prompt('提示词内容', item.positive || '');
-        if(!String(positive || '').trim()) return;
+        if(!String(positive || '').trim()) return true;
         const data = await fetch(`/api/prompt-libraries/items/${encodeURIComponent(item.id)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({library_id:lib.id, name, positive, negative:item.negative || '', category:item.category || 'mine', scene:item.scene || ''})}).then(r => r.json());
         canvasPromptLibraries = data.library?.libraries || canvasPromptLibraries;
         refreshCanvasPromptTemplatesFromLibraries();
-        renderAssetManager(); return;
+        renderAssetManager(); return true;
     }
     const promptRemove = event.target.closest?.('[data-manager-prompt-remove]');
     if(promptRemove){
         const lib = activeCanvasPromptLibrary();
-        if(!lib || lib.readonly) return;
+        if(!lib || lib.readonly) return true;
         const itemId = promptRemove.dataset.managerPromptRemove || '';
         const item = (lib.items || []).find(entry => entry.id === itemId);
-        if(!item || !window.confirm(`删除提示词「${item.name || '提示词'}」？`)) return;
+        if(!item || !window.confirm(`删除提示词「${item.name || '提示词'}」？`)) return true;
         const data = await fetch(`/api/prompt-libraries/items/${encodeURIComponent(item.id)}`, {method:'DELETE'}).then(r => r.json());
         canvasPromptLibraries = data.library?.libraries || canvasPromptLibraries;
         managerSelectedPromptIds.delete(item.id);
         refreshCanvasPromptTemplatesFromLibraries();
-        renderAssetManager(); return;
+        renderAssetManager(); return true;
     }
+    return false;
+}
+async function handleCanvasAssetManagerAssetActions(event){
     if(event.target.closest?.('[data-manager-asset-lib-new]')){
         const name = window.prompt('资产库名称', '新资产库');
-        if(!String(name || '').trim()) return;
+        if(!String(name || '').trim()) return true;
         const data = await fetch('/api/asset-library/libraries', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}).then(r => r.json());
         canvasAssetLibrary = data.library || canvasAssetLibrary;
         activeCanvasAssetLibraryId = data.asset_library?.id || activeCanvasAssetLibraryId;
         activeCanvasAssetCategoryId = '';
-        renderAssetManager(); renderCanvasAssetLibrary(); return;
+        renderAssetManager(); renderCanvasAssetLibrary(); return true;
     }
     if(event.target.closest?.('[data-manager-asset-lib-rename]')){
         const lib = activeCanvasAssetLibrary();
         const name = window.prompt('资产库名称', lib?.name || '');
-        if(!lib || !String(name || '').trim()) return;
+        if(!lib || !String(name || '').trim()) return true;
         const data = await fetch(`/api/asset-library/libraries/${encodeURIComponent(lib.id)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}).then(r => r.json());
         canvasAssetLibrary = data.library || canvasAssetLibrary;
-        renderAssetManager(); renderCanvasAssetLibrary(); return;
+        renderAssetManager(); renderCanvasAssetLibrary(); return true;
     }
     if(event.target.closest?.('[data-manager-asset-lib-delete]')){
         const lib = activeCanvasAssetLibrary();
-        if(!lib || !window.confirm(`删除资产库「${lib.name || '资产库'}」？`)) return;
+        if(!lib || !window.confirm(`删除资产库「${lib.name || '资产库'}」？`)) return true;
         const data = await fetch(`/api/asset-library/libraries/${encodeURIComponent(lib.id)}`, {method:'DELETE'}).then(r => r.json());
         canvasAssetLibrary = data.library || canvasAssetLibrary;
         activeCanvasAssetLibraryId = canvasAssetLibrary.active_library_id || canvasAssetLibraries()[0]?.id || '';
         activeCanvasAssetCategoryId = '';
-        renderAssetManager(); renderCanvasAssetLibrary(); return;
+        renderAssetManager(); renderCanvasAssetLibrary(); return true;
     }
     if(event.target.closest?.('[data-manager-asset-cat-new]')){
         const name = window.prompt('分组名称', '新分组');
-        if(!String(name || '').trim()) return;
+        if(!String(name || '').trim()) return true;
         const data = await fetch('/api/asset-library/categories', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({library_id:activeCanvasAssetLibraryId, name, type:'image'})}).then(r => r.json());
         canvasAssetLibrary = data.library || canvasAssetLibrary;
         activeCanvasAssetCategoryId = data.category?.id || activeCanvasAssetCategoryId;
-        renderAssetManager(); renderCanvasAssetLibrary(); return;
+        renderAssetManager(); renderCanvasAssetLibrary(); return true;
     }
     if(event.target.closest?.('[data-manager-asset-cat-rename]')){
         const cat = activeCanvasMediaCategory();
         const name = window.prompt('分组名称', cat?.name || '');
-        if(!cat || !String(name || '').trim()) return;
+        if(!cat || !String(name || '').trim()) return true;
         const data = await fetch(`/api/asset-library/categories/${encodeURIComponent(cat.id)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}).then(r => r.json());
         canvasAssetLibrary = data.library || canvasAssetLibrary;
-        renderAssetManager(); renderCanvasAssetLibrary(); return;
+        renderAssetManager(); renderCanvasAssetLibrary(); return true;
     }
     if(event.target.closest?.('[data-manager-asset-cat-delete]')){
         const cat = activeCanvasMediaCategory();
-        if(!cat || !window.confirm(`删除分组「${cat.name || '分组'}」？`)) return;
+        if(!cat || !window.confirm(`删除分组「${cat.name || '分组'}」？`)) return true;
         const data = await fetch(`/api/asset-library/categories/${encodeURIComponent(cat.id)}`, {method:'DELETE'}).then(r => r.json());
         canvasAssetLibrary = data.library || canvasAssetLibrary;
         activeCanvasAssetCategoryId = canvasMediaCategories()[0]?.id || '';
-        renderAssetManager(); renderCanvasAssetLibrary(); return;
+        renderAssetManager(); renderCanvasAssetLibrary(); return true;
     }
     if(event.target.closest?.('[data-manager-asset-delete]')){
-        if(!managerSelectedAssetIds.size) return;
+        if(!managerSelectedAssetIds.size) return true;
         const data = await fetch('/api/asset-library/items/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({library_id:activeCanvasAssetLibraryId, ids:[...managerSelectedAssetIds]})}).then(r => r.json());
         canvasAssetLibrary = data.library || canvasAssetLibrary;
         managerSelectedAssetIds.clear();
-        renderAssetManager(); renderCanvasAssetLibrary(); return;
+        renderAssetManager(); renderCanvasAssetLibrary(); return true;
     }
+    return false;
+}
+async function handleCanvasAssetManagerWorkflowActions(event){
     if(event.target.closest?.('[data-manager-workflow-export]')){
         const items = (activeCanvasWorkflowCategory()?.items || []).filter(item => managerSelectedWorkflowIds.has(item.id));
         if(items.length === 1) {
@@ -14181,71 +14190,82 @@ assetManagerModal?.addEventListener('click', async event => {
             const res = await fetch('/api/canvas-assets/download', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({filename:'workflows.zip', items:items.map(item => ({url:item.url, name:item.name || 'workflow'}))})});
             if(res.ok) downloadBlob(await res.blob(), 'workflows.zip');
         }
-        return;
+        return true;
     }
     if(event.target.closest?.('[data-manager-workflow-delete]')){
-        if(!managerSelectedWorkflowIds.size) return;
+        if(!managerSelectedWorkflowIds.size) return true;
         const data = await fetch('/api/asset-library/items/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({library_id:activeCanvasAssetLibraryId, ids:[...managerSelectedWorkflowIds]})}).then(r => r.json());
         canvasAssetLibrary = data.library || canvasAssetLibrary;
         managerSelectedWorkflowIds.clear();
-        renderAssetManager(); renderCanvasAssetLibrary(); return;
+        renderAssetManager(); renderCanvasAssetLibrary(); return true;
     }
     if(event.target.closest?.('[data-manager-workflow-cat-new]')){
         const name = window.prompt('工作流分组名称', '工作流');
-        if(!String(name || '').trim()) return;
+        if(!String(name || '').trim()) return true;
         const data = await fetch('/api/asset-library/categories', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({library_id:activeCanvasAssetLibraryId, name, type:'workflow'})}).then(r => r.json());
         canvasAssetLibrary = data.library || canvasAssetLibrary;
         activeCanvasWorkflowCategoryId = data.category?.id || activeCanvasWorkflowCategoryId;
-        renderAssetManager(); renderCanvasAssetLibrary(); return;
+        renderAssetManager(); renderCanvasAssetLibrary(); return true;
     }
+    return false;
+}
+async function handleCanvasAssetManagerPromptActions(event){
     if(event.target.closest?.('[data-manager-prompt-lib-new]')){
         const name = window.prompt('提示词库名称', '新提示词库');
-        if(!String(name || '').trim()) return;
+        if(!String(name || '').trim()) return true;
         const data = await fetch('/api/prompt-libraries', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}).then(r => r.json());
         canvasPromptLibraries = data.library?.libraries || canvasPromptLibraries;
         activePromptLibraryId = data.prompt_library?.id || activePromptLibraryId;
         refreshCanvasPromptTemplatesFromLibraries();
-        renderAssetManager(); return;
+        renderAssetManager(); return true;
     }
     if(event.target.closest?.('[data-manager-prompt-lib-rename]')){
         const lib = activeCanvasPromptLibrary();
-        if(!lib || lib.readonly) return;
+        if(!lib || lib.readonly) return true;
         const name = window.prompt('提示词库名称', lib.name || '');
-        if(!String(name || '').trim()) return;
+        if(!String(name || '').trim()) return true;
         const data = await fetch(`/api/prompt-libraries/${encodeURIComponent(lib.id)}`, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}).then(r => r.json());
         canvasPromptLibraries = data.library?.libraries || canvasPromptLibraries;
         refreshCanvasPromptTemplatesFromLibraries();
-        renderAssetManager(); return;
+        renderAssetManager(); return true;
     }
     if(event.target.closest?.('[data-manager-prompt-lib-delete]')){
         const lib = activeCanvasPromptLibrary();
-        if(!lib || lib.readonly || !window.confirm(`删除提示词库「${lib.name || '提示词库'}」？`)) return;
+        if(!lib || lib.readonly || !window.confirm(`删除提示词库「${lib.name || '提示词库'}」？`)) return true;
         const data = await fetch(`/api/prompt-libraries/${encodeURIComponent(lib.id)}`, {method:'DELETE'}).then(r => r.json());
         canvasPromptLibraries = data.library?.libraries || canvasPromptLibraries;
         activePromptLibraryId = data.library?.active_library_id || canvasPromptLibraries.find(item => item.id !== 'system')?.id || 'system';
         refreshCanvasPromptTemplatesFromLibraries();
-        renderAssetManager(); return;
+        renderAssetManager(); return true;
     }
     if(event.target.closest?.('[data-manager-prompt-new]')){
         const lib = activeCanvasPromptLibrary();
-        if(!lib || lib.readonly) return;
+        if(!lib || lib.readonly) return true;
         const name = window.prompt('提示词名称', '新提示词');
-        if(!String(name || '').trim()) return;
+        if(!String(name || '').trim()) return true;
         const positive = window.prompt('提示词内容', '');
-        if(!String(positive || '').trim()) return;
+        if(!String(positive || '').trim()) return true;
         const data = await fetch('/api/prompt-libraries/items', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({library_id:lib.id, name, positive, category:'mine'})}).then(r => r.json());
         canvasPromptLibraries = data.library?.libraries || canvasPromptLibraries;
         refreshCanvasPromptTemplatesFromLibraries();
-        renderAssetManager(); return;
+        renderAssetManager(); return true;
     }
     if(event.target.closest?.('[data-manager-prompt-delete]')){
-        if(!managerSelectedPromptIds.size) return;
+        if(!managerSelectedPromptIds.size) return true;
         const data = await fetch('/api/prompt-libraries/items/delete', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ids:[...managerSelectedPromptIds]})}).then(r => r.json());
         canvasPromptLibraries = data.library?.libraries || canvasPromptLibraries;
         managerSelectedPromptIds.clear();
         refreshCanvasPromptTemplatesFromLibraries();
-        renderAssetManager(); return;
+        renderAssetManager(); return true;
     }
+    return false;
+}
+assetManagerModal?.addEventListener('click', async event => {
+    if(await handleCanvasAssetManagerSelection(event)) return;
+    if(await handleCanvasAssetManagerItemEdit(event)) return;
+    if(await handleCanvasAssetManagerAssetActions(event)) return;
+    if(await handleCanvasAssetManagerWorkflowActions(event)) return;
+    if(await handleCanvasAssetManagerPromptActions(event)) return;
 }, true);
 function rerunFromOutputMeta(meta){
     if(!ensureCanvas() || !meta?.run?.nodeType) return;
