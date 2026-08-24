@@ -13305,6 +13305,17 @@ def volcengine_default_models_payload(payload, include_protocol=True):
         del result["protocol"]
     return result
 
+async def volcengine_fallback_models_payload(client, base_url, api_key, status_fallback, models_error, probe_default, suffix):
+    detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
+    if not detected:
+        return None
+    payload = volcengine_default_model_payload(
+        status=probe.get("status") or status_fallback,
+        message=f"{probe.get('message') or probe_default}{suffix}",
+        raw={"models_error": models_error, **(probe.get("raw") or {})},
+    )
+    return volcengine_default_models_payload(payload)
+
 def volcengine_task_probe_url(base_url: str):
     base = str(base_url or "").strip().rstrip("/")
     if not base:
@@ -13790,37 +13801,22 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
                 raise HTTPException(status_code=400, detail=f"上游 {endpoint_label} 返回网页 HTML，请检查请求地址是否为 API Base URL")
             if resp.status_code >= 400:
                 if protocol == "volcengine":
-                    detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
-                    if detected:
-                        payload = volcengine_default_model_payload(
-                            status=probe.get("status") or resp.status_code,
-                            message=f"{probe.get('message') or '方舟任务接口可达'}；但 /api/v3/models 不可用。请按实际方舟控制台模型名称手动填写视频模型。",
-                            raw={"models_error": resp.text[:300], **(probe.get("raw") or {})},
-                        )
-                        return volcengine_default_models_payload(payload)
+                    fallback = await volcengine_fallback_models_payload(client, base_url, api_key, resp.status_code, resp.text[:300], "方舟任务接口可达", "；但 /api/v3/models 不可用。请按实际方舟控制台模型名称手动填写视频模型。")
+                    if fallback:
+                        return fallback
                 elif protocol == "openai":
-                    detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
-                    if detected:
-                        payload = volcengine_default_model_payload(
-                            status=probe.get("status") or resp.status_code,
-                            message=f"{probe.get('message') or '检测到方舟/Ark 兼容入口'}；OpenAI /v1/models 不可用，已自动切换为方舟协议。请按实际方舟控制台模型名称手动填写视频模型。",
-                            raw={"models_error": resp.text[:300], **(probe.get("raw") or {})},
-                        )
-                        return volcengine_default_models_payload(payload)
+                    fallback = await volcengine_fallback_models_payload(client, base_url, api_key, resp.status_code, resp.text[:300], "检测到方舟/Ark 兼容入口", "；OpenAI /v1/models 不可用，已自动切换为方舟协议。请按实际方舟控制台模型名称手动填写视频模型。")
+                    if fallback:
+                        return fallback
                 raise HTTPException(status_code=resp.status_code, detail=f"上游 {endpoint_label} 失败：{resp.text[:300]}")
             raw = resp.json()
     except httpx.HTTPError as e:
         if protocol == "volcengine":
             try:
                 async with httpx.AsyncClient(timeout=15) as client:
-                    detected, probe = await probe_volcengine_auto_detect(client, base_url, api_key)
-                    if detected:
-                        payload = volcengine_default_model_payload(
-                            status=probe.get("status") or 0,
-                            message=f"{probe.get('message') or '方舟任务接口可达'}；但模型列表请求失败。请按实际方舟控制台模型名称手动填写视频模型。",
-                            raw={"models_error": str(e)[:300], **(probe.get("raw") or {})},
-                        )
-                        return volcengine_default_models_payload(payload)
+                    fallback = await volcengine_fallback_models_payload(client, base_url, api_key, 0, str(e)[:300], "方舟任务接口可达", "；但模型列表请求失败。请按实际方舟控制台模型名称手动填写视频模型。")
+                    if fallback:
+                        return fallback
             except Exception:
                 pass
         raise HTTPException(status_code=502, detail=f"请求上游模型列表失败：{e}")
