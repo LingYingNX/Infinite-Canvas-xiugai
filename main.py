@@ -5365,11 +5365,7 @@ async def codex_reference_paths(reference_images=None):
             temp_paths.extend(created)
         return paths, temp_paths
     except Exception:
-        for path in temp_paths:
-            try:
-                os.remove(path)
-            except Exception:
-                pass
+        cleanup_temp_paths(temp_paths)
         raise
 
 def codex_models_payload(raw=None):
@@ -5396,11 +5392,7 @@ async def generate_codex_provider_image(prompt, size, model, reference_images=No
             return skill_result
         raise HTTPException(status_code=400, detail="未找到 GPT Image 2 helper，OpenAI CLI 生图已禁用 $imagegen 回退。请先安装 gpt-image-2-skill 后再生成图片。")
     finally:
-        for path in temp_paths:
-            try:
-                os.remove(path)
-            except Exception:
-                pass
+        cleanup_temp_paths(temp_paths)
 
 def codex_chat_prompt(payload, history_messages=None):
     parts = []
@@ -5438,11 +5430,7 @@ async def codex_chat_text(payload, history_messages=None):
         text = str(raw.get("text") or "").strip()
         return text or "Codex CLI 返回了空回复。", raw
     finally:
-        for path in temp_paths:
-            try:
-                os.remove(path)
-            except Exception:
-                pass
+        cleanup_temp_paths(temp_paths)
 
 def gemini_cli_env_value(key):
     return os.getenv(key, "") or read_api_env_value(key)
@@ -5672,11 +5660,7 @@ async def generate_gemini_cli_provider_image(prompt, size, model, reference_imag
             raise HTTPException(status_code=502, detail=f"{gemini_cli_display_name()} 已返回，但没有在输出目录发现图片：{status_text}")
         return {"type": "url", "value": urls[0]}, {"images": urls, "text": raw.get("text"), "provider": "gemini-cli", "raw": raw.get("raw")}
     finally:
-        for path in temp_paths:
-            try:
-                os.remove(path)
-            except Exception:
-                pass
+        cleanup_temp_paths(temp_paths)
 
 def gemini_cli_chat_prompt(payload, history_messages=None):
     parts = []
@@ -5717,11 +5701,7 @@ async def gemini_cli_chat_text(payload, history_messages=None):
         text = str(raw.get("text") or "").strip()
         return text or f"{gemini_cli_display_name()} 返回了空回复。", raw
     finally:
-        for path in temp_paths:
-            try:
-                os.remove(path)
-            except Exception:
-                pass
+        cleanup_temp_paths(temp_paths)
 
 def is_yuli_provider(provider):
     # 玉玉API（yuli.host）的视频接口走自有格式（/v1/video/create + /v1/video/query），
@@ -6541,11 +6521,7 @@ async def generate_jimeng_provider_image(prompt, size, model, reference_images=N
         urls = await jimeng_store_outputs(raw, "image")
         return {"type": "url", "value": urls[0]}, raw
     finally:
-        for path in temp_paths:
-            try:
-                os.remove(path)
-            except Exception:
-                pass
+        cleanup_temp_paths(temp_paths)
 
 JIMENG_UPSCALE_RESOLUTIONS = {"2k", "4k", "8k"}
 
@@ -6570,11 +6546,7 @@ async def generate_jimeng_upscale_image(reference_images, resolution_type):
         urls = await jimeng_store_outputs(raw, "image")
         return {"type": "url", "value": urls[0]}, raw
     finally:
-        for path in temp_paths:
-            try:
-                os.remove(path)
-            except Exception:
-                pass
+        cleanup_temp_paths(temp_paths)
 
 async def generate_jimeng_video(payload: CanvasVideoRequest, provider):
     image_refs = [ref for ref in (payload.images or []) if jimeng_video_ref_url(ref)]
@@ -6694,11 +6666,7 @@ async def generate_jimeng_video(payload: CanvasVideoRequest, provider):
         urls = await jimeng_store_outputs(raw, "video")
         return {"videos": urls, "task_id": jimeng_submit_id(raw) or None, "raw": raw}
     finally:
-        for path in temp_paths:
-            try:
-                os.remove(path)
-            except Exception:
-                pass
+        cleanup_temp_paths(temp_paths)
 
 IMAGE_TASK_SUCCESS_STATUSES = {"SUCCESS", "SUCCESSFUL", "SUCCEED", "SUCCEEDED", "COMPLETED", "COMPLETE", "DONE", "FINISHED", "OK", "READY"}
 IMAGE_TASK_FAILED_STATUSES = {"FAILURE", "FAILED", "FAIL", "ERROR", "ERRORED", "CANCELED", "CANCELLED", "TIMEOUT", "REJECTED", "EXPIRED"}
@@ -6811,6 +6779,13 @@ def output_url_for(filename, category="output"):
 def output_path_for(filename, category="output"):
     folder, _ = output_storage(category)
     return os.path.join(folder, filename)
+
+def cleanup_temp_paths(temp_paths):
+    for path in temp_paths:
+        try:
+            os.remove(path)
+        except Exception:
+            pass
 
 async def save_remote_image_to_output(img_url: str, filename: str, log_errors: bool = False) -> str:
     local_path = img_url
