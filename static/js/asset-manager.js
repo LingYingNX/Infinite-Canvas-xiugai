@@ -289,34 +289,26 @@ function handleStorageFileGridScroll(event){
         loadStorageFiles(storageSettingsState.kind, {append:true}).catch(err => showRequestError(err, '加载更多图片失败'));
     }
 }
-function renderStorageSettingsModal(){
-    if(!storageSettingsState.open) return;
-    normalizeLocalCaptionSettings();
-    const providers = localCaptionProviders();
-    const models = localCaptionModels();
-    let overlay = document.getElementById('storageSettingsOverlay');
-    if(!overlay){
-        overlay = document.createElement('div');
-        overlay.id = 'storageSettingsOverlay';
-        overlay.className = 'storage-settings-overlay';
-        document.body.appendChild(overlay);
-    }
+function storageDirRowsHtml(){
     const dirs = storageSettingsState.dirs || {};
-    const kind = storageSettingsState.kind || 'generated';
-    const selectedCount = storageSettingsState.selected.size;
-    const rows = ['upload','generated','local'].map(key => `
+    return ['upload','generated','local'].map(key => `
         <label class="storage-dir-row">
             <span>${STORAGE_KIND_LABELS[key]}</span>
             <input id="storageDir_${key}" value="${escapeAttr(dirs[key] || '')}" placeholder="${escapeAttr(storageSettingsState.defaults?.[key] || '')}">
         </label>
     `).join('');
-    const tabs = ['generated','upload','local'].map(key => `
+}
+function storageTabsHtml(){
+    const kind = storageSettingsState.kind || 'generated';
+    return ['generated','upload','local'].map(key => `
         <button class="${kind === key ? 'active' : ''}" type="button" data-storage-kind="${key}">
             <span>${STORAGE_KIND_LABELS[key]}</span>
         </button>
     `).join('');
+}
+function storageFileCardsHtml(){
     const loadedCount = storageSettingsState.items.length;
-    const cards = storageSettingsState.loading
+    return storageSettingsState.loading
         ? `<div class="storage-empty">正在读取目录...</div>`
         : storageSettingsState.items.length
         ? storageSettingsState.items.map(item => `
@@ -330,10 +322,11 @@ function renderStorageSettingsModal(){
             ? `<div class="storage-load-more">${storageSettingsState.loadingMore ? '继续加载中...' : `已加载 ${loadedCount} / ${storageSettingsState.total || loadedCount}，向下滚动继续`}</div>`
             : `<div class="storage-load-more done">已加载全部 ${loadedCount} 张</div>`)
         : `<div class="storage-empty">这个目录里暂时没有图片</div>`;
-    const activePrefTab = storageSettingsState.tab || 'prefs';
+}
+function storagePrefsBodyHtml(providers, models){
     const captionOpen = storageSettingsState.editor === 'caption';
     const classifyOpen = storageSettingsState.editor === 'classify';
-    const prefsBody = `
+    return `
         <div class="asset-pref-section">
             <div class="asset-pref-title"><i data-lucide="wand-sparkles"></i><span>基础偏好</span></div>
             <div class="asset-pref-grid">
@@ -390,23 +383,40 @@ function renderStorageSettingsModal(){
             ` : ''}
         </div>
     `;
-    const manageBody = `
+}
+function storageManageBodyHtml(){
+    const selectedCount = storageSettingsState.selected.size;
+    return `
         <div class="asset-pref-section">
             <div class="asset-pref-title"><i data-lucide="folder-cog"></i><span>保存目录</span></div>
-            <div class="storage-dir-grid">${rows}</div>
+            <div class="storage-dir-grid">${storageDirRowsHtml()}</div>
             <div class="storage-settings-actions inline">
                 <button class="asset-btn primary" type="button" data-storage-save><i data-lucide="save"></i><span>保存目录</span></button>
             </div>
         </div>
         <div class="storage-file-head">
-            <div class="storage-tabs">${tabs}</div>
+            <div class="storage-tabs">${storageTabsHtml()}</div>
             <div class="storage-file-actions">
                 <button class="asset-btn" type="button" data-storage-select-all ${storageSettingsState.items.length ? '' : 'disabled'}><i data-lucide="check-square"></i><span>全选</span></button>
                 <button class="asset-btn danger" type="button" data-storage-delete ${selectedCount ? '' : 'disabled'}><i data-lucide="trash-2"></i><span>删除 ${selectedCount || ''}</span></button>
             </div>
         </div>
-        <div class="storage-file-grid" data-storage-file-grid>${cards}</div>
+        <div class="storage-file-grid" data-storage-file-grid>${storageFileCardsHtml()}</div>
     `;
+}
+function renderStorageSettingsModal(){
+    if(!storageSettingsState.open) return;
+    normalizeLocalCaptionSettings();
+    const providers = localCaptionProviders();
+    const models = localCaptionModels();
+    let overlay = document.getElementById('storageSettingsOverlay');
+    if(!overlay){
+        overlay = document.createElement('div');
+        overlay.id = 'storageSettingsOverlay';
+        overlay.className = 'storage-settings-overlay';
+        document.body.appendChild(overlay);
+    }
+    const activePrefTab = storageSettingsState.tab || 'prefs';
     overlay.innerHTML = `
         <div class="storage-settings-modal">
             <div class="storage-settings-head">
@@ -420,7 +430,7 @@ function renderStorageSettingsModal(){
                 <button class="${activePrefTab === 'prefs' ? 'active' : ''}" type="button" data-pref-tab="prefs"><i data-lucide="sliders-horizontal"></i><span>偏好设置</span></button>
                 <button class="${activePrefTab === 'manage' ? 'active' : ''}" type="button" data-pref-tab="manage"><i data-lucide="images"></i><span>素材管理</span></button>
             </div>
-            <div class="asset-pref-body">${activePrefTab === 'manage' ? manageBody : prefsBody}</div>
+            <div class="asset-pref-body">${activePrefTab === 'manage' ? storageManageBodyHtml() : storagePrefsBodyHtml(providers, models)}</div>
         </div>
     `;
     const fileGrid = overlay.querySelector('[data-storage-file-grid]');
