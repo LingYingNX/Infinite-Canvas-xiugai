@@ -10213,6 +10213,17 @@ function miniMaxRunningHubPayloadError(stage, data, fallback, extra={}){
     if(code !== '') parts.push(`code=${code}`);
     return miniMaxDetailedError(parts.join('：'), {stage, taskId, code, raw, ...(detailObj || {}), ...extra});
 }
+async function canvasRunningHubJson(r){
+    const data = await r.json();
+    if(!r.ok || data.success === false) throw new Error(data.detail || data.error || tr('canvas.rhFailed'));
+    return data.data || data;
+}
+async function miniMaxRunningHubJson(r, stage, fallback, extra){
+    const data = await r.clone().json().catch(async () => ({detail:await r.text().catch(() => '')}));
+    if(!r.ok || data.success === false) throw miniMaxRunningHubPayloadError(stage, data, fallback, extra);
+    return data.data || data;
+}
+
 function miniMaxReadableError(error, engine='comfyui'){
     const text = String(error?.message || error || tr('canvas.generationFailed')).trim();
     const jsonStart = text.indexOf('{');
@@ -10646,11 +10657,7 @@ async function runRhNode(nodeId, opts={}){
             method:'POST',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify(body)
-        }, {cascadeTargetId}).then(async r => {
-            const data = await r.json();
-            if(!r.ok || data.success === false) throw new Error(data.detail || data.error || tr('canvas.rhFailed'));
-            return data.data || data;
-        });
+        }, {cascadeTargetId}).then(canvasRunningHubJson);
         const taskId = submit.taskId;
         if(!taskId) throw new Error(tr('canvas.rhNoTaskId'));
         const useWallet = rhUseWallet(node);
@@ -10659,11 +10666,7 @@ async function runRhNode(nodeId, opts={}){
         for(let i = 0; i < 720; i++){
             if(cascadeTargetId) ensureCascadeActive(cascadeTargetId);
             await sleep(2500);
-            const data = await cascadeFetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}&useWallet=${useWallet ? '1' : '0'}`, {}, {cascadeTargetId}).then(async r => {
-                const json = await r.json();
-                if(!r.ok || json.success === false) throw new Error(json.detail || json.error || tr('canvas.rhFailed'));
-                return json.data || json;
-            });
+            const data = await cascadeFetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}&useWallet=${useWallet ? '1' : '0'}`, {}, {cascadeTargetId}).then(canvasRunningHubJson);
             if(data.status === 'SUCCESS'){
                 result = data;
                 break;
@@ -11657,26 +11660,18 @@ async function runMiniMaxRunningHub(node, media, options={}){
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify(body)
-    }, {cascadeTargetId}).then(async r => {
-        const data = await r.clone().json().catch(async () => ({detail:await r.text().catch(() => '')}));
-        if(!r.ok || data.success === false) throw miniMaxRunningHubPayloadError('提交', data, 'RunningHub 工作流提交失败', {
-            endpoint:'/api/runninghub/workflow-submit',
-            workflowId,
-            nodeInfoList:nodeInfoList.slice(0, 40),
-            hasWorkflow:Boolean(body.workflow)
-        });
-        return data.data || data;
-    });
+    }, {cascadeTargetId}).then(r => miniMaxRunningHubJson(r, '提交', 'RunningHub 工作流提交失败', {
+        endpoint:'/api/runninghub/workflow-submit',
+        workflowId,
+        nodeInfoList:nodeInfoList.slice(0, 40),
+        hasWorkflow:Boolean(body.workflow)
+    }));
     const taskId = submit.taskId;
     if(!taskId) throw new Error(tr('canvas.rhNoTaskId'));
     for(let i = 0; i < 720; i++){
         if(cascadeTargetId) ensureCascadeActive(cascadeTargetId);
         await sleep(2500);
-        const data = await cascadeFetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}&useWallet=${rhUseWallet(rhNode) ? '1' : '0'}`, {}, {cascadeTargetId}).then(async r => {
-            const json = await r.clone().json().catch(async () => ({detail:await r.text().catch(() => '')}));
-            if(!r.ok || json.success === false) throw miniMaxRunningHubPayloadError('查询', json, 'RunningHub 查询失败', {taskId, workflowId});
-            return json.data || json;
-        });
+        const data = await cascadeFetch(`/api/runninghub/query?taskId=${encodeURIComponent(taskId)}&useWallet=${rhUseWallet(rhNode) ? '1' : '0'}`, {}, {cascadeTargetId}).then(r => miniMaxRunningHubJson(r, '查询', 'RunningHub 查询失败', {taskId, workflowId}));
         if(data.status === 'SUCCESS'){
             const outputs = resultMediaUrls(data.image_items?.length ? data.image_items : (data.urls || []));
             if(!outputs.length) throw new Error(tr('canvas.rhOutputsEmpty'));
