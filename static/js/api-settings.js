@@ -621,18 +621,8 @@ function updateApimartDomesticHint(item=provider()){
     const hasKey = Boolean(item?.has_key || (keyInput?.value || '').trim());
     document.body.classList.toggle('show-apimart-domestic-hint', Boolean(isApimartProviderContext(item) && hasKey));
 }
-function renderProviderOnboarding(item){
-    if(!providerOnboardingCard) return;
-    const guide = ONBOARDING_GUIDES[item?.id];
-    const visible = Boolean(!recommendInlineOpen && guide && isNewUserProvider(item));
-    providerOnboardingCard.hidden = !visible;
-    document.body.classList.toggle('show-provider-onboarding', visible);
-    if(!visible){
-        providerOnboardingCard.innerHTML = '';
-        return;
-    }
-    if(item.id === 'modelscope'){
-        providerOnboardingCard.innerHTML = `
+function modelscopeOnboardingHtml(guide){
+    return `
             <div class="onboarding-head">
                 <div>
                     <div class="onboarding-title">${escapeHtml(tr(guide.titleKey))}</div>
@@ -668,11 +658,9 @@ function renderProviderOnboarding(item){
                 </div>
             </div>
         `;
-        refreshIcons();
-        return;
-    }
-    if(item.id === 'runninghub'){
-        providerOnboardingCard.innerHTML = `
+}
+function runningHubOnboardingHtml(guide){
+    return `
             <div class="onboarding-head">
                 <div>
                     <div class="onboarding-title">${escapeHtml(tr(guide.titleKey))}</div>
@@ -720,10 +708,29 @@ function renderProviderOnboarding(item){
                 </div>
             </div>
         `;
+}
+function renderProviderOnboarding(item){
+    if(!providerOnboardingCard) return;
+    const guide = ONBOARDING_GUIDES[item?.id];
+    const visible = Boolean(!recommendInlineOpen && guide && isNewUserProvider(item));
+    providerOnboardingCard.hidden = !visible;
+    document.body.classList.toggle('show-provider-onboarding', visible);
+    if(!visible){
+        providerOnboardingCard.innerHTML = '';
+        return;
+    }
+    if(item.id === 'modelscope'){
+        providerOnboardingCard.innerHTML = modelscopeOnboardingHtml(guide);
+        refreshIcons();
+        return;
+    }
+    if(item.id === 'runninghub'){
+        providerOnboardingCard.innerHTML = runningHubOnboardingHtml(guide);
         refreshIcons();
         return;
     }
 }
+
 function syncOnboardingKeyInput(kind, value){
     if(kind === 'free' && rhFreeKeyInput) rhFreeKeyInput.value = value || '';
     else if(kind === 'wallet' && rhWalletKeyInput) rhWalletKeyInput.value = value || '';
@@ -3634,58 +3641,102 @@ async function loadProviders(){
         setStatus(tr('api.loadFailed'));
     }
 }
-async function saveProviders(){
-    syncEditor();
-    providers.forEach(item => {
-        item.id = normalizeId(item.id);
-        applyLockedRecommendedProtocol(item);
-        item.protocol = item.id === 'runninghub'
-            ? 'runninghub'
-            : item.id === 'volcengine'
-            ? 'volcengine'
-            : API_PROTOCOLS.includes(String(item.protocol || '').toLowerCase()) ? String(item.protocol).toLowerCase() : 'openai';
-        const isCliProtocol = CLI_PROTOCOLS.has(item.protocol);
-        item.image_request_mode = normalizeImageRequestMode(
-            item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || isCliProtocol
-                ? 'openai'
-                : item.image_request_mode
-        );
-        item.image_edit_route = normalizeImageEditRoute(
-            item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || isCliProtocol
-                ? 'general'
-                : item.image_edit_route
-        );
-        if(isCliProtocol) applyCliProtocolDefaults(item, item.protocol);
-        if(item.id === 'runninghub'){
-            item.base_url = normalizeRunningHubBaseUrl(item.base_url);
-            item.image_models = unique(item.image_models || []);
-            item.chat_models = unique(item.chat_models || []);
-            item.video_models = unique(item.video_models || []);
-        }
-        item.image_generation_endpoint = '';
-        item.image_edit_endpoint = '';
+function normalizeProviderForSave(item){
+    item.id = normalizeId(item.id);
+    applyLockedRecommendedProtocol(item);
+    item.protocol = item.id === 'runninghub'
+        ? 'runninghub'
+        : item.id === 'volcengine'
+        ? 'volcengine'
+        : API_PROTOCOLS.includes(String(item.protocol || '').toLowerCase()) ? String(item.protocol).toLowerCase() : 'openai';
+    const isCliProtocol = CLI_PROTOCOLS.has(item.protocol);
+    item.image_request_mode = normalizeImageRequestMode(
+        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || isCliProtocol
+            ? 'openai'
+            : item.image_request_mode
+    );
+    item.image_edit_route = normalizeImageEditRoute(
+        item.id === 'modelscope' || item.id === 'runninghub' || item.id === 'volcengine' || isCliProtocol
+            ? 'general'
+            : item.image_edit_route
+    );
+    if(isCliProtocol) applyCliProtocolDefaults(item, item.protocol);
+    if(item.id === 'runninghub'){
+        item.base_url = normalizeRunningHubBaseUrl(item.base_url);
         item.image_models = unique(item.image_models || []);
         item.chat_models = unique(item.chat_models || []);
         item.video_models = unique(item.video_models || []);
-        const modelNameSource = (item.model_names && typeof item.model_names === 'object') ? item.model_names : {};
-        const modelNameMap = {};
-        [...item.image_models, ...item.chat_models, ...item.video_models].forEach(model => {
-            const raw = String(model || '').trim();
-            const label = String(modelNameSource[raw] || modelDisplayName(raw, item) || '').trim();
-            if(raw && label && label !== raw) modelNameMap[raw] = label;
-        });
-        item.model_names = modelNameMap;
-        item.rh_apps = normalizeRhEntries(item.rh_apps || [], 'app');
-        item.rh_workflows = normalizeRhEntries(item.rh_workflows || [], 'workflow');
-        item.ms_loras = (Array.isArray(item.ms_loras) ? item.ms_loras : []).map(lora => ({
-            id:String(lora.id || '').trim(),
-            name:String(lora.name || lora.id || '').trim(),
-            target_model:String(lora.target_model || '').trim(),
-            strength:normalizeLoraStrength(lora.strength ?? 0.8),
-            enabled:lora.enabled !== false,
-            note:String(lora.note || '').trim()
-        })).filter(lora => lora.id && lora.target_model);
+    }
+    item.image_generation_endpoint = '';
+    item.image_edit_endpoint = '';
+    item.image_models = unique(item.image_models || []);
+    item.chat_models = unique(item.chat_models || []);
+    item.video_models = unique(item.video_models || []);
+    const modelNameSource = (item.model_names && typeof item.model_names === 'object') ? item.model_names : {};
+    const modelNameMap = {};
+    [...item.image_models, ...item.chat_models, ...item.video_models].forEach(model => {
+        const raw = String(model || '').trim();
+        const label = String(modelNameSource[raw] || modelDisplayName(raw, item) || '').trim();
+        if(raw && label && label !== raw) modelNameMap[raw] = label;
     });
+    item.model_names = modelNameMap;
+    item.rh_apps = normalizeRhEntries(item.rh_apps || [], 'app');
+    item.rh_workflows = normalizeRhEntries(item.rh_workflows || [], 'workflow');
+    item.ms_loras = (Array.isArray(item.ms_loras) ? item.ms_loras : []).map(lora => ({
+        id:String(lora.id || '').trim(),
+        name:String(lora.name || lora.id || '').trim(),
+        target_model:String(lora.target_model || '').trim(),
+        strength:normalizeLoraStrength(lora.strength ?? 0.8),
+        enabled:lora.enabled !== false,
+        note:String(lora.note || '').trim()
+    })).filter(lora => lora.id && lora.target_model);
+}
+function providerPayloadForSave(item){
+    return {
+        id:item.id,
+        name:item.name,
+        base_url:item.base_url,
+        protocol:(item.id === 'modelscope') ? 'openai' : item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : (item.protocol || 'openai'),
+        image_request_mode:item.image_request_mode || 'openai',
+        image_edit_route:item.image_edit_route || 'general',
+        image_generation_endpoint:item.image_generation_endpoint || '',
+        image_edit_endpoint:item.image_edit_endpoint || '',
+        enabled:item.enabled !== false,
+        primary:false,
+        image_models:item.image_models || [],
+        chat_models:item.chat_models || [],
+        video_models:item.video_models || [],
+        model_names:(item.model_names && typeof item.model_names === 'object') ? item.model_names : {},
+        model_protocols:(item.model_protocols && typeof item.model_protocols === 'object') ? item.model_protocols : {},
+        ms_loras:item.id === 'modelscope' ? (item.ms_loras || []) : [],
+        ms_defaults_version:item.id === 'modelscope' ? (item.ms_defaults_version || 1) : 0,
+        rh_apps:item.id === 'runninghub' ? (item.rh_apps || []) : [],
+        rh_workflows:item.id === 'runninghub' ? (item.rh_workflows || []) : [],
+        volcengine_project_name:item.id === 'volcengine' ? (item.volcengine_project_name || VOLCENGINE_DEFAULT_PROJECT_NAME) : '',
+        volcengine_region:item.id === 'volcengine' ? (item.volcengine_region || VOLCENGINE_DEFAULT_REGION) : '',
+        volcengine_access_key_id:item.volcengine_access_key_id || undefined,
+        volcengine_secret_access_key:item.volcengine_secret_access_key || undefined,
+        api_key:item.api_key || undefined,
+        wallet_api_key:item.wallet_api_key || undefined,
+        clear_key:item._clearKey === true,
+        clear_wallet_key:item._clearWalletKey === true,
+        clear_volcengine_access_key_id:item._clearVolcengineAccessKey === true,
+        clear_volcengine_secret_access_key:item._clearVolcengineSecretKey === true
+    };
+}
+function clearProviderSecrets(item){
+    delete item.api_key;
+    delete item.wallet_api_key;
+    delete item.volcengine_access_key_id;
+    delete item.volcengine_secret_access_key;
+    delete item._clearKey;
+    delete item._clearWalletKey;
+    delete item._clearVolcengineAccessKey;
+    delete item._clearVolcengineSecretKey;
+}
+async function saveProviders(){
+    syncEditor();
+    providers.forEach(normalizeProviderForSave);
     if(new Set(providers.map(item => item.id)).size !== providers.length){
         alert(tr('api.duplicateId'));
         return false;
@@ -3695,49 +3746,10 @@ async function saveProviders(){
         const data = await apiRequestJson('/api/providers', {
             method:'PUT',
             headers:{'Content-Type':'application/json'},
-            body:JSON.stringify(providers.map(item => ({
-                id:item.id,
-                name:item.name,
-                base_url:item.base_url,
-                protocol:(item.id === 'modelscope') ? 'openai' : item.id === 'runninghub' ? 'runninghub' : item.id === 'volcengine' ? 'volcengine' : (item.protocol || 'openai'),
-                image_request_mode:item.image_request_mode || 'openai',
-                image_edit_route:item.image_edit_route || 'general',
-                image_generation_endpoint:item.image_generation_endpoint || '',
-                image_edit_endpoint:item.image_edit_endpoint || '',
-                enabled:item.enabled !== false,
-                primary:false,
-                image_models:item.image_models || [],
-                chat_models:item.chat_models || [],
-                video_models:item.video_models || [],
-                model_names:(item.model_names && typeof item.model_names === 'object') ? item.model_names : {},
-                model_protocols:(item.model_protocols && typeof item.model_protocols === 'object') ? item.model_protocols : {},
-                ms_loras:item.id === 'modelscope' ? (item.ms_loras || []) : [],
-                ms_defaults_version:item.id === 'modelscope' ? (item.ms_defaults_version || 1) : 0,
-                rh_apps:item.id === 'runninghub' ? (item.rh_apps || []) : [],
-                rh_workflows:item.id === 'runninghub' ? (item.rh_workflows || []) : [],
-                volcengine_project_name:item.id === 'volcengine' ? (item.volcengine_project_name || VOLCENGINE_DEFAULT_PROJECT_NAME) : '',
-                volcengine_region:item.id === 'volcengine' ? (item.volcengine_region || VOLCENGINE_DEFAULT_REGION) : '',
-                volcengine_access_key_id:item.volcengine_access_key_id || undefined,
-                volcengine_secret_access_key:item.volcengine_secret_access_key || undefined,
-                api_key:item.api_key || undefined,
-                wallet_api_key:item.wallet_api_key || undefined,
-                clear_key:item._clearKey === true,
-                clear_wallet_key:item._clearWalletKey === true,
-                clear_volcengine_access_key_id:item._clearVolcengineAccessKey === true,
-                clear_volcengine_secret_access_key:item._clearVolcengineSecretKey === true
-            })))
+            body:JSON.stringify(providers.map(providerPayloadForSave))
         }, tr('api.saveFailed'));
         providers = data.providers || providers;
-        providers.forEach(item => {
-            delete item.api_key;
-            delete item.wallet_api_key;
-            delete item.volcengine_access_key_id;
-            delete item.volcengine_secret_access_key;
-            delete item._clearKey;
-            delete item._clearWalletKey;
-            delete item._clearVolcengineAccessKey;
-            delete item._clearVolcengineSecretKey;
-        });
+        providers.forEach(clearProviderSecrets);
         selectedId = provider()?.id || providers[0]?.id || '';
         renderEditor();
         setStatus(tr('api.saved'));
@@ -3749,6 +3761,7 @@ async function saveProviders(){
         return false;
     }
 }
+
 function escapeHtml(str){
     return String(str || '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
 }
