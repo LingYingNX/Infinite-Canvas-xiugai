@@ -4202,92 +4202,99 @@ def extract_image_flexible(value, depth=0):
             return found
     return None
 
-def extract_images(data):
-    found = []
-    seen = set()
+def append_extracted_image(item, found, seen):
+    if not isinstance(item, dict):
+        return
+    img_type = item.get("type") or "url"
+    value = item.get("value")
+    if not value:
+        return
+    key = (img_type, value)
+    if key in seen:
+        return
+    seen.add(key)
+    found.append(item)
 
-    def add_image(item):
-        if not isinstance(item, dict):
-            return
-        img_type = item.get("type") or "url"
-        value = item.get("value")
-        if not value:
-            return
-        key = (img_type, value)
-        if key in seen:
-            return
-        seen.add(key)
-        found.append(item)
-
-    def collect(value, depth=0):
-        if depth > 8 or value is None:
-            return
-        if isinstance(value, str):
-            found = image_payload_from_string(value)
-            if found:
-                add_image(found)
-            return
-        if isinstance(value, list):
-            for item in value:
-                collect(item, depth + 1)
-            return
-        if not isinstance(value, dict):
-            return
-        if value.get("type") == "image_generation_call":
-            result = value.get("result")
-            if isinstance(result, str) and result.strip():
-                add_image(image_payload_from_string(
+def collect_extracted_image_value(value, depth, found, seen):
+    if depth > 8 or value is None:
+        return
+    if isinstance(value, str):
+        payload = image_payload_from_string(value)
+        if payload:
+            append_extracted_image(payload, found, seen)
+        return
+    if isinstance(value, list):
+        for item in value:
+            collect_extracted_image_value(item, depth + 1, found, seen)
+        return
+    if not isinstance(value, dict):
+        return
+    if value.get("type") == "image_generation_call":
+        result = value.get("result")
+        if isinstance(result, str) and result.strip():
+            append_extracted_image(
+                image_payload_from_string(
                     result,
                     value.get("mime_type") or value.get("mimeType") or "image/png",
                     assume_b64=not looks_like_generated_image_url(result),
-                ))
-            else:
-                collect(result, depth + 1)
-        has_direct_url = any(
-            isinstance(value.get(key), str) and looks_like_generated_image_url(value.get(key))
-            for key in IMAGE_OUTPUT_KEY_HINTS
-        )
-        if not has_direct_url:
-            for key in IMAGE_BASE64_KEY_HINTS:
-                item = value.get(key)
-                if isinstance(item, str) and item.strip():
-                    add_image(image_payload_from_string(item, value.get("mime_type") or value.get("mimeType") or "image/png", assume_b64=True))
-        for key in IMAGE_OUTPUT_KEY_HINTS:
+                ),
+                found,
+                seen,
+            )
+        else:
+            collect_extracted_image_value(result, depth + 1, found, seen)
+    has_direct_url = any(
+        isinstance(value.get(key), str) and looks_like_generated_image_url(value.get(key))
+        for key in IMAGE_OUTPUT_KEY_HINTS
+    )
+    if not has_direct_url:
+        for key in IMAGE_BASE64_KEY_HINTS:
             item = value.get(key)
-            if isinstance(item, str):
-                add_image(image_payload_from_string(item, value.get("mime_type") or value.get("mimeType") or "image/png"))
-            else:
-                collect(item, depth + 1)
-        for key in IMAGE_CONTAINER_KEY_HINTS:
-            collect(value.get(key), depth + 1)
+            if isinstance(item, str) and item.strip():
+                append_extracted_image(image_payload_from_string(item, value.get("mime_type") or value.get("mimeType") or "image/png", assume_b64=True), found, seen)
+    for key in IMAGE_OUTPUT_KEY_HINTS:
+        item = value.get(key)
+        if isinstance(item, str):
+            append_extracted_image(image_payload_from_string(item, value.get("mime_type") or value.get("mimeType") or "image/png"), found, seen)
+        else:
+            collect_extracted_image_value(item, depth + 1, found, seen)
+    for key in IMAGE_CONTAINER_KEY_HINTS:
+        collect_extracted_image_value(value.get(key), depth + 1, found, seen)
 
+def extract_gemini_candidate_images(data, found, seen):
     candidates = data.get("candidates") if isinstance(data, dict) else None
-    if isinstance(candidates, list):
-        for candidate in candidates:
-            if not isinstance(candidate, dict):
+    if not isinstance(candidates, list):
+        return
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        content = candidate.get("content") or {}
+        parts = content.get("parts") if isinstance(content, dict) else None
+        if not isinstance(parts, list):
+            continue
+        for part in parts:
+            if not isinstance(part, dict):
                 continue
-            content = candidate.get("content") or {}
-            parts = content.get("parts") if isinstance(content, dict) else None
-            if not isinstance(parts, list):
-                continue
-            for part in parts:
-                if not isinstance(part, dict):
-                    continue
-                inline = part.get("inlineData") or part.get("inline_data") or {}
-                if not isinstance(inline, dict):
-                    inline = {}
-                value = inline.get("data")
-                if value:
-                    add_image({
-                        "type": "b64",
-                        "value": value,
-                        "mime_type": inline.get("mimeType") or inline.get("mime_type") or "image/png",
-                    })
-                # APIMart Gemini image models can return a Markdown data URL in
-                # the text part instead of the native inlineData structure.
-                embedded = image_payload_from_string(part.get("text"))
-                if embedded:
-                    add_image(embedded)
+            inline = part.get("inlineData") or part.get("inline_data") or {}
+            if not isinstance(inline, dict):
+                inline = {}
+            value = inline.get("data")
+            if value:
+                append_extracted_image({
+                    "type": "b64",
+                    "value": value,
+                    "mime_type": inline.get("mimeType") or inline.get("mime_type") or "image/png",
+                }, found, seen)
+            # APIMart Gemini image models can return a Markdown data URL in
+            # the text part instead of the native inlineData structure.
+            embedded = image_payload_from_string(part.get("text"))
+            if embedded:
+                append_extracted_image(embedded, found, seen)
+
+def extract_images(data):
+    found = []
+    seen = set()
+    extract_gemini_candidate_images(data, found, seen)
 
     current = data
     if isinstance(current, dict) and isinstance(current.get("data"), dict) and isinstance(current["data"].get("result"), dict):
@@ -4295,19 +4302,19 @@ def extract_images(data):
     if isinstance(current, dict) and isinstance(current.get("result"), dict):
         for item in current["result"].get("images") or []:
             if not isinstance(item, dict):
-                collect(item)
+                collect_extracted_image_value(item, 0, found, seen)
                 continue
             url = item.get("url")
             if isinstance(url, list):
                 for one in url:
-                    collect(one)
+                    collect_extracted_image_value(one, 0, found, seen)
             else:
-                collect(url)
-            collect(item)
+                collect_extracted_image_value(url, 0, found, seen)
+            collect_extracted_image_value(item, 0, found, seen)
 
-    collect(data)
+    collect_extracted_image_value(data, 0, found, seen)
     if isinstance(data, dict) and isinstance(data.get("data"), dict) and isinstance(data["data"].get("data"), dict):
-        collect(data["data"]["data"])
+        collect_extracted_image_value(data["data"]["data"], 0, found, seen)
     if found:
         return found
     raise HTTPException(status_code=502, detail="无法识别生图接口返回格式")
