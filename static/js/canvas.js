@@ -9128,9 +9128,7 @@ function miniMaxStartPaneResize(e, node, pane){
     window.addEventListener('mouseup', onUp, true);
     window.addEventListener('blur', onUp, true);
 }
-function renderMiniMaxBody(node){
-    const wrap = document.createElement('div');
-    wrap.className = 'minimax-canvas-workbench';
+function miniMaxWorkbenchMetrics(node){
     const selected = miniMaxSelectedSegment(node);
     const total = miniMaxTimelineTotal(node);
     const playhead = Math.max(0, Math.min(total, Number(node.playhead || 0)));
@@ -9140,11 +9138,16 @@ function renderMiniMaxBody(node){
     const videoTrackH = Math.max(48, Math.min(180, Number(node.minimaxVideoTrackH || 74)));
     const refLaneH = Math.max(30, Math.min(130, Number(node.minimaxRefLaneH || 36)));
     const libraryW = Math.max(170, Math.min(520, Number(node.minimaxLibraryW || 190)));
-    const ticks = Array.from({length:Math.min(13, Math.max(3, Math.ceil(total) + 1))}).map((_, i, arr) => {
+    return {selected, total, playhead, playheadPct, fmt, previewH, videoTrackH, refLaneH, libraryW};
+}
+function miniMaxTimelineTicksHtml(total, fmt){
+    return Array.from({length:Math.min(13, Math.max(3, Math.ceil(total) + 1))}).map((_, i, arr) => {
         const ratio = arr.length <= 1 ? 0 : i / (arr.length - 1);
         return `<span class="minimax-tick" style="left:${ratio * 100}%"><b>${fmt(total * ratio)}</b></span>`;
     }).join('');
-    const segmentsHtml = node.segments.map((seg, index) => {
+}
+function miniMaxSegmentsHtml(node, total, selected, fmt){
+    return node.segments.map((seg, index) => {
         const left = total ? (Number(seg.start || 0) / total) * 100 : 0;
         const width = total ? Math.max(5, (Number(seg.duration || 1) / total) * 100) : 100;
         const active = seg.id === selected?.id;
@@ -9157,9 +9160,14 @@ function renderMiniMaxBody(node){
             ${node.segments.length > 1 ? `<button type="button" class="minimax-clip-delete" data-minimax-delete-segment="${escapeAttr(seg.id)}" title="删除片段"><i data-lucide="trash-2"></i></button>` : ''}
         </div>`;
     }).join('');
+}
+function miniMaxRefLaneMetrics(node, selected){
     const selectedRefs = miniMaxExplicitRefsForSegment(selected);
-    const refLanes = Math.max(1, selectedRefs.length, ...node.segments.map(seg => miniMaxExplicitRefsForSegment(seg).length));
-    const refsHtml = Array.from({length:refLanes}).map((_, laneIndex) => {
+    const lanes = Math.max(1, selectedRefs.length, ...node.segments.map(seg => miniMaxExplicitRefsForSegment(seg).length));
+    return {selectedRefs, lanes};
+}
+function miniMaxRefLanesHtml(node, total, selected, fmt, lanes){
+    return Array.from({length:lanes}).map((_, laneIndex) => {
         const clips = node.segments.map(seg => {
             const left = total ? (Number(seg.start || 0) / total) * 100 : 0;
             const width = total ? Math.max(5, (Number(seg.duration || 1) / total) * 100) : 100;
@@ -9173,6 +9181,15 @@ function renderMiniMaxBody(node){
         }).join('');
         return `<div class="minimax-ref-lane">${clips}</div>`;
     }).join('');
+}
+function miniMaxRefCounts(selectedRefs){
+    const imageCount = miniMaxSegmentRefsByKind(selectedRefs, 'image').length;
+    const videoCount = miniMaxSegmentRefsByKind(selectedRefs, 'video').length;
+    const audioCount = miniMaxSegmentRefsByKind(selectedRefs, 'audio').length;
+    const overLimit = imageCount > CANVAS_MINIMAX_REF_IMAGE_MAX || videoCount > CANVAS_MINIMAX_REF_VIDEO_MAX || audioCount > CANVAS_MINIMAX_REF_AUDIO_MAX;
+    return {imageCount, videoCount, audioCount, overLimit};
+}
+function miniMaxLibraryHtml(node){
     const upstream = miniMaxRefsForNode(node);
     const assets = miniMaxUniqueRefs([...node.segments.flatMap(seg => seg.refs || []), ...upstream.refs]).slice(0, 36);
     const assetsHtml = assets.length ? assets.map((item, index) => `<div class="minimax-material-card minimax-asset-item" draggable="true" data-minimax-asset-index="${index}" title="${escapeAttr(item.name || mediaKindForRef(item))}">
@@ -9183,46 +9200,65 @@ function renderMiniMaxBody(node){
         <button type="button" data-minimax-download-material="${index}" title="下载"><i data-lucide="download"></i></button>
         <button type="button" data-minimax-use-material="${index}" title="设为当前片段"><i data-lucide="replace"></i></button>
     </div>`).join('') || `<div class="minimax-library-empty"><i data-lucide="inbox"></i><span>Output</span></div>`;
-    const segDuration = Math.max(0.5, Number(selected?.duration || 8) || 8);
-    const imageCount = miniMaxSegmentRefsByKind(selectedRefs, 'image').length;
-    const videoCount = miniMaxSegmentRefsByKind(selectedRefs, 'video').length;
-    const audioCount = miniMaxSegmentRefsByKind(selectedRefs, 'audio').length;
-    const overLimit = imageCount > CANVAS_MINIMAX_REF_IMAGE_MAX || videoCount > CANVAS_MINIMAX_REF_VIDEO_MAX || audioCount > CANVAS_MINIMAX_REF_AUDIO_MAX;
+    return `<div class="minimax-library minimax-asset-bin"><span class="minimax-pane-resize minimax-library-resize" data-minimax-pane-resize="library"></span><div class="minimax-library-head"><i data-lucide="database"></i><span>Assets</span></div><div class="minimax-library-list">${assetsHtml}</div><div class="minimax-library-head minimax-output-head"><i data-lucide="folder-output"></i><span>Output</span></div><div class="minimax-library-list minimax-output-list">${materialsHtml}</div></div>`;
+}
+function miniMaxToolbarHtml(fmt, playhead, total, selected){
+    return `<div class="minimax-wb-toolbar">
+        <div class="minimax-brand"><i data-lucide="clapperboard"></i><span>MiniMax H3</span><b data-minimax-time-label>${fmt(playhead)} / ${fmt(total)}</b></div>
+        <div class="minimax-transport"><button type="button" data-minimax-play title="播放"><i data-lucide="play"></i></button><button type="button" data-minimax-add-segment title="新增片段"><i data-lucide="plus"></i></button></div>
+        <div class="minimax-top-actions"><button type="button" data-minimax-download-current ${selected?.result?.url ? '' : 'disabled'} title="下载当前片段"><i data-lucide="download"></i></button></div>
+    </div>`;
+}
+function miniMaxPlayerStageHtml(selected){
+    return `<div class="minimax-player-stage" data-minimax-player-stage="1" data-minimax-player-segment="${escapeAttr(selected?.id || '')}" data-minimax-player-url="${escapeAttr(selected?.result?.url || '')}"><div class="minimax-player-content" data-minimax-player-content="1">${miniMaxPlayerHtml(selected)}</div><span class="minimax-pane-resize minimax-preview-resize" data-minimax-pane-resize="preview"></span></div>`;
+}
+function miniMaxTimelineHtml(ticks, playheadPct, segmentsHtml, refsHtml){
+    return `<div class="minimax-edit-timeline" data-minimax-scrub-track="1">
+        <span class="minimax-pane-resize minimax-video-resize" data-minimax-pane-resize="video"></span>
+        <span class="minimax-pane-resize minimax-ref-resize" data-minimax-pane-resize="refs"></span>
+        <div class="minimax-timeline-controls"><button type="button" data-minimax-play title="播放"><i data-lucide="play"></i></button></div>
+        <div class="minimax-ruler"><div class="minimax-track-content">${ticks}<span class="minimax-playhead" data-minimax-playhead="1" style="left:${playheadPct}%"></span></div></div>
+        <div class="minimax-add-gutter minimax-ruler-gutter"></div>
+        <div class="minimax-track-label minimax-video-label">Video</div>
+        <div class="minimax-track minimax-video-track"><div class="minimax-track-content">${segmentsHtml}</div></div>
+        <button type="button" class="minimax-video-add" data-minimax-add-segment title="新增片段"><i data-lucide="plus"></i></button>
+        <div class="minimax-track-label minimax-ref-label">Refs</div>
+        <div class="minimax-ref-track"><div class="minimax-ref-content">${refsHtml}</div></div>
+        <div class="minimax-add-gutter minimax-ref-gutter"></div>
+    </div>`;
+}
+function miniMaxCurrentPanelHtml(node, selected, fmt, segDuration, counts){
+    return `<div class="minimax-current-panel">
+        <div class="minimax-current-head"><div class="minimax-current-title"><span class="minimax-current-dot"></span><b>Clip ${Math.max(1, node.segments.findIndex(seg => seg.id === selected?.id) + 1)}</b><span>${fmt(selected?.start)} - ${fmt(Number(selected?.start || 0) + segDuration)}</span></div><div class="minimax-current-refs"><span><i data-lucide="image"></i>${counts.imageCount}</span><span><i data-lucide="film"></i>${counts.videoCount}</span><span><i data-lucide="file-audio"></i>${counts.audioCount}</span></div></div>
+        <label class="minimax-prompt-field"><span><i data-lucide="text-cursor-input"></i>Prompt</span><textarea data-minimax-prompt placeholder="Prompt for selected clip">${escapeHtml(selected?.prompt || '')}</textarea></label>
+        <div class="minimax-clip-parameters"><div class="minimax-section-label"><i data-lucide="sliders-horizontal"></i><span>Clip settings</span></div><div class="minimax-settings minimax-segment-fields">
+            <label class="minimax-wide-setting minimax-engine-setting"><span>Engine</span><select class="minimax-engine-select" data-minimax-engine><option value="comfyui" ${node.minimaxEngine === 'comfyui' ? 'selected' : ''}>ComfyUI</option><option value="runninghub" ${node.minimaxEngine === 'runninghub' ? 'selected' : ''}>RunningHub</option></select></label>
+            <label><span>Duration</span><input type="number" min="0.5" max="60" step="0.1" data-minimax-seg-number="duration" value="${escapeAttr(segDuration)}"><b>s</b></label>
+            <label><span>Megapixels</span><input type="number" min="0.1" max="2" step="0.1" data-minimax-seg-number="megapixels" value="${escapeAttr(selected?.megapixels || node.megapixels || 0.4)}"><b>MP</b></label>
+            <label class="minimax-wide-setting"><span>Aspect ratio</span><select data-minimax-select="aspectRatio">${['16:9','9:16','1:1','4:3','3:4','21:9','9:21'].map(value => `<option value="${value}" ${value === (selected?.aspectRatio || node.aspectRatio) ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
+            <label class="minimax-wide-setting"><span>Payment</span><select data-minimax-payment>${rhPaymentOptions(node)}</select></label>
+            <button class="minimax-run ${node.running ? 'running' : ''}" type="button" data-minimax-run ${node.running || counts.overLimit ? 'disabled' : ''}><i data-lucide="${node.running ? 'loader-2' : 'sparkles'}"></i><span>${node.running ? 'Running' : 'Generate clip'}</span></button>
+        </div></div>
+    </div>`;
+}
+function renderMiniMaxBody(node){
+    const wrap = document.createElement('div');
+    wrap.className = 'minimax-canvas-workbench';
+    const m = miniMaxWorkbenchMetrics(node);
+    const ticks = miniMaxTimelineTicksHtml(m.total, m.fmt);
+    const segmentsHtml = miniMaxSegmentsHtml(node, m.total, m.selected, m.fmt);
+    const {selectedRefs, lanes} = miniMaxRefLaneMetrics(node, m.selected);
+    const refsHtml = miniMaxRefLanesHtml(node, m.total, m.selected, m.fmt, lanes);
+    const counts = miniMaxRefCounts(selectedRefs);
+    const segDuration = Math.max(0.5, Number(m.selected?.duration || 8) || 8);
     wrap.innerHTML = `
-        <div class="minimax-wb-toolbar">
-            <div class="minimax-brand"><i data-lucide="clapperboard"></i><span>MiniMax H3</span><b data-minimax-time-label>${fmt(playhead)} / ${fmt(total)}</b></div>
-            <div class="minimax-transport"><button type="button" data-minimax-play title="播放"><i data-lucide="play"></i></button><button type="button" data-minimax-add-segment title="新增片段"><i data-lucide="plus"></i></button></div>
-            <div class="minimax-top-actions"><button type="button" data-minimax-download-current ${selected?.result?.url ? '' : 'disabled'} title="下载当前片段"><i data-lucide="download"></i></button></div>
-        </div>
-        <div class="minimax-wb-body" style="--minimax-library-w:${libraryW}px">
-            <div class="minimax-library minimax-asset-bin"><span class="minimax-pane-resize minimax-library-resize" data-minimax-pane-resize="library"></span><div class="minimax-library-head"><i data-lucide="database"></i><span>Assets</span></div><div class="minimax-library-list">${assetsHtml}</div><div class="minimax-library-head minimax-output-head"><i data-lucide="folder-output"></i><span>Output</span></div><div class="minimax-library-list minimax-output-list">${materialsHtml}</div></div>
-            <div class="minimax-wb-main" style="--minimax-preview-h:${previewH}px;--minimax-video-h:${videoTrackH}px;--minimax-ref-lane-h:${refLaneH}px;--minimax-ref-h:${Math.max(78, refLanes * refLaneH)}px">
-                <div class="minimax-player-stage" data-minimax-player-stage="1" data-minimax-player-segment="${escapeAttr(selected?.id || '')}" data-minimax-player-url="${escapeAttr(selected?.result?.url || '')}"><div class="minimax-player-content" data-minimax-player-content="1">${miniMaxPlayerHtml(selected)}</div><span class="minimax-pane-resize minimax-preview-resize" data-minimax-pane-resize="preview"></span></div>
-                <div class="minimax-edit-timeline" data-minimax-scrub-track="1">
-                    <span class="minimax-pane-resize minimax-video-resize" data-minimax-pane-resize="video"></span>
-                    <span class="minimax-pane-resize minimax-ref-resize" data-minimax-pane-resize="refs"></span>
-                    <div class="minimax-timeline-controls"><button type="button" data-minimax-play title="播放"><i data-lucide="play"></i></button></div>
-                    <div class="minimax-ruler"><div class="minimax-track-content">${ticks}<span class="minimax-playhead" data-minimax-playhead="1" style="left:${playheadPct}%"></span></div></div>
-                    <div class="minimax-add-gutter minimax-ruler-gutter"></div>
-                    <div class="minimax-track-label minimax-video-label">Video</div>
-                    <div class="minimax-track minimax-video-track"><div class="minimax-track-content">${segmentsHtml}</div></div>
-                    <button type="button" class="minimax-video-add" data-minimax-add-segment title="新增片段"><i data-lucide="plus"></i></button>
-                    <div class="minimax-track-label minimax-ref-label">Refs</div>
-                    <div class="minimax-ref-track"><div class="minimax-ref-content">${refsHtml}</div></div>
-                    <div class="minimax-add-gutter minimax-ref-gutter"></div>
-                </div>
-                <div class="minimax-current-panel">
-                    <div class="minimax-current-head"><div class="minimax-current-title"><span class="minimax-current-dot"></span><b>Clip ${Math.max(1, node.segments.findIndex(seg => seg.id === selected?.id) + 1)}</b><span>${fmt(selected?.start)} - ${fmt(Number(selected?.start || 0) + segDuration)}</span></div><div class="minimax-current-refs"><span><i data-lucide="image"></i>${imageCount}</span><span><i data-lucide="film"></i>${videoCount}</span><span><i data-lucide="file-audio"></i>${audioCount}</span></div></div>
-                    <label class="minimax-prompt-field"><span><i data-lucide="text-cursor-input"></i>Prompt</span><textarea data-minimax-prompt placeholder="Prompt for selected clip">${escapeHtml(selected?.prompt || '')}</textarea></label>
-                    <div class="minimax-clip-parameters"><div class="minimax-section-label"><i data-lucide="sliders-horizontal"></i><span>Clip settings</span></div><div class="minimax-settings minimax-segment-fields">
-                        <label class="minimax-wide-setting minimax-engine-setting"><span>Engine</span><select class="minimax-engine-select" data-minimax-engine><option value="comfyui" ${node.minimaxEngine === 'comfyui' ? 'selected' : ''}>ComfyUI</option><option value="runninghub" ${node.minimaxEngine === 'runninghub' ? 'selected' : ''}>RunningHub</option></select></label>
-                        <label><span>Duration</span><input type="number" min="0.5" max="60" step="0.1" data-minimax-seg-number="duration" value="${escapeAttr(segDuration)}"><b>s</b></label>
-                        <label><span>Megapixels</span><input type="number" min="0.1" max="2" step="0.1" data-minimax-seg-number="megapixels" value="${escapeAttr(selected?.megapixels || node.megapixels || 0.4)}"><b>MP</b></label>
-                        <label class="minimax-wide-setting"><span>Aspect ratio</span><select data-minimax-select="aspectRatio">${['16:9','9:16','1:1','4:3','3:4','21:9','9:21'].map(value => `<option value="${value}" ${value === (selected?.aspectRatio || node.aspectRatio) ? 'selected' : ''}>${value}</option>`).join('')}</select></label>
-                        <label class="minimax-wide-setting"><span>Payment</span><select data-minimax-payment>${rhPaymentOptions(node)}</select></label>
-                        <button class="minimax-run ${node.running ? 'running' : ''}" type="button" data-minimax-run ${node.running || overLimit ? 'disabled' : ''}><i data-lucide="${node.running ? 'loader-2' : 'sparkles'}"></i><span>${node.running ? 'Running' : 'Generate clip'}</span></button>
-                    </div></div>
-                </div>
+        ${miniMaxToolbarHtml(m.fmt, m.playhead, m.total, m.selected)}
+        <div class="minimax-wb-body" style="--minimax-library-w:${m.libraryW}px">
+            ${miniMaxLibraryHtml(node)}
+            <div class="minimax-wb-main" style="--minimax-preview-h:${m.previewH}px;--minimax-video-h:${m.videoTrackH}px;--minimax-ref-lane-h:${m.refLaneH}px;--minimax-ref-h:${Math.max(78, lanes * m.refLaneH)}px">
+                ${miniMaxPlayerStageHtml(m.selected)}
+                ${miniMaxTimelineHtml(ticks, m.playheadPct, segmentsHtml, refsHtml)}
+                ${miniMaxCurrentPanelHtml(node, m.selected, m.fmt, segDuration, counts)}
             </div>
         </div>
         ${retryBarHtml(node)}
