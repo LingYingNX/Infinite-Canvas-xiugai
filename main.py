@@ -10,7 +10,6 @@ import urllib.error
 import os
 import re
 import random
-import sys
 import subprocess
 import time
 import traceback
@@ -13237,6 +13236,9 @@ def upstream_models_url(base_url: str, protocol: str):
         return runninghub_openapi_url({"base_url": base_url}, "models")
     return f"{base_url}/models" if base_url.endswith("/v1") else f"{base_url}/v1/models"
 
+def upstream_models_endpoint_label(protocol):
+    return "/v1beta/models" if protocol == "gemini" else "/api/v3/models" if protocol == "volcengine" else "/openapi/v2/models" if protocol == "runninghub" else "/v1/models"
+
 def upstream_model_headers(api_key: str, protocol: str):
     if protocol == "gemini":
         return {"x-goog-api-key": api_key, "Accept": "application/json"}
@@ -13482,10 +13484,10 @@ async def test_provider_connection(payload: TestConnectionPayload):
             if resp.status_code in (301, 302, 303, 307, 308):
                 location = resp.headers.get("Location") or resp.headers.get("location") or ""
                 suffix = f"：{location}" if location else ""
-                endpoint_label = "/v1beta/models" if protocol == "gemini" else "/api/v3/models" if protocol == "volcengine" else "/openapi/v2/models" if protocol == "runninghub" else "/v1/models"
+                endpoint_label = upstream_models_endpoint_label(protocol)
                 return {"ok": False, "status": resp.status_code, "message": f"上游 {endpoint_label} 发生跳转{suffix}，请填写 API Base URL，不要填写网页登录地址"}
             if looks_like_html_response(resp.text):
-                endpoint_label = "/v1beta/models" if protocol == "gemini" else "/api/v3/models" if protocol == "volcengine" else "/openapi/v2/models" if protocol == "runninghub" else "/v1/models"
+                endpoint_label = upstream_models_endpoint_label(protocol)
                 return {"ok": False, "status": resp.status_code, "message": f"上游 {endpoint_label} 返回网页 HTML，请检查请求地址是否为 API Base URL"}
             if resp.status_code >= 400:
                 if protocol == "volcengine":
@@ -13734,7 +13736,7 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(url, headers=upstream_model_headers(api_key, protocol))
-            endpoint_label = "/v1beta/models" if protocol == "gemini" else "/api/v3/models" if protocol == "volcengine" else "/openapi/v2/models" if protocol == "runninghub" else "/v1/models"
+            endpoint_label = upstream_models_endpoint_label(protocol)
             if resp.status_code in (301, 302, 303, 307, 308):
                 location = resp.headers.get("Location") or resp.headers.get("location") or ""
                 suffix = f"：{location}" if location else ""
