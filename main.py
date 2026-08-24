@@ -721,10 +721,13 @@ def read_api_env_value(key: str) -> str:
     except Exception:
         return ""
 
+def read_env_value(key: str) -> str:
+    return os.getenv(key, "") or read_api_env_value(key)
+
 def provider_env_key_value(provider_id: str) -> str:
     provider_id = str(provider_id or "").strip().lower()
     env_key = provider_key_env(provider_id)
-    key = os.getenv(env_key, "") or read_api_env_value(env_key)
+    key = read_env_value(env_key)
     if key:
         return key
     if provider_id == "modelscope":
@@ -733,15 +736,15 @@ def provider_env_key_value(provider_id: str) -> str:
 
 def runninghub_wallet_key_value() -> str:
     env_key = runninghub_wallet_key_env()
-    return os.getenv(env_key, "") or read_api_env_value(env_key)
+    return read_env_value(env_key)
 
 def volcengine_access_key_value() -> str:
     env_key = volcengine_access_key_env()
-    return os.getenv(env_key, "") or read_api_env_value(env_key)
+    return read_env_value(env_key)
 
 def volcengine_secret_key_value() -> str:
     env_key = volcengine_secret_key_env()
-    return os.getenv(env_key, "") or read_api_env_value(env_key)
+    return read_env_value(env_key)
 
 def volcengine_provider_api_key(explicit_key: str = "") -> str:
     explicit_key = str(explicit_key or "").strip()
@@ -4875,11 +4878,8 @@ def is_codex_provider(provider):
 def is_gemini_cli_provider(provider):
     return provider_protocol(provider) == "gemini-cli"
 
-def codex_env_value(key):
-    return os.getenv(key, "") or read_api_env_value(key)
-
 def codex_cli_executable():
-    configured = str(codex_env_value("CODEX_BIN") or "").strip()
+    configured = str(read_env_value("CODEX_BIN") or "").strip()
     if configured:
         return configured
     return shutil.which("codex") or shutil.which("codex.exe") or shutil.which("codex.cmd") or ""
@@ -4989,7 +4989,7 @@ def codex_output_url_from_path(path):
     return ""
 
 def gpt_image_2_skill_executable():
-    configured = str(codex_env_value("GPT_IMAGE_2_SKILL_BIN") or "").strip()
+    configured = str(read_env_value("GPT_IMAGE_2_SKILL_BIN") or "").strip()
     if configured:
         return configured
     return (
@@ -5000,7 +5000,7 @@ def gpt_image_2_skill_executable():
     )
 
 def gpt_image_2_skill_auth_file():
-    configured = str(codex_env_value("GPT_IMAGE_2_SKILL_AUTH_FILE") or codex_env_value("CODEX_AUTH_FILE") or "").strip()
+    configured = str(read_env_value("GPT_IMAGE_2_SKILL_AUTH_FILE") or read_env_value("CODEX_AUTH_FILE") or "").strip()
     if configured:
         return configured
     project_auth = os.path.join(BASE_DIR, "API", "openai-gpt-account-auth.json")
@@ -5043,7 +5043,7 @@ def gpt_image_2_skill_access_token(auth_data):
 
 def gpt_image_2_skill_api_key(auth_data=None):
     for key in ("GPT_IMAGE_2_SKILL_API_KEY", "OPENAI_API_KEY"):
-        value = str(codex_env_value(key) or "").strip()
+        value = str(read_env_value(key) or "").strip()
         if value:
             return value
     if isinstance(auth_data, dict):
@@ -5482,9 +5482,6 @@ async def codex_chat_text(payload, history_messages=None):
     finally:
         cleanup_temp_paths(temp_paths)
 
-def gemini_cli_env_value(key):
-    return os.getenv(key, "") or read_api_env_value(key)
-
 def antigravity_cli_winget_candidates():
     patterns = [
         os.path.join(os.path.expanduser("~"), "AppData", "Local", "Microsoft", "WinGet", "Packages", "Google.AntigravityCLI_*", "agy.exe"),
@@ -5499,7 +5496,7 @@ def antigravity_cli_winget_candidates():
 
 def gemini_cli_executable():
     for key in ("ANTIGRAVITY_BIN", "AGY_BIN", "GEMINI_BIN"):
-        configured = str(gemini_cli_env_value(key) or "").strip().strip('"')
+        configured = str(read_env_value(key) or "").strip().strip('"')
         if configured:
             return configured
     for name in ("agy", "agy.exe"):
@@ -5784,19 +5781,16 @@ def avatar_platform_for_provider(provider) -> str:
         return "volcengine"
     return ""
 
-def jimeng_env_value(key):
-    return os.getenv(key, "") or read_api_env_value(key)
-
 def jimeng_use_wsl():
-    value = str(jimeng_env_value("JIMENG_USE_WSL") or "").strip().lower()
+    value = str(read_env_value("JIMENG_USE_WSL") or "").strip().lower()
     return value in {"1", "true", "yes", "on", "wsl"}
 
 def jimeng_cli_executable():
     if jimeng_use_wsl():
         return shutil.which("wsl.exe") or shutil.which("wsl") or "wsl.exe"
     configured = str(
-        jimeng_env_value("JIMENG_BIN")
-        or jimeng_env_value("DREAMINA_BIN")
+        read_env_value("JIMENG_BIN")
+        or read_env_value("DREAMINA_BIN")
         or ""
     ).strip()
     if configured:
@@ -5852,7 +5846,7 @@ def decode_wsl_output(data: bytes) -> str:
     return data.decode("utf-8-sig", errors="ignore")
 
 def jimeng_wsl_base_args(exe="wsl.exe"):
-    configured = str(jimeng_env_value("JIMENG_WSL_DISTRO") or "").strip()
+    configured = str(read_env_value("JIMENG_WSL_DISTRO") or "").strip()
     names = []
     try:
         proc = subprocess.run(
