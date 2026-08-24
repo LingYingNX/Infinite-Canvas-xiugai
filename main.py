@@ -109,21 +109,19 @@ class ConnectionManager:
     async def broadcast_count(self):
         count = self.online_count()
         data = json.dumps({"type": "stats", "online_count": count})
+        await self._broadcast_text(data, "Broadcast")
+
+    async def _broadcast_text(self, data, error_prefix):
         for connection in self.active_connections[:]:
             try:
                 await connection.send_text(data)
             except Exception as e:
-                print(f"Broadcast error: {e}")
+                print(f"{error_prefix} error: {e}")
                 self.active_connections.remove(connection)
 
     async def broadcast_new_image(self, image_data: dict):
         data = json.dumps({"type": "new_image", "data": image_data})
-        for connection in self.active_connections[:]:
-            try:
-                await connection.send_text(data)
-            except Exception as e:
-                print(f"Broadcast image error: {e}")
-                self.active_connections.remove(connection)
+        await self._broadcast_text(data, "Broadcast image")
 
     async def broadcast_canvas_updated(self, canvas_id: str, updated_at: int, client_id: str = ""):
         data = json.dumps({
@@ -132,24 +130,14 @@ class ConnectionManager:
             "updated_at": updated_at,
             "client_id": client_id or "",
         })
-        for connection in self.active_connections[:]:
-            try:
-                await connection.send_text(data)
-            except Exception as e:
-                print(f"Broadcast canvas error: {e}")
-                self.active_connections.remove(connection)
+        await self._broadcast_text(data, "Broadcast canvas")
 
     async def broadcast_asset_library_updated(self, updated_at: int = 0):
         data = json.dumps({
             "type": "asset_library_updated",
             "updated_at": updated_at or now_ms(),
         })
-        for connection in self.active_connections[:]:
-            try:
-                await connection.send_text(data)
-            except Exception as e:
-                print(f"Broadcast asset library error: {e}")
-                self.active_connections.remove(connection)
+        await self._broadcast_text(data, "Broadcast asset library")
 
     async def send_personal_message(self, message: dict, client_id: str):
         ws = self.user_connections.get(client_id)
@@ -515,19 +503,23 @@ def ensure_runtime_config_files():
     except Exception as e:
         print(f"初始化 API 配置目录失败: {e}")
 
+def read_api_env_entries():
+    entries = {}
+    with open(API_ENV_FILE, "r", encoding="utf-8-sig") as f:
+        for raw_line in f.read().splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            entries[key.strip()] = value.strip().strip('"').strip("'")
+    return entries
+
 def load_env_file():
     if not os.path.exists(API_ENV_FILE):
         return
     try:
-        with open(API_ENV_FILE, 'r', encoding='utf-8-sig') as f:
-            for raw_line in f.read().splitlines():
-                line = raw_line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-                os.environ.setdefault(key, value)
+        for key, value in read_api_env_entries().items():
+            os.environ.setdefault(key, value)
     except Exception as e:
         print(f"加载 API/.env 失败: {e}")
 ensure_runtime_config_files()
@@ -725,17 +717,9 @@ def read_api_env_value(key: str) -> str:
     if not key or not os.path.exists(API_ENV_FILE):
         return ""
     try:
-        with open(API_ENV_FILE, "r", encoding="utf-8-sig") as f:
-            for raw_line in f.read().splitlines():
-                line = raw_line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                env_key, value = line.split("=", 1)
-                if env_key.strip() == key:
-                    return value.strip().strip('"').strip("'")
+        return read_api_env_entries().get(key, "")
     except Exception:
         return ""
-    return ""
 
 def provider_env_key_value(provider_id: str) -> str:
     provider_id = str(provider_id or "").strip().lower()
