@@ -15598,19 +15598,19 @@ async function runSmartCascadeRoundsWithLimit(roundIndexes, limit, runner, runSt
     });
     await Promise.all(workers);
 }
-async function runSmartCascade(targetNode=null){
+function smartCascadeRunSetup(targetNode=null){
     const tail = targetNode || selectedNode();
-    if(!canRunSmartCascade(tail)){ toast('请选择链路结尾图片节点'); return; }
+    if(!canRunSmartCascade(tail)){ toast('请选择链路结尾图片节点'); return null; }
     savePromptDraftForCurrent();
     const graph = smartCascadeGraphForTail(tail);
     const chain = graph.path;
     const loop = resolveSmartCascadeLoop(tail.id);
     const loopId = loop?.node?.id || '';
-    if(loopId && smartCascadeIsLoopRunning(loopId)){ requestSmartCascadeStop(loopId); return; }
-    if(!loopId && smartCascadeAnyRunning()){ requestSmartCascadeStop(); return; }
+    if(loopId && smartCascadeIsLoopRunning(loopId)){ requestSmartCascadeStop(loopId); return null; }
+    if(!loopId && smartCascadeAnyRunning()){ requestSmartCascadeStop(); return null; }
     const directLoopTargetRun = Boolean(loop && isDirectLoopTargetRun(loop, tail, graph));
     const singleNodeLoopRun = Boolean(loop && (chain.length === 1 || directLoopTargetRun));
-    if(!graph.edges.length && !singleNodeLoopRun){ toast(tr('smart.loopNoChain')); return; }
+    if(!graph.edges.length && !singleNodeLoopRun){ toast(tr('smart.loopNoChain')); return null; }
     const originalSelected = selectedId;
     const originalSettings = cloneSmartSettings(settings);
     const originalPromptHtml = promptInput.innerHTML;
@@ -15629,6 +15629,10 @@ async function runSmartCascade(targetNode=null){
     const loopMode = loop?.mode === 'parallel' ? 'parallel' : 'serial';
     const parallelLimit = loopMode === 'parallel' && totalRounds > 1 ? smartCascadeParallelLimit(chain) : 1;
     const precreateSingleSlots = singleNodeLoopRun && loopMode === 'parallel' && totalRounds > 1 && parallelLimit > 1;
+    return {tail, graph, chain, loop, loopId, directLoopTargetRun, singleNodeLoopRun, originalSelected, originalSettings, originalPromptHtml, runKey, runState, totalRounds, startIndex, batchSize, endIndex, loopMode, parallelLimit, precreateSingleSlots};
+}
+function smartCascadePrepareRunState(setup){
+    const {tail, graph, loop, runState, singleNodeLoopRun, precreateSingleSlots, startIndex, batchSize, totalRounds} = setup;
     let singleLoopSlots = [];
     if(singleNodeLoopRun){
         runState.runPath = {states:{}};
@@ -15659,6 +15663,41 @@ async function runSmartCascade(targetNode=null){
         scheduleConnectionLayerRefresh();
         updateComposer();
     }
+    return singleLoopSlots;
+}
+async function runSmartCascadeRounds(setup, roundIndexes, runRound){
+    const {loopMode, parallelLimit, singleLoopSlots, runState, singleNodeLoopRun, totalRounds} = setup;
+    if(loopMode === 'parallel' && totalRounds > 1){
+        const parallelTargets = singleNodeLoopRun
+            ? singleLoopSlots
+            : [];
+        if(parallelTargets.length) render();
+        await runSmartCascadeRoundsWithLimit(roundIndexes, parallelLimit, (loopIndex, roundOffset) => {
+            const outputTarget = parallelTargets[roundOffset] || null;
+            return runRound(loopIndex, {outputTarget});
+        }, runState);
+    } else {
+        for(const loopIndex of roundIndexes){
+            throwIfSmartCascadeStopRequested(runState);
+            await runRound(loopIndex);
+        }
+    }
+}
+function smartCascadeCleanupRun(runKey, tail, directLoopTargetRun){
+    smartCascadeRuns.delete(runKey);
+    syncSmartCascadeLegacyState();
+    smartCascadeSilentSelection = false;
+    syncRunButtonState();
+    cascadeRunBtn.disabled = false;
+    if(directLoopTargetRun) finishLoopTargetPreviewState(tail);
+    scheduleSave();
+    render();
+}
+async function runSmartCascade(targetNode=null){
+    const setup = smartCascadeRunSetup(targetNode);
+    if(!setup) return;
+    const {tail, graph, chain, loop, loopId, directLoopTargetRun, singleNodeLoopRun, originalSelected, originalSettings, originalPromptHtml, runKey, runState, totalRounds, startIndex, batchSize, endIndex, loopMode, parallelLimit} = setup;
+    const singleLoopSlots = smartCascadePrepareRunState(setup);
     try {
         const runRound = async (loopIndex=startIndex, options={}) => {
             throwIfSmartCascadeStopRequested(runState);
@@ -15763,21 +15802,7 @@ async function runSmartCascade(targetNode=null){
             await runBranch(graph.root, rootRefs);
         };
         const roundIndexes = Array.from({length:totalRounds}, (_, round) => startIndex + round * batchSize);
-        if(loopMode === 'parallel' && totalRounds > 1){
-            const parallelTargets = singleNodeLoopRun
-                ? singleLoopSlots
-                : [];
-            if(parallelTargets.length) render();
-            await runSmartCascadeRoundsWithLimit(roundIndexes, parallelLimit, (loopIndex, roundOffset) => {
-                const outputTarget = parallelTargets[roundOffset] || null;
-                return runRound(loopIndex, {outputTarget});
-            }, runState);
-        } else {
-            for(const loopIndex of roundIndexes){
-                throwIfSmartCascadeStopRequested(runState);
-                await runRound(loopIndex);
-            }
-        }
+        await runSmartCascadeRounds(setup, roundIndexes, runRound);
         throwIfSmartCascadeStopRequested(runState);
         if(parallelLimit === 1) smartLoopContext = null;
         selectedId = '';
@@ -15799,14 +15824,7 @@ async function runSmartCascade(targetNode=null){
         promptInput.innerHTML = originalPromptHtml;
         toast(e?.smartCascadeStopped ? '已停止一键运行' : (e.message || tr('smart.errRunFailed')).slice(0, 160));
     } finally {
-        smartCascadeRuns.delete(runKey);
-        syncSmartCascadeLegacyState();
-        smartCascadeSilentSelection = false;
-        syncRunButtonState();
-        cascadeRunBtn.disabled = false;
-        if(directLoopTargetRun) finishLoopTargetPreviewState(tail);
-        scheduleSave();
-        render();
+        smartCascadeCleanupRun(runKey, tail, directLoopTargetRun);
     }
 }
 function runSmartCascadeFromLoop(loopId){
