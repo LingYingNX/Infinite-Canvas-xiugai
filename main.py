@@ -3538,11 +3538,14 @@ def canvas_path(canvas_id):
         raise HTTPException(status_code=400, detail="无效的画布 ID")
     return os.path.join(CANVAS_DIR, f"{cleaned}.json")
 
-def save_canvas(canvas):
-    canvas["updated_at"] = now_ms()
+def write_canvas_json(canvas):
     with CANVAS_LOCK:
         with open(canvas_path(canvas["id"]), 'w', encoding='utf-8') as f:
             json.dump(canvas, f, ensure_ascii=False, indent=2)
+
+def save_canvas(canvas):
+    canvas["updated_at"] = now_ms()
+    write_canvas_json(canvas)
 
 def normalize_canvas_kind(kind="classic"):
     return "smart" if str(kind or "").strip().lower() == "smart" else "classic"
@@ -16093,9 +16096,7 @@ async def update_canvas_meta(canvas_id: str, payload: CanvasMetaUpdate):
         canvas["board_x"] = float(payload.board_x)
     if payload.board_y is not None:
         canvas["board_y"] = float(payload.board_y)
-    with CANVAS_LOCK:
-        with open(canvas_path(canvas["id"]), 'w', encoding='utf-8') as f:
-            json.dump(canvas, f, ensure_ascii=False, indent=2)
+    write_canvas_json(canvas)
     return {"canvas": canvas_record(canvas)}
 
 @app.get("/api/canvases/{canvas_id}")
