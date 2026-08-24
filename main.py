@@ -6618,116 +6618,139 @@ async def generate_jimeng_upscale_image(reference_images, resolution_type):
     finally:
         cleanup_temp_paths(temp_paths)
 
+async def jimeng_video_multimodal_args(payload, image_refs, video_refs, audio_refs, temp_paths):
+    if not image_refs and not video_refs:
+        raise HTTPException(status_code=400, detail="即梦全能参考至少需要一张图片或一个视频，音频不能单独生成视频。")
+    model_version = jimeng_video_model_for_command(payload.model, "multimodal2video")
+    duration = jimeng_video_duration(payload.duration, model_version, "multimodal2video")
+    image_paths = []
+    video_paths = []
+    audio_paths = []
+    for ref in image_refs[:9]:
+        image_path, created = await jimeng_prepare_local_media(jimeng_video_ref_url(ref), "image")
+        temp_paths.extend(created)
+        image_paths.append(image_path)
+    for ref_url in video_refs[:3]:
+        video_path, created = await jimeng_prepare_local_media(ref_url, "video")
+        temp_paths.extend(created)
+        video_paths.append(video_path)
+    for ref_url in audio_refs:
+        audio_path, created = await jimeng_prepare_local_media(ref_url, "audio")
+        temp_paths.extend(created)
+        audio_paths.append(audio_path)
+    args = [
+        "multimodal2video",
+        f"--prompt={payload.prompt}",
+        f"--duration={duration}",
+        f"--poll={jimeng_poll_seconds()}",
+    ]
+    args.append(f"--ratio={jimeng_video_ratio(payload.aspect_ratio)}")
+    jimeng_append_model_resolution_args(args, payload, model_version)
+    for image_path in image_paths:
+        args.append(f"--image={jimeng_cli_path_arg(image_path)}")
+    for video_path in video_paths:
+        args.append(f"--video={jimeng_cli_path_arg(video_path)}")
+    for audio_path in audio_paths:
+        args.append(f"--audio={jimeng_cli_path_arg(audio_path)}")
+    return args
+
+async def jimeng_video_frames_args(payload, image_refs, temp_paths):
+    first_frame = next((ref for ref in image_refs if jimeng_video_ref_role(ref) == "first_frame"), None)
+    last_frame = next((ref for ref in image_refs if jimeng_video_ref_role(ref) == "last_frame"), None)
+    model_version = jimeng_video_model_for_command(payload.model, "frames2video")
+    duration = jimeng_video_duration(payload.duration, model_version, "frames2video")
+    first_path, created = await jimeng_prepare_local_media(jimeng_video_ref_url(first_frame), "image")
+    temp_paths.extend(created)
+    last_path, created = await jimeng_prepare_local_media(jimeng_video_ref_url(last_frame), "image")
+    temp_paths.extend(created)
+    args = [
+        "frames2video",
+        f"--first={jimeng_cli_path_arg(first_path)}",
+        f"--last={jimeng_cli_path_arg(last_path)}",
+        f"--prompt={payload.prompt}",
+        f"--duration={duration}",
+        f"--poll={jimeng_poll_seconds()}",
+    ]
+    jimeng_append_model_resolution_args(args, payload, model_version)
+    return args
+
+async def jimeng_video_multiframe_args(payload, image_refs, temp_paths):
+    image_paths = []
+    for ref in image_refs:
+        image_path, created = await jimeng_prepare_local_media(jimeng_video_ref_url(ref), "image")
+        temp_paths.extend(created)
+        image_paths.append(image_path)
+    args = [
+        "multiframe2video",
+        f"--images={','.join(jimeng_cli_path_arg(path) for path in image_paths)}",
+        f"--poll={jimeng_poll_seconds()}",
+    ]
+    # multiframe2video has its own transition arguments and does not
+    # accept model_version. The CLI requires an explicit resolution.
+    args.append(f"--video_resolution={jimeng_multiframe_resolution(payload.resolution)}")
+    segments = max(1, len(image_paths) - 1)
+    segment_duration = jimeng_transition_duration(payload.duration, segments)
+    if len(image_paths) <= 2:
+        if str(payload.prompt or "").strip():
+            args.append(f"--prompt={payload.prompt}")
+        args.append(f"--duration={segment_duration}")
+    else:
+        for segment_prompt in jimeng_multiframe_transition_prompts(payload.prompt, segments):
+            args.append(f"--transition-prompt={segment_prompt}")
+        for _ in range(segments):
+            args.append(f"--transition-duration={segment_duration}")
+    return args
+
+async def jimeng_video_image_args(payload, image_ref, temp_paths):
+    model_version = jimeng_video_model_for_command(payload.model, "image2video")
+    duration = jimeng_video_duration(payload.duration, model_version, "image2video")
+    image_path, created = await jimeng_prepare_local_media(jimeng_video_ref_url(image_ref), "image")
+    temp_paths.extend(created)
+    args = [
+        "image2video",
+        f"--image={jimeng_cli_path_arg(image_path)}",
+        f"--prompt={payload.prompt}",
+        f"--duration={duration}",
+        f"--poll={jimeng_poll_seconds()}",
+    ]
+    jimeng_append_model_resolution_args(args, payload, model_version)
+    return args
+
+def jimeng_video_text_args(payload):
+    model_version = jimeng_video_model_for_command(payload.model, "text2video")
+    duration = jimeng_video_duration(payload.duration, model_version, "text2video")
+    args = [
+        "text2video",
+        f"--prompt={payload.prompt}",
+        f"--duration={duration}",
+        f"--ratio={jimeng_video_ratio(payload.aspect_ratio)}",
+        f"--poll={jimeng_poll_seconds()}",
+    ]
+    jimeng_append_model_resolution_args(args, payload, model_version)
+    return args
+
+async def build_jimeng_video_args(payload, image_refs, video_refs, audio_refs, temp_paths):
+    if payload.multimodal or video_refs or audio_refs:
+        return await jimeng_video_multimodal_args(payload, image_refs, video_refs, audio_refs, temp_paths)
+    if len(image_refs) >= 2:
+        if len(image_refs) > 20:
+            raise HTTPException(status_code=400, detail="即梦多帧视频最多支持 20 张图片。")
+        first_frame = next((ref for ref in image_refs if jimeng_video_ref_role(ref) == "first_frame"), None)
+        last_frame = next((ref for ref in image_refs if jimeng_video_ref_role(ref) == "last_frame"), None)
+        if first_frame and last_frame:
+            return await jimeng_video_frames_args(payload, image_refs, temp_paths)
+        return await jimeng_video_multiframe_args(payload, image_refs, temp_paths)
+    if image_refs:
+        return await jimeng_video_image_args(payload, image_refs[0], temp_paths)
+    return jimeng_video_text_args(payload)
+
 async def generate_jimeng_video(payload: CanvasVideoRequest, provider):
     image_refs = [ref for ref in (payload.images or []) if jimeng_video_ref_url(ref)]
     video_refs = [url for url in (payload.videos or []) if str(url or "").strip()]
     audio_refs = [url for url in (payload.audios or []) if str(url or "").strip()][:3]
     temp_paths = []
     try:
-        if payload.multimodal or video_refs or audio_refs:
-            if not image_refs and not video_refs:
-                raise HTTPException(status_code=400, detail="即梦全能参考至少需要一张图片或一个视频，音频不能单独生成视频。")
-            model_version = jimeng_video_model_for_command(payload.model, "multimodal2video")
-            duration = jimeng_video_duration(payload.duration, model_version, "multimodal2video")
-            image_paths = []
-            video_paths = []
-            audio_paths = []
-            for ref in image_refs[:9]:
-                image_path, created = await jimeng_prepare_local_media(jimeng_video_ref_url(ref), "image")
-                temp_paths.extend(created)
-                image_paths.append(image_path)
-            for ref_url in video_refs[:3]:
-                video_path, created = await jimeng_prepare_local_media(ref_url, "video")
-                temp_paths.extend(created)
-                video_paths.append(video_path)
-            for ref_url in audio_refs:
-                audio_path, created = await jimeng_prepare_local_media(ref_url, "audio")
-                temp_paths.extend(created)
-                audio_paths.append(audio_path)
-            args = [
-                "multimodal2video",
-                f"--prompt={payload.prompt}",
-                f"--duration={duration}",
-                f"--poll={jimeng_poll_seconds()}",
-            ]
-            args.append(f"--ratio={jimeng_video_ratio(payload.aspect_ratio)}")
-            jimeng_append_model_resolution_args(args, payload, model_version)
-            for image_path in image_paths:
-                args.append(f"--image={jimeng_cli_path_arg(image_path)}")
-            for video_path in video_paths:
-                args.append(f"--video={jimeng_cli_path_arg(video_path)}")
-            for audio_path in audio_paths:
-                args.append(f"--audio={jimeng_cli_path_arg(audio_path)}")
-        elif len(image_refs) >= 2:
-            if len(image_refs) > 20:
-                raise HTTPException(status_code=400, detail="即梦多帧视频最多支持 20 张图片。")
-            first_frame = next((ref for ref in image_refs if jimeng_video_ref_role(ref) == "first_frame"), None)
-            last_frame = next((ref for ref in image_refs if jimeng_video_ref_role(ref) == "last_frame"), None)
-            if first_frame and last_frame:
-                model_version = jimeng_video_model_for_command(payload.model, "frames2video")
-                duration = jimeng_video_duration(payload.duration, model_version, "frames2video")
-                first_path, created = await jimeng_prepare_local_media(jimeng_video_ref_url(first_frame), "image")
-                temp_paths.extend(created)
-                last_path, created = await jimeng_prepare_local_media(jimeng_video_ref_url(last_frame), "image")
-                temp_paths.extend(created)
-                args = [
-                    "frames2video",
-                    f"--first={jimeng_cli_path_arg(first_path)}",
-                    f"--last={jimeng_cli_path_arg(last_path)}",
-                    f"--prompt={payload.prompt}",
-                    f"--duration={duration}",
-                    f"--poll={jimeng_poll_seconds()}",
-                ]
-                jimeng_append_model_resolution_args(args, payload, model_version)
-            else:
-                image_paths = []
-                for ref in image_refs:
-                    image_path, created = await jimeng_prepare_local_media(jimeng_video_ref_url(ref), "image")
-                    temp_paths.extend(created)
-                    image_paths.append(image_path)
-                args = [
-                    "multiframe2video",
-                    f"--images={','.join(jimeng_cli_path_arg(path) for path in image_paths)}",
-                    f"--poll={jimeng_poll_seconds()}",
-                ]
-                # multiframe2video has its own transition arguments and does not
-                # accept model_version. The CLI requires an explicit resolution.
-                args.append(f"--video_resolution={jimeng_multiframe_resolution(payload.resolution)}")
-                segments = max(1, len(image_paths) - 1)
-                segment_duration = jimeng_transition_duration(payload.duration, segments)
-                if len(image_paths) <= 2:
-                    if str(payload.prompt or "").strip():
-                        args.append(f"--prompt={payload.prompt}")
-                    args.append(f"--duration={segment_duration}")
-                else:
-                    for segment_prompt in jimeng_multiframe_transition_prompts(payload.prompt, segments):
-                        args.append(f"--transition-prompt={segment_prompt}")
-                    for _ in range(segments):
-                        args.append(f"--transition-duration={segment_duration}")
-        elif image_refs:
-            model_version = jimeng_video_model_for_command(payload.model, "image2video")
-            duration = jimeng_video_duration(payload.duration, model_version, "image2video")
-            image_path, created = await jimeng_prepare_local_media(jimeng_video_ref_url(image_refs[0]), "image")
-            temp_paths.extend(created)
-            args = [
-                "image2video",
-                f"--image={jimeng_cli_path_arg(image_path)}",
-                f"--prompt={payload.prompt}",
-                f"--duration={duration}",
-                f"--poll={jimeng_poll_seconds()}",
-            ]
-            jimeng_append_model_resolution_args(args, payload, model_version)
-        else:
-            model_version = jimeng_video_model_for_command(payload.model, "text2video")
-            duration = jimeng_video_duration(payload.duration, model_version, "text2video")
-            args = [
-                "text2video",
-                f"--prompt={payload.prompt}",
-                f"--duration={duration}",
-                f"--ratio={jimeng_video_ratio(payload.aspect_ratio)}",
-                f"--poll={jimeng_poll_seconds()}",
-            ]
-            jimeng_append_model_resolution_args(args, payload, model_version)
+        args = await build_jimeng_video_args(payload, image_refs, video_refs, audio_refs, temp_paths)
         # Do not hold the canvas request open for the full cloud generation.
         # A pending result carries submit_id and is resumed by the existing UI poller.
         submit_poll = jimeng_video_submit_poll_seconds()
