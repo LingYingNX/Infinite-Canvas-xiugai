@@ -15315,10 +15315,7 @@ async function generateComfyUrlsWithSettings(runSettings, prompt, refs){
     const fallbackKind = result.videos?.length ? 'video' : result.audios?.length ? 'audio' : result.texts?.length ? 'text' : 'image';
     return {urls, kind:mediaKindForUrls(urls, fallbackKind)};
 }
-async function runCascadeStepIntoNode(sourceNode, targetNode, inputRefs, ctx=smartLoopContext){
-    const outputNode = targetNode || sourceNode;
-    if(!sourceNode || !targetNode || !outputNode) return [];
-    const requestNode = sourceNode?.type === 'smart-loop' ? targetNode : sourceNode;
+function prepareSmartCascadeStepRun(sourceNode, requestNode, targetNode, inputRefs, ctx){
     const previousSettings = cloneSmartSettings(settings);
     const runSettings = smartLoopRoundSettings({...cloneSmartSettings(settings), ...cloneSmartSettings(smartSettingsForNode(requestNode) || {})}, ctx);
     settings = runSettings;
@@ -15339,19 +15336,6 @@ async function runCascadeStepIntoNode(sourceNode, targetNode, inputRefs, ctx=sma
         settings = previousSettings;
         throw new Error('链路节点缺少提示词');
     }
-    const meta = {
-        prompt,
-        displayPrompt:request.displayPrompt || '',
-        promptRefs:(request.refs || []).map(ref => ({url:ref.url || '', name:ref.name || '', nodeId:ref.nodeId || '', imageIndex:ref.imageIndex ?? ''})).filter(ref => ref.url),
-        inputRefs:(request.refs || []).map(ref => ({url:ref.url || '', name:ref.name || '', nodeId:ref.nodeId || '', imageIndex:ref.imageIndex ?? '', kind:ref.kind || ''})).filter(ref => ref.url),
-        sourceNodeId:sourceNode.id,
-        settings:JSON.parse(JSON.stringify(runSettings)),
-        createdAt:Date.now()
-    };
-    if(requestNode.promptDraftHtml != null){
-        meta.promptHtml = requestNode.promptDraftHtml;
-        meta.promptText = requestNode.promptDraftText || request.displayPrompt || '';
-    }
     const logKind = isApiLikeEngine(runSettings.engine) && runSettings.apiKind === 'video' ? 'video' : 'image';
     const runLog = smartRunSnapshot(requestNode, prompt, request.refs || [], logKind);
     const runLogStart = nowMs();
@@ -15366,6 +15350,45 @@ async function runCascadeStepIntoNode(sourceNode, targetNode, inputRefs, ctx=sma
         sourceNodeId:targetNode.sourceNodeId,
         runAt:targetNode.runAt
     };
+    return {previousSettings, runSettings, outpaintSize, prompt, request, logKind, runLog, runLogStart, targetPromptState};
+}
+function completeSmartCascadeStepRun({outputNode, requestNode, outpaintSize, request, logKind, runLog, runLogStart, ctx, targetPromptState, previousSettings, result}){
+    if(outpaintSize) delete requestNode.outpaintSize;
+    addSmartGenerationLog({run:{...runLog, kind:result.kind || logKind}, outputs:result.urls, runMs:nowMs() - runLogStart});
+    const ext = result.kind === 'video' ? 'mp4' : result.kind === 'audio' ? 'mp3' : result.kind === 'text' ? 'txt' : 'png';
+    const additions = result.urls.map((item, i) => {
+        const url = typeof item === 'string' ? item : item?.url || '';
+        return stripImageGenerationMeta(copyMediaSizeFields(item, {url, name:(typeof item === 'object' && item.name) || `output-${i + 1}.${ext}`, kind:(typeof item === 'object' && item.kind) || result.kind, generatedResult:true}));
+    }).filter(item => item.url);
+    if(ctx?.appendLoopOutputs){
+        appendLoopOutputsToNode(outputNode, additions, result.kind, ctx);
+    } else {
+        replaceOutputsToNodeWithHistory(outputNode, additions, result.kind, null, {skipShift:Boolean(ctx?.nodeId)});
+    }
+    outputNode.runPrompt = targetPromptState.runPrompt;
+    outputNode.runModelPrompt = targetPromptState.runModelPrompt;
+    outputNode.runPromptRefs = targetPromptState.runPromptRefs || [];
+    outputNode.runInputRefs = targetPromptState.runInputRefs || [];
+    outputNode.runSettings = targetPromptState.runSettings;
+    outputNode.sourceNodeId = targetPromptState.sourceNodeId;
+    outputNode.runAt = targetPromptState.runAt;
+    if(targetPromptState.promptDraftHtml === undefined) delete outputNode.promptDraftHtml;
+    else outputNode.promptDraftHtml = targetPromptState.promptDraftHtml;
+    if(targetPromptState.promptDraftText === undefined) delete outputNode.promptDraftText;
+    else outputNode.promptDraftText = targetPromptState.promptDraftText;
+    ['runPrompt','runModelPrompt','runSettings','sourceNodeId','runAt'].forEach(key => {
+        if(targetPromptState[key] === undefined) delete outputNode[key];
+    });
+    settings = previousSettings;
+    render();
+    return rememberRoundOutputs(ctx, outputNode, additions);
+}
+async function runCascadeStepIntoNode(sourceNode, targetNode, inputRefs, ctx=smartLoopContext){
+    const outputNode = targetNode || sourceNode;
+    if(!sourceNode || !targetNode || !outputNode) return [];
+    const requestNode = sourceNode?.type === 'smart-loop' ? targetNode : sourceNode;
+    const run = prepareSmartCascadeStepRun(sourceNode, requestNode, targetNode, inputRefs, ctx);
+    const {previousSettings, runSettings, outpaintSize, prompt, request, logKind, runLog, runLogStart, targetPromptState} = run;
     outputNode.running = true;
     outputNode.runStartedAt = nowMs();
     delete outputNode.runFinishedAt;
@@ -15377,35 +15400,7 @@ async function runCascadeStepIntoNode(sourceNode, targetNode, inputRefs, ctx=sma
     try {
         const result = await generateUrlsForCurrentSettings(outputNode, prompt, request.refs || [], runSettings);
         if(!result.urls?.length) throw new Error(result.kind === 'video' ? tr('smart.errNoOutVideos') : tr('smart.errNoOutImages'));
-        if(outpaintSize) delete requestNode.outpaintSize;
-        addSmartGenerationLog({run:{...runLog, kind:result.kind || logKind}, outputs:result.urls, runMs:nowMs() - runLogStart});
-        const ext = result.kind === 'video' ? 'mp4' : result.kind === 'audio' ? 'mp3' : result.kind === 'text' ? 'txt' : 'png';
-        const additions = result.urls.map((item, i) => {
-            const url = typeof item === 'string' ? item : item?.url || '';
-            return stripImageGenerationMeta(copyMediaSizeFields(item, {url, name:(typeof item === 'object' && item.name) || `output-${i + 1}.${ext}`, kind:(typeof item === 'object' && item.kind) || result.kind, generatedResult:true}));
-        }).filter(item => item.url);
-        if(ctx?.appendLoopOutputs) {
-            appendLoopOutputsToNode(outputNode, additions, result.kind, ctx);
-        } else {
-            replaceOutputsToNodeWithHistory(outputNode, additions, result.kind, null, {skipShift:Boolean(ctx?.nodeId)});
-        }
-        outputNode.runPrompt = targetPromptState.runPrompt;
-        outputNode.runModelPrompt = targetPromptState.runModelPrompt;
-        outputNode.runPromptRefs = targetPromptState.runPromptRefs || [];
-        outputNode.runInputRefs = targetPromptState.runInputRefs || [];
-        outputNode.runSettings = targetPromptState.runSettings;
-        outputNode.sourceNodeId = targetPromptState.sourceNodeId;
-        outputNode.runAt = targetPromptState.runAt;
-        if(targetPromptState.promptDraftHtml === undefined) delete outputNode.promptDraftHtml;
-        else outputNode.promptDraftHtml = targetPromptState.promptDraftHtml;
-        if(targetPromptState.promptDraftText === undefined) delete outputNode.promptDraftText;
-        else outputNode.promptDraftText = targetPromptState.promptDraftText;
-        ['runPrompt','runModelPrompt','runSettings','sourceNodeId','runAt'].forEach(key => {
-            if(targetPromptState[key] === undefined) delete outputNode[key];
-        });
-        settings = previousSettings;
-        render();
-        return rememberRoundOutputs(ctx, outputNode, additions);
+        return completeSmartCascadeStepRun({outputNode, requestNode, outpaintSize, request, logKind, runLog, runLogStart, ctx, targetPromptState, previousSettings, result});
     } catch(e) {
         settings = previousSettings;
         if(handleJimengPendingSignal(outputNode, e)){
