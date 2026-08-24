@@ -13586,11 +13586,7 @@ async def test_provider_connection(payload: TestConnectionPayload):
         return {"ok": False, "status": 0, "message": str(e)[:300]}
 
 @app.post("/api/providers/probe-async")
-async def probe_async_endpoint(payload: TestConnectionPayload):
-    """验证异步协议：用假 task_id 请求 GET /v1/tasks/{fake_id}。
-    收到 400 Invalid task ID = 端点存在且 Key 有效；401/403 = Key 无效；404/连接失败 = 不支持异步端点。"""
-    base_url = (payload.base_url or "").strip().rstrip("/")
-    protocol = protocol_from_payload(payload)
+async def probe_local_cli_endpoint(protocol: str):
     if protocol == "codex":
         status = await codex_status()
         return {
@@ -13600,15 +13596,152 @@ async def probe_async_endpoint(payload: TestConnectionPayload):
             "message": status.get("message") or "OpenAI Codex CLI 本机检测完成",
             "raw": status,
         }
-    if protocol == "gemini-cli":
-        status = await gemini_cli_status()
+    status = await gemini_cli_status()
+    return {
+        "ok": bool(status.get("installed")),
+        "protocol": "gemini-cli",
+        "status_code": 200 if status.get("installed") else 0,
+        "message": status.get("message") or "Antigravity CLI 本机检测完成",
+        "raw": status,
+    }
+
+async def probe_volcengine_async_endpoint(client, base_url, api_key):
+    task_ok, task_probe = await probe_volcengine_task_endpoint(client, base_url, api_key)
+    if task_ok:
         return {
-            "ok": bool(status.get("installed")),
-            "protocol": "gemini-cli",
-            "status_code": 200 if status.get("installed") else 0,
-            "message": status.get("message") or "Antigravity CLI 本机检测完成",
-            "raw": status,
+            "ok": True,
+            "protocol": "volcengine",
+            "status_code": task_probe.get("status") or 200,
+            "message": "方舟/Ark 任务协议可用",
+            "raw": task_probe.get("raw"),
         }
+    compat_ok, compat_probe = await probe_openai_compat_bearer_endpoint(client, base_url, api_key)
+    if compat_ok:
+        return {
+            "ok": True,
+            "protocol": "volcengine",
+            "status_code": compat_probe.get("status") or 200,
+            "message": "方舟/Ark Bearer 鉴权入口可用（OpenAI 兼容透传）",
+            "raw": {"task_probe": task_probe, "openai_compat_probe": compat_probe.get("raw")},
+        }
+    return {
+        "ok": False,
+        "protocol": "volcengine",
+        "status_code": compat_probe.get("status") or task_probe.get("status") or 0,
+        "message": compat_probe.get("message") or task_probe.get("message") or "方舟/Ark 任务协议不可用",
+        "raw": {"task_probe": task_probe, "openai_compat_probe": compat_probe.get("raw")},
+    }
+
+def async_task_probe_message(sc: int, resp_text: str, location: str) -> str:
+    if sc in (301, 302, 303, 307, 308):
+        return f"/v1/tasks/ 发生跳转{f'：{location}' if location else ''}"
+    if looks_like_html_response(resp_text):
+        return "/v1/tasks/ 返回网页 HTML"
+    if sc in (401, 403):
+        return "/v1/tasks/ 返回鉴权失败"
+    if sc == 404:
+        return "平台不支持 /v1/tasks/ 端点，可能不是 APIMart 异步协议"
+    if 400 <= sc < 500:
+        return f"/v1/tasks/ 返回 {sc}"
+    if sc < 300:
+        return f"/v1/tasks/ 返回 {sc}（意外成功）"
+    return f"/v1/tasks/ 服务端错误 {sc}"
+
+async def probe_generic_async_endpoint(client, base_url, api_key, protocol, is_tudou_async, image_request_mode=""):
+    tasks_base = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
+    probe_url = f"{tasks_base}/tasks/healthcheck_probe_do_not_submit"
+    resp = await client.get(probe_url, headers={"Authorization": bearer_auth_value(api_key), "Accept": "application/json"})
+    try:
+        body = resp.json()
+    except Exception:
+        body = resp.text[:500]
+    sc = resp.status_code
+    # 判断结果
+    err_msg = ""
+    if isinstance(body, dict):
+        err = body.get("error") or {}
+        if isinstance(err, dict):
+            err_msg = str(err.get("message") or "").lower()
+        else:
+            err_msg = str(err).lower()
+    # 400 + "invalid task id" → 端点存在，Key 有效
+    if is_tudou_async and sc == 400:
+        # 土豆对不存在的 task_id 可能使用不同的 400 错误字段；只要不是
+        # 401/403，400 已证明请求命中了异步任务端点且认证通过。
+        return {
+            "ok": True,
+            "protocol": "openai",
+            "image_request_mode": "tudou-async",
+            "status_code": sc,
+            "message": "土豆 GPT-Image-2 异步任务端点可用，API Key 已通过认证",
+            "raw": body,
+        }
+    if sc == 400 and "invalid task id" in err_msg:
+        return {"ok": True, "protocol": "apimart", "status_code": sc, "message": "APIMart 异步任务端点可用，API Key 已通过认证", "raw": body}
+
+    async_probe = {"status": sc, "message": async_task_probe_message(sc, resp.text, resp.headers.get("Location") or resp.headers.get("location") or ""), "raw": body}
+
+    if is_tudou_async:
+        return {
+            "ok": sc < 400,
+            "protocol": "openai",
+            "image_request_mode": "tudou-async" if sc < 400 else "openai",
+            "status_code": sc,
+            "message": async_probe["message"] or "土豆 GPT-Image-2 异步任务端点验证完成",
+            "raw": body,
+        }
+
+    if protocol == "apimart":
+        return {"ok": False, "protocol": "apimart", "status_code": sc, "message": async_probe["message"], "raw": body}
+
+    openai_ok, openai_probe = await probe_openai_models_endpoint(client, base_url, api_key)
+    if not openai_ok and protocol == "openai":
+        # /v1/models 不可用，先确认是不是“没实现 models 接口的 OpenAI 兼容站”：探一下 /v1/chat/completions。
+        # 可达就判定为 OpenAI 兼容（很多网关不暴露 /v1/models），避免被下面的方舟探测（404 也算可达）误判成方舟。
+        compat_ok, compat_probe = await probe_openai_compat_bearer_endpoint(client, base_url, api_key)
+        if compat_ok and (compat_probe.get("status") or 0) != 404:
+            return {
+                "ok": True,
+                "protocol": "openai",
+                "status_code": compat_probe.get("status") or openai_probe.get("status") or sc,
+                "message": "OpenAI 兼容入口可达（该站未提供 /v1/models，模型请手动填写）",
+                "raw": {"async_probe": async_probe, "openai_probe": openai_probe.get("raw"), "openai_compat_probe": compat_probe.get("raw")},
+                "model_count": 0,
+                "image_models": [],
+                "chat_models": [],
+                "video_models": [],
+                "all": [],
+            }
+        detected, volc_probe = await probe_volcengine_auto_detect(client, base_url, api_key)
+        if detected:
+            return {
+                "ok": True,
+                "protocol": "volcengine",
+                "status_code": volc_probe.get("status") or openai_probe.get("status") or sc,
+                "message": f"{volc_probe.get('message') or '检测到方舟/Ark 兼容入口'}，已自动切换为方舟/Ark 任务协议",
+                "raw": {"async_probe": async_probe, "openai_probe": openai_probe.get("raw"), **(volc_probe.get("raw") or {})},
+            }
+    return {
+        "ok": openai_ok,
+        "protocol": "openai",
+        "status_code": openai_probe.get("status") or sc,
+        "message": openai_probe.get("message") or "OpenAI 兼容验证完成",
+        "raw": {"async_probe": async_probe, "openai_probe": openai_probe.get("raw")},
+        "model_count": openai_probe.get("model_count") or 0,
+        "image_models": openai_probe.get("image_models") or [],
+        "chat_models": openai_probe.get("chat_models") or [],
+        "video_models": openai_probe.get("video_models") or [],
+        "all": openai_probe.get("all") or [],
+        "image_request_mode": detect_image_request_mode(base_url, openai_probe.get("all") or []) or normalize_image_request_mode(image_request_mode),
+    }
+
+async def probe_async_endpoint(payload: TestConnectionPayload):
+    """验证异步协议：用假 task_id 请求 GET /v1/tasks/{fake_id}。
+    收到 400 Invalid task ID = 端点存在且 Key 有效；401/403 = Key 无效；404/连接失败 = 不支持异步端点。"""
+    base_url = (payload.base_url or "").strip().rstrip("/")
+    protocol = protocol_from_payload(payload)
+    if protocol in ("codex", "gemini-cli"):
+        return await probe_local_cli_endpoint(protocol)
     if not base_url:
         raise HTTPException(status_code=400, detail="请先填写请求地址")
     api_key = api_key_from_payload(payload, protocol)
@@ -13618,138 +13751,19 @@ async def probe_async_endpoint(payload: TestConnectionPayload):
     if protocol == "volcengine":
         try:
             async with httpx.AsyncClient(timeout=15) as client:
-                task_ok, task_probe = await probe_volcengine_task_endpoint(client, base_url, api_key)
-                if task_ok:
-                    return {
-                        "ok": True,
-                        "protocol": "volcengine",
-                        "status_code": task_probe.get("status") or 200,
-                        "message": "方舟/Ark 任务协议可用",
-                        "raw": task_probe.get("raw"),
-                    }
-                compat_ok, compat_probe = await probe_openai_compat_bearer_endpoint(client, base_url, api_key)
-                if compat_ok:
-                    return {
-                        "ok": True,
-                        "protocol": "volcengine",
-                        "status_code": compat_probe.get("status") or 200,
-                        "message": "方舟/Ark Bearer 鉴权入口可用（OpenAI 兼容透传）",
-                        "raw": {"task_probe": task_probe, "openai_compat_probe": compat_probe.get("raw")},
-                    }
-                return {
-                    "ok": False,
-                    "protocol": "volcengine",
-                    "status_code": compat_probe.get("status") or task_probe.get("status") or 0,
-                    "message": compat_probe.get("message") or task_probe.get("message") or "方舟/Ark 任务协议不可用",
-                    "raw": {"task_probe": task_probe, "openai_compat_probe": compat_probe.get("raw")},
-                }
+                return await probe_volcengine_async_endpoint(client, base_url, api_key)
         except httpx.HTTPError as e:
             raise HTTPException(status_code=502, detail=str(e)[:300])
-    tasks_base = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
-    probe_url = f"{tasks_base}/tasks/healthcheck_probe_do_not_submit"
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.get(probe_url, headers={"Authorization": bearer_auth_value(api_key), "Accept": "application/json"})
-            try:
-                body = resp.json()
-            except Exception:
-                body = resp.text[:500]
-            sc = resp.status_code
-            # 判断结果
-            err_msg = ""
-            if isinstance(body, dict):
-                err = body.get("error") or {}
-                if isinstance(err, dict):
-                    err_msg = str(err.get("message") or "").lower()
-                else:
-                    err_msg = str(err).lower()
-            # 400 + "invalid task id" → 端点存在，Key 有效
-            if is_tudou_async and sc == 400:
-                # 土豆对不存在的 task_id 可能使用不同的 400 错误字段；只要不是
-                # 401/403，400 已证明请求命中了异步任务端点且认证通过。
-                return {
-                    "ok": True,
-                    "protocol": "openai",
-                    "image_request_mode": "tudou-async",
-                    "status_code": sc,
-                    "message": "土豆 GPT-Image-2 异步任务端点可用，API Key 已通过认证",
-                    "raw": body,
-                }
-            if sc == 400 and "invalid task id" in err_msg:
-                return {"ok": True, "protocol": "apimart", "status_code": sc, "message": "APIMart 异步任务端点可用，API Key 已通过认证", "raw": body}
-
-            async_probe = {"status": sc, "message": "", "raw": body}
-            if sc in (301, 302, 303, 307, 308):
-                location = resp.headers.get("Location") or resp.headers.get("location") or ""
-                async_probe["message"] = f"/v1/tasks/ 发生跳转{f'：{location}' if location else ''}"
-            elif looks_like_html_response(resp.text):
-                async_probe["message"] = "/v1/tasks/ 返回网页 HTML"
-            elif sc in (401, 403):
-                async_probe["message"] = "/v1/tasks/ 返回鉴权失败"
-            elif sc == 404:
-                async_probe["message"] = "平台不支持 /v1/tasks/ 端点，可能不是 APIMart 异步协议"
-            elif 400 <= sc < 500:
-                async_probe["message"] = f"/v1/tasks/ 返回 {sc}"
-            elif sc < 300:
-                async_probe["message"] = f"/v1/tasks/ 返回 {sc}（意外成功）"
-            else:
-                async_probe["message"] = f"/v1/tasks/ 服务端错误 {sc}"
-
-            if is_tudou_async:
-                return {
-                    "ok": sc < 400,
-                    "protocol": "openai",
-                    "image_request_mode": "tudou-async" if sc < 400 else "openai",
-                    "status_code": sc,
-                    "message": async_probe["message"] or "土豆 GPT-Image-2 异步任务端点验证完成",
-                    "raw": body,
-                }
-
-            if protocol == "apimart":
-                return {"ok": False, "protocol": "apimart", "status_code": sc, "message": async_probe["message"], "raw": body}
-
-            openai_ok, openai_probe = await probe_openai_models_endpoint(client, base_url, api_key)
-            if not openai_ok and protocol == "openai":
-                # /v1/models 不可用，先确认是不是“没实现 models 接口的 OpenAI 兼容站”：探一下 /v1/chat/completions。
-                # 可达就判定为 OpenAI 兼容（很多网关不暴露 /v1/models），避免被下面的方舟探测（404 也算可达）误判成方舟。
-                compat_ok, compat_probe = await probe_openai_compat_bearer_endpoint(client, base_url, api_key)
-                # 仅当 /v1/chat/completions 确实存在（返回 2xx 或我们发空 messages 触发的 400 等，而非 404 路径不存在）
-                # 才判为 OpenAI 兼容；404 说明该路径不存在，留给后面的方舟探测。
-                if compat_ok and (compat_probe.get("status") or 0) != 404:
-                    return {
-                        "ok": True,
-                        "protocol": "openai",
-                        "status_code": compat_probe.get("status") or openai_probe.get("status") or sc,
-                        "message": "OpenAI 兼容入口可达（该站未提供 /v1/models，模型请手动填写）",
-                        "raw": {"async_probe": async_probe, "openai_probe": openai_probe.get("raw"), "openai_compat_probe": compat_probe.get("raw")},
-                        "model_count": 0,
-                        "image_models": [],
-                        "chat_models": [],
-                        "video_models": [],
-                        "all": [],
-                    }
-                detected, volc_probe = await probe_volcengine_auto_detect(client, base_url, api_key)
-                if detected:
-                    return {
-                        "ok": True,
-                        "protocol": "volcengine",
-                        "status_code": volc_probe.get("status") or openai_probe.get("status") or sc,
-                        "message": f"{volc_probe.get('message') or '检测到方舟/Ark 兼容入口'}，已自动切换为方舟/Ark 任务协议",
-                        "raw": {"async_probe": async_probe, "openai_probe": openai_probe.get("raw"), **(volc_probe.get("raw") or {})},
-                    }
-            return {
-                "ok": openai_ok,
-                "protocol": "openai",
-                "status_code": openai_probe.get("status") or sc,
-                "message": openai_probe.get("message") or "OpenAI 兼容验证完成",
-                "raw": {"async_probe": async_probe, "openai_probe": openai_probe.get("raw")},
-                "model_count": openai_probe.get("model_count") or 0,
-                "image_models": openai_probe.get("image_models") or [],
-                "chat_models": openai_probe.get("chat_models") or [],
-                "video_models": openai_probe.get("video_models") or [],
-                "all": openai_probe.get("all") or [],
-                "image_request_mode": detect_image_request_mode(base_url, openai_probe.get("all") or []) or normalize_image_request_mode(getattr(payload, "image_request_mode", "")),
-            }
+            return await probe_generic_async_endpoint(
+                client,
+                base_url,
+                api_key,
+                protocol,
+                is_tudou_async,
+                getattr(payload, "image_request_mode", ""),
+            )
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=str(e)[:300])
 
