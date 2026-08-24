@@ -1339,12 +1339,11 @@ async function onSave(){
     }
     setStatus(tr('comfy.saving'));
     try {
-        const res = await fetch(`/api/workflows/${encodeURIComponent(selectedName)}/config`, {
+        await comfyRequestJson(`/api/workflows/${encodeURIComponent(selectedName)}/config`, {
             method:'PUT',
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify(currentConfig)
-        });
-        if(!res.ok) throw new Error((await res.json()).detail || tr('comfy.saveFailed'));
+        }, tr('comfy.saveFailed'));
         setStatus(tr('comfy.saved'));
         await loadList();
         new BroadcastChannel('studio-api').postMessage({ type: 'workflows-changed' });
@@ -1355,8 +1354,7 @@ async function onDelete(){
     if(!selectedName || isBuiltin) return;
     if(!confirm(tf('comfy.deleteConfirm', {name: currentConfig.title || selectedName}))) return;
     try {
-        const res = await fetch(`/api/workflows/${encodeURIComponent(selectedName)}`, { method:'DELETE' });
-        if(!res.ok) throw new Error((await res.json()).detail || tr('comfy.deleteFailed'));
+        await comfyRequestJson(`/api/workflows/${encodeURIComponent(selectedName)}`, { method:'DELETE' }, tr('comfy.deleteFailed'));
         selectedName = '';
         currentWorkflow = null;
         currentConfig = null;
