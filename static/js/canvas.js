@@ -7550,11 +7550,7 @@ async function deleteCanvasPromptTemplateGroup(groupId){
     refreshCanvasPromptTemplatesFromLibraries();
     renderPromptTemplateModal();
 }
-function renderPromptTemplateModal(){
-    if(!promptTemplateModal || !promptTemplatePanel || !promptTemplateCats || !promptTemplateBody) return;
-    canvasPromptTemplates = activeCanvasPromptLibraryItems();
-    renderCanvasPromptLibrarySelect();
-    const scrollSnapshot = promptTemplateScrollSnapshot();
+function renderCanvasPromptTemplateCats(){
     const activeGroups = activeCanvasPromptTemplateGroups();
     const categories = [{id:'all', name:tr('smart.tplAll')}, ...activeGroups.map(group => ({...group, name:canvasPromptTemplateCategoryLabel(group.id)}))];
     const counts = canvasPromptTemplates.reduce((map, item) => {
@@ -7601,6 +7597,8 @@ function renderPromptTemplateModal(){
             <button type="button" class="prompt-template-manage-groups" data-template-group-edit><i data-lucide="settings-2"></i><span>${escapeHtml(tr('smart.tplManageGroups'))}</span></button>
         </div>
     `;
+}
+function renderCanvasPromptTemplateBody(){
     const items = canvasPromptTemplateVisibleItems();
     if(items.length && !items.some(item => item.id === promptTemplateSelectedId)) promptTemplateSelectedId = items[0].id;
     const selected = items.find(item => item.id === promptTemplateSelectedId) || items[0] || null;
@@ -7669,6 +7667,14 @@ function renderPromptTemplateModal(){
             ` : `<div class="prompt-template-empty">${escapeHtml(tr('smart.tplPickOrCreate'))}</div>`}
         </div>
     `;
+}
+function renderPromptTemplateModal(){
+    if(!promptTemplateModal || !promptTemplatePanel || !promptTemplateCats || !promptTemplateBody) return;
+    canvasPromptTemplates = activeCanvasPromptLibraryItems();
+    renderCanvasPromptLibrarySelect();
+    const scrollSnapshot = promptTemplateScrollSnapshot();
+    renderCanvasPromptTemplateCats();
+    renderCanvasPromptTemplateBody();
     refreshIcons();
     restorePromptTemplateScroll(scrollSnapshot);
 }
