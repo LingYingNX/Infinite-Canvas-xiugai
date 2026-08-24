@@ -931,9 +931,6 @@ def merge_default_api_providers(providers, inject_missing=True):
         current["video_models"] = []
     return merged
 
-def normalize_model_list(values):
-    return model_list_from_values(values)
-
 def model_list_from_values(values):
     deduped = []
     for value in values or []:
@@ -1127,21 +1124,6 @@ def load_static_runninghub_provider():
     except Exception as e:
         print(f"加载 static RunningHub 配置失败: {e}")
     return None
-
-def merge_runninghub_provider_with_static(provider):
-    static_provider = load_static_runninghub_provider()
-    if not static_provider:
-        return provider
-    if not isinstance(provider, dict):
-        return static_provider
-    merged = {**static_provider, **provider}
-    merged["protocol"] = "runninghub"
-    merged["image_models"] = model_list_from_values(provider.get("image_models") or [])
-    merged["chat_models"] = model_list_from_values(provider.get("chat_models") or [])
-    merged["video_models"] = model_list_from_values(provider.get("video_models") or [])
-    merged["rh_apps"] = merge_runninghub_system_entries(static_provider.get("rh_apps") or [], provider.get("rh_apps") or [], "app")
-    merged["rh_workflows"] = merge_runninghub_system_entries(static_provider.get("rh_workflows") or [], provider.get("rh_workflows") or [], "workflow")
-    return normalize_provider(merged)
 
 def preserve_runninghub_hidden_overrides(provider):
     if not isinstance(provider, dict) or provider.get("id") != "runninghub":
@@ -3274,36 +3256,6 @@ def comfy_prompt_error_message(status_code: int, error_body: str) -> str:
     detail = "；".join(part for part in parts if part).strip()
     return f"ComfyUI 拒绝了工作流（HTTP {status_code}）：{detail[:700] or fallback[:500] or '工作流校验失败'}"
 
-def get_best_backend(required_images: List[str] = None):
-    best_backend = COMFYUI_INSTANCES[0]
-    min_queue_size = float('inf')
-    backend_stats = {}
-
-    for addr in COMFYUI_INSTANCES:
-        try:
-            with urllib.request.urlopen(f"http://{addr}/queue", timeout=1) as response:
-                data = json.loads(response.read())
-                remote_load = len(data.get('queue_running', [])) + len(data.get('queue_pending', []))
-                with LOAD_LOCK:
-                    local_load = BACKEND_LOCAL_LOAD.get(addr, 0)
-                effective_load = max(remote_load, local_load)
-                has_images = check_images_exist(addr, required_images)
-                backend_stats[addr] = {"load": effective_load, "has_images": has_images}
-        except Exception as e:
-            print(f"Backend {addr} unreachable: {e}")
-            continue
-
-    if not backend_stats:
-        return COMFYUI_INSTANCES[0]
-
-    for addr, stats in backend_stats.items():
-        load = stats["load"]
-        if load < min_queue_size or (load == min_queue_size and stats.get("has_images") and not backend_stats.get(best_backend, {}).get("has_images")):
-            min_queue_size = load
-            best_backend = addr
-
-    return best_backend
-
 def reserve_best_backend(required_images: List[str] = None):
     backend_stats = {}
     for addr in COMFYUI_INSTANCES:
@@ -3329,20 +3281,6 @@ def reserve_best_backend(required_images: List[str] = None):
         return best_backend
 
 # --- 辅助工具 ---
-
-def download_image(comfy_address, comfy_url_path, prefix="studio_"):
-    filename = f"{prefix}{uuid.uuid4().hex[:10]}.png"
-    local_path = output_path_for(filename, "output")
-    full_url = f"http://{comfy_address}{comfy_url_path}"
-    try:
-        with urllib.request.urlopen(full_url, timeout=COMFYUI_DOWNLOAD_TIMEOUT) as response, open(local_path, 'wb') as out_file:
-            shutil.copyfileobj(response, out_file)
-        return output_url_for(filename, "output")
-    except Exception as e:
-        print(f"下载图片失败: {e}")
-        if comfy_url_path.startswith("/view"):
-            return comfy_url_path.replace("/view", "/api/view", 1)
-        return full_url
 
 def comfy_output_extension(item):
     filename = str((item or {}).get("filename") or "")
@@ -3374,11 +3312,6 @@ def comfy_output_extension(item):
     if "mp4" in fmt or "h264" in fmt or "video" in fmt:
         return ".mp4"
     return ext or ".bin"
-
-def is_video_output_item(item):
-    ext = comfy_output_extension(item)
-    fmt = str((item or {}).get("format") or "").lower()
-    return ext in {".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"} or "video" in fmt
 
 def comfy_output_kind(item):
     ext = comfy_output_extension(item)
@@ -4749,9 +4682,6 @@ def effective_image_request_mode(provider, model=""):
         return detected
     return normalize_image_request_mode((provider or {}).get("image_request_mode"))
 
-def is_gemini_provider(provider):
-    return provider_protocol(provider) == "gemini"
-
 def is_tudou_provider(provider):
     if not isinstance(provider, dict):
         return False
@@ -5668,16 +5598,6 @@ def gemini_cli_models_payload(raw=None):
         "raw": raw or {},
     }
 
-def gemini_cli_reference_note(reference_images=None):
-    refs = []
-    temp_paths = []
-    for ref in (reference_images or [])[:ONLINE_IMAGE_REFERENCE_MAX]:
-        url = ref.get("url") if isinstance(ref, dict) else getattr(ref, "url", "")
-        if not url:
-            continue
-        refs.append(url)
-    return refs, temp_paths
-
 async def gemini_cli_reference_paths(reference_images=None):
     return await codex_reference_paths(reference_images)
 
@@ -5826,9 +5746,6 @@ def avatar_platform_for_provider(provider) -> str:
     if is_volcengine_provider(provider):
         return "volcengine"
     return ""
-
-def provider_supports_avatar(provider) -> bool:
-    return avatar_platform_for_provider(provider) in AVATAR_SUPPORTED_PLATFORMS
 
 def jimeng_env_value(key):
     return os.getenv(key, "") or read_api_env_value(key)
@@ -7756,12 +7673,6 @@ def save_asset_library(lib):
     if GLOBAL_LOOP:
         asyncio.run_coroutine_threadsafe(manager.broadcast_asset_library_updated(int(lib["updated_at"])), GLOBAL_LOOP)
 
-def find_asset_category(lib, category_id):
-    for cat in lib.get("categories", []):
-        if cat.get("id") == category_id:
-            return cat
-    return None
-
 def find_asset_library(lib, library_id=""):
     lib = normalize_asset_library(lib)
     library_id = str(library_id or lib.get("active_library_id") or "").strip()
@@ -8538,10 +8449,6 @@ def volcengine_video_resolution(value: str) -> str:
     text = aliases.get(text, text)
     return text if text in {"480p", "720p", "1080p"} else ""
 
-def is_volcengine_seedance2_model(model: str) -> bool:
-    value = str(model or "").strip().lower().replace("_", "-").replace(".", "-")
-    return "seedance-2-0" in value
-
 def probe_local_audio_duration_seconds(value: str) -> Optional[float]:
     path = output_file_from_url(value)
     if not path or not os.path.isfile(path):
@@ -8645,52 +8552,12 @@ async def video_reference_to_frame_data_urls(value, max_frames=6, max_size=768):
             try: os.remove(cleanup_path)
             except OSError: pass
 
-def compress_data_url_image(value, max_size=1536, jpeg_quality=88):
-    if not isinstance(value, str) or not value.startswith("data:image/") or ";base64," not in value:
-        return value
-    header, encoded = value.split(";base64,", 1)
-    try:
-        raw = base64.b64decode(encoded)
-        with Image.open(BytesIO(raw)) as img:
-            img.load()
-            if max_size and max(img.size) > max_size:
-                img.thumbnail((max_size, max_size), Image.LANCZOS)
-            has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
-            if has_alpha:
-                if img.mode != "RGBA":
-                    img = img.convert("RGBA")
-                fmt, mime = "PNG", "image/png"
-            else:
-                if img.mode != "RGB":
-                    img = img.convert("RGB")
-                fmt, mime = "JPEG", "image/jpeg"
-            buf = BytesIO()
-            if fmt == "JPEG":
-                img.save(buf, format=fmt, quality=jpeg_quality, optimize=True)
-            else:
-                img.save(buf, format=fmt, optimize=True)
-            return f"data:{mime};base64,{base64.b64encode(buf.getvalue()).decode('ascii')}"
-    except Exception as e:
-        print(f"data url image compress failed, fallback to raw: {e}")
-        return value
-
 def modelscope_image_url(value, max_size=1536):
     if not value:
         return value
     if isinstance(value, str) and (value.startswith("/output/") or value.startswith("/assets/")):
         return reference_to_data_url({"url": value}, max_size=max_size)
     return value
-
-def valid_video_image_input(value: str) -> bool:
-    if not isinstance(value, str):
-        return False
-    value = value.strip()
-    return (
-        value.startswith("http://") or
-        value.startswith("https://") or
-        value.startswith("asset://") or
-        (value.startswith("data:image/") and ";base64," in value)
-    )
 
 def valid_apimart_video_image_input(value: str) -> bool:
     if not isinstance(value, str):
@@ -8798,12 +8665,6 @@ def openai_video_proxy_local_image_path(ref) -> str:
     if not path:
         return ""
     return path if content_type_for_path(path).startswith("image/") else ""
-
-def normalize_apimart_video_reference(value: str) -> str:
-    text = str(value or "").strip()
-    if valid_apimart_video_image_input(text):
-        return text
-    return local_asset_public_url(text)
 
 def apimart_video_reference_error(value: str) -> str:
     text = str(value or "").strip()
@@ -9388,9 +9249,6 @@ def local_media_path_for_cloud_upload(ref_url: str, allowed_prefixes=("image/", 
         raise HTTPException(status_code=400, detail=f"媒体文件超过云端上传大小限制：{size} bytes")
     return path
 
-def local_video_path_for_cloud_upload(ref_url: str) -> str:
-    return local_media_path_for_cloud_upload(ref_url, ("video/",))
-
 async def upload_video_to_litterbox(path: str, source_url: str) -> Dict[str, str]:
     upload_url = os.getenv("LITTERBOX_UPLOAD_URL", "https://litterbox.catbox.moe/resources/internals/api.php").strip() or "https://litterbox.catbox.moe/resources/internals/api.php"
     time_value = os.getenv("LITTERBOX_TIME", "72h").strip() or "72h"
@@ -9448,9 +9306,6 @@ async def upload_local_video_to_cloud(ref_url: str, service: str = "auto") -> Di
         except HTTPException as exc:
             errors.append(f"{name}: {exc.detail}")
     raise HTTPException(status_code=502, detail="云端上传失败：" + "；".join(errors))
-
-async def upload_local_video_to_temp_sh(ref_url: str) -> Dict[str, str]:
-    return await upload_local_video_to_cloud(ref_url, "auto")
 
 async def save_ai_image_to_output(image_data, prefix="online_", category="output"):
     filename = f"{prefix}{uuid.uuid4().hex[:10]}.png"
@@ -15483,17 +15338,6 @@ async def generate_tudou_grok_video(client, payload, provider, base_url, request
         raise HTTPException(status_code=502, detail=f"土豆 Grok 视频没有返回视频地址：{str(result)[:400]}")
     return {"videos": videos, "task_id": task_id, "raw": result}
 
-def volcengine_video_prompt_text(prompt, aspect_ratio="", duration=None):
-    text = str(prompt or "").strip()
-    suffixes = []
-    ratio = str(aspect_ratio or "").strip()
-    if ratio:
-        suffixes.append(f"--ratio {ratio}")
-    if not suffixes:
-        return text
-    suffix_text = " ".join(suffixes)
-    return f"{text} {suffix_text}".strip() if text else suffix_text
-
 @app.post("/api/canvas-video")
 async def canvas_video(payload: CanvasVideoRequest):
     provider = get_api_provider(payload.provider_id)
@@ -18505,9 +18349,6 @@ def workflow_config_path(name: str) -> str:
 
 def is_builtin_workflow(name: str) -> bool:
     return "/" not in name and os.path.basename(name) in BUILTIN_WORKFLOWS
-
-def runninghub_workflow_store_path() -> str:
-    return RUNNINGHUB_WORKFLOW_STORE_FILE
 
 def load_runninghub_workflow_store():
     if not os.path.exists(RUNNINGHUB_WORKFLOW_STORE_FILE):
