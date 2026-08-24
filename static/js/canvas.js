@@ -887,6 +887,11 @@ function assertCanvasResponseOk(response, message){
 async function assertCanvasResponseMessage(response, fallback='请求失败'){
     if(!response.ok) throw new Error(await responseErrorMessage(response, fallback));
 }
+async function canvasResponseJsonMessage(r, fallback){
+    if(!r.ok) await assertCanvasResponseMessage(r, fallback);
+    return r.json();
+}
+
 function closeErrorModal(){
     if(errorModal) errorModal.classList.remove('open');
 }
@@ -11493,7 +11498,7 @@ async function runVideoNode(nodeId, opts={}){
                 generate_audio:Boolean(node.generateAudio),
                 multimodal:Boolean(node.multimodal)
             })
-        }, {cascadeTargetId}).then(async r => { if(!r.ok) await assertCanvasResponseMessage(r, tr('canvas.videoFailed')); return r.json(); });
+        }, {cascadeTargetId}).then(r => canvasResponseJsonMessage(r, tr('canvas.videoFailed')));
         const meta = collectRunMeta(out, pendingId);
         if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
         const outputUrls = resultMediaUrls(result).map(item => {
@@ -11773,10 +11778,7 @@ async function uploadCanvasUrlToComfy(url){
     const filename = (url || '').split('/').pop()?.split('?')[0] || `canvas_${Date.now()}.png`;
     const form = new FormData();
     form.append('files', blob, filename);
-    const data = await fetch('/api/upload', {method:'POST', body:form}).then(async r => {
-        if(!r.ok) await assertCanvasResponseMessage(r, langIsEn() ? 'Image upload to ComfyUI failed' : '图片上传到 ComfyUI 失败');
-        return r.json();
-    });
+    const data = await fetch('/api/upload', {method:'POST', body:form}).then(r => canvasResponseJsonMessage(r, langIsEn() ? 'Image upload to ComfyUI failed' : '图片上传到 ComfyUI 失败'));
     return data.files?.[0]?.comfy_name || filename;
 }
 async function comfyNameForRef(ref){
@@ -12619,12 +12621,7 @@ async function callCanvasLLM(node, message, messages=[], options={}){
             images,
             videos,
         })
-    }, options).then(async r => {
-        if(!r.ok){
-            await assertCanvasResponseMessage(r, 'LLM 运行失败');
-        }
-        return r.json();
-    });
+    }, options).then(r => canvasResponseJsonMessage(r, 'LLM 运行失败'));
     return result.text || '';
 }
 async function runLLMNode(nodeId, opts={}){
