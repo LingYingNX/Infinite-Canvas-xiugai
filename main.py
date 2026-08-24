@@ -1617,11 +1617,7 @@ def read_local_update_notes(version: str = "") -> Dict[str, Any]:
         pass
     return {"version": version or current_app_version(), "updated_at": "", "items": []}
 
-def fetch_remote_update_notes(url: str, version: str = "", timeout: float = 5.0) -> Dict[str, Any]:
-    info: Dict[str, Any] = {"ok": False, "error": "", "url": url, "version": version, "items": []}
-    if not url:
-        info["error"] = "missing url"
-        return info
+def updater_get(url: str, timeout: float):
     try:
         resp = requests.get(
             f"{url}{'&' if '?' in url else '?'}t={int(time.time())}",
@@ -1630,12 +1626,25 @@ def fetch_remote_update_notes(url: str, version: str = "", timeout: float = 5.0)
             proxies=urllib.request.getproxies() or None,
         )
         if 200 <= resp.status_code < 400:
-            payload = json.loads(resp.content.decode("utf-8", errors="replace"))
-            notes = safe_update_notes(payload, version)
-            info.update(notes)
-            info["ok"] = True
-        else:
-            info["error"] = f"HTTP {resp.status_code}"
+            return resp, ""
+        return None, f"HTTP {resp.status_code}"
+    except requests.RequestException as exc:
+        return None, str(exc)
+
+def fetch_remote_update_notes(url: str, version: str = "", timeout: float = 5.0) -> Dict[str, Any]:
+    info: Dict[str, Any] = {"ok": False, "error": "", "url": url, "version": version, "items": []}
+    if not url:
+        info["error"] = "missing url"
+        return info
+    resp, error = updater_get(url, timeout)
+    if error:
+        info["error"] = error
+        return info
+    try:
+        payload = json.loads(resp.content.decode("utf-8", errors="replace"))
+        notes = safe_update_notes(payload, version)
+        info.update(notes)
+        info["ok"] = True
     except Exception as exc:
         info["error"] = str(exc)
     return info
@@ -1945,28 +1954,20 @@ def fetch_remote_version(url: str, timeout: float = 5.0) -> Dict[str, Any]:
     if not url:
         info["error"] = "missing url"
         return info
-    try:
-        resp = requests.get(
-            f"{url}{'&' if '?' in url else '?'}t={int(time.time())}",
-            headers={"User-Agent": "Infinite-Canvas-Updater"},
-            timeout=timeout,
-            proxies=urllib.request.getproxies() or None,
-        )
-        if 200 <= resp.status_code < 400:
-            text = resp.content.decode("utf-8", errors="replace").strip()
-            version = text.splitlines()[0].strip() if text else ""
-            # 防御：raw 网页/错误页会返回 HTML 或 JSON，必须长得像版本号（含数字、无尖括号/花括号）
-            if version and "<" not in version and "{" not in version and re.search(r"\d", version):
-                info["version"] = version
-                info["ok"] = True
-            elif not version:
-                info["error"] = "空版本文件"
-            else:
-                info["error"] = "版本文件格式异常"
-        else:
-            info["error"] = f"HTTP {resp.status_code}"
-    except requests.RequestException as exc:
-        info["error"] = str(exc)
+    resp, error = updater_get(url, timeout)
+    if error:
+        info["error"] = error
+        return info
+    text = resp.content.decode("utf-8", errors="replace").strip()
+    version = text.splitlines()[0].strip() if text else ""
+    # 防御：raw 网页/错误页会返回 HTML 或 JSON，必须长得像版本号（含数字、无尖括号/花括号）
+    if version and "<" not in version and "{" not in version and re.search(r"\d", version):
+        info["version"] = version
+        info["ok"] = True
+    elif not version:
+        info["error"] = "空版本文件"
+    else:
+        info["error"] = "版本文件格式异常"
     return info
 
 def version_tuple(value: str) -> List[int]:
