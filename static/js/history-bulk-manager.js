@@ -82,19 +82,14 @@
         document.head.appendChild(style);
     }
 
-    function attach(opts){
-        opts = opts || {};
-        const masonrySel = opts.masonry || '#masonry';
-        const masonry = document.querySelector(masonrySel);
-        if(!masonry) return null;
-        if(masonry.dataset.hbmAttached === '1') return masonry._hbm || null;
-        masonry.dataset.hbmAttached = '1';
+    function historyCards(masonry){
+        return Array.from(masonry.querySelectorAll('[data-history-ts]'));
+    }
+    function historySelectedCards(masonry){
+        return historyCards(masonry).filter(c => c.classList.contains('hbm-selected'));
+    }
 
-        injectStyles();
-
-        let selecting = false;
-
-        /* -------- 工具条 -------- */
+    function createHistoryToolbar(){
         const bar = document.createElement('div');
         bar.className = 'hbm-toolbar';
 
@@ -125,103 +120,120 @@
         exitBtn.className = 'hbm-btn hbm-primary hbm-hide';
 
         bar.append(manageBtn, spacer, countEl, selectAllBtn, deleteBtn, exitBtn);
-        masonry.parentNode.insertBefore(bar, masonry);
+        return { bar, manageBtn, manageLabel, countEl, selectAllBtn, deleteBtn, deleteLabel, exitBtn };
+    }
 
-        function cards(){
-            return Array.from(masonry.querySelectorAll('[data-history-ts]'));
-        }
-        function selectedCards(){
-            return cards().filter(c => c.classList.contains('hbm-selected'));
-        }
+    function refreshHistoryToolbar(masonry, toolbar){
+        toolbar.manageLabel.textContent = tr('bulk.manage');
+        const all = historyCards(masonry);
+        const sel = historySelectedCards(masonry);
+        toolbar.countEl.textContent = fmt('bulk.selectedCount', { n: sel.length });
+        const allSelected = all.length > 0 && sel.length === all.length;
+        toolbar.selectAllBtn.textContent = allSelected ? tr('bulk.deselectAll') : tr('bulk.selectAll');
+        toolbar.deleteLabel.textContent = tr('bulk.deleteSelected');
+        toolbar.deleteBtn.disabled = sel.length === 0;
+        toolbar.exitBtn.textContent = tr('bulk.exit');
+        if(window.lucide && lucide.createIcons) lucide.createIcons();
+    }
 
-        function refreshLabels(){
-            manageLabel.textContent = tr('bulk.manage');
-            const all = cards();
-            const sel = selectedCards();
-            countEl.textContent = fmt('bulk.selectedCount', { n: sel.length });
-            const allSelected = all.length > 0 && sel.length === all.length;
-            selectAllBtn.textContent = allSelected ? tr('bulk.deselectAll') : tr('bulk.selectAll');
-            deleteLabel.textContent = tr('bulk.deleteSelected');
-            deleteBtn.disabled = sel.length === 0;
-            exitBtn.textContent = tr('bulk.exit');
-            if(window.lucide && lucide.createIcons) lucide.createIcons();
-        }
+    function enterHistoryBulkMode(masonry, toolbar, state){
+        state.selecting = true;
+        document.body.classList.add('history-bulk-selecting');
+        toolbar.manageBtn.classList.add('hbm-hide');
+        [toolbar.countEl, toolbar.selectAllBtn, toolbar.deleteBtn, toolbar.exitBtn].forEach(el => el.classList.remove('hbm-hide'));
+        refreshHistoryToolbar(masonry, toolbar);
+    }
 
-        function enter(){
-            selecting = true;
-            document.body.classList.add('history-bulk-selecting');
-            manageBtn.classList.add('hbm-hide');
-            [countEl, selectAllBtn, deleteBtn, exitBtn].forEach(el => el.classList.remove('hbm-hide'));
-            refreshLabels();
-        }
-        function exit(){
-            selecting = false;
-            document.body.classList.remove('history-bulk-selecting');
-            cards().forEach(c => c.classList.remove('hbm-selected'));
-            manageBtn.classList.remove('hbm-hide');
-            [countEl, selectAllBtn, deleteBtn, exitBtn].forEach(el => el.classList.add('hbm-hide'));
-            refreshLabels();
-        }
+    function exitHistoryBulkMode(masonry, toolbar, state){
+        state.selecting = false;
+        document.body.classList.remove('history-bulk-selecting');
+        historyCards(masonry).forEach(c => c.classList.remove('hbm-selected'));
+        toolbar.manageBtn.classList.remove('hbm-hide');
+        [toolbar.countEl, toolbar.selectAllBtn, toolbar.deleteBtn, toolbar.exitBtn].forEach(el => el.classList.add('hbm-hide'));
+        refreshHistoryToolbar(masonry, toolbar);
+    }
 
-        manageBtn.addEventListener('click', enter);
-        exitBtn.addEventListener('click', exit);
-
-        selectAllBtn.addEventListener('click', () => {
-            const all = cards();
-            const allSelected = all.length > 0 && selectedCards().length === all.length;
+    function bindHistoryBulkSelectAll(toolbar, masonry, refresh){
+        toolbar.selectAllBtn.addEventListener('click', () => {
+            const all = historyCards(masonry);
+            const allSelected = all.length > 0 && historySelectedCards(masonry).length === all.length;
             all.forEach(c => c.classList.toggle('hbm-selected', !allSelected));
-            refreshLabels();
+            refresh();
         });
+    }
 
-        /* 选择模式下点击卡片 = 切换选中（捕获阶段拦截，避免触发卡片自身逻辑） */
+    function bindHistoryBulkCardSelection(masonry, state, refresh){
         masonry.addEventListener('click', (e) => {
-            if(!selecting) return;
+            if(!state.selecting) return;
             const card = e.target.closest('[data-history-ts]');
             if(!card || !masonry.contains(card)) return;
             e.preventDefault();
             e.stopPropagation();
             card.classList.toggle('hbm-selected');
-            refreshLabels();
+            refresh();
         }, true);
+    }
 
-        async function doDelete(){
-            const sel = selectedCards();
-            if(sel.length === 0) return;
-            if(!confirm(fmt('bulk.deleteConfirm', { n: sel.length }))) return;
+    async function deleteSelectedHistoryCards(masonry, toolbar, state, refresh){
+        const sel = historySelectedCards(masonry);
+        if(sel.length === 0) return;
+        if(!confirm(fmt('bulk.deleteConfirm', { n: sel.length }))) return;
 
-            deleteBtn.disabled = true;
-            deleteLabel.textContent = tr('bulk.deleting');
+        toolbar.deleteBtn.disabled = true;
+        toolbar.deleteLabel.textContent = tr('bulk.deleting');
 
-            const results = await Promise.allSettled(sel.map(card => {
-                const ts = card.dataset.historyTs;
-                return fetch('/api/history/delete', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ timestamp: ts })
-                }).then(r => r.json()).then(res => {
-                    if(res && res.success){ card.remove(); return true; }
-                    throw new Error('delete failed');
-                });
-            }));
+        const results = await Promise.allSettled(sel.map(card => {
+            const ts = card.dataset.historyTs;
+            return fetch('/api/history/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ timestamp: ts })
+            }).then(r => r.json()).then(res => {
+                if(res && res.success){ card.remove(); return true; }
+                throw new Error('delete failed');
+            });
+        }));
 
-            const failed = results.filter(r => r.status === 'rejected').length;
-            if(failed > 0) alert(failed + ' / ' + sel.length + ' ✗');
+        const failed = results.filter(r => r.status === 'rejected').length;
+        if(failed > 0) alert(failed + ' / ' + sel.length + ' ✗');
 
-            refreshLabels();
-            if(selectedCards().length === 0 && cards().length === 0){ exit(); }
-            else { deleteBtn.disabled = selectedCards().length === 0; deleteLabel.textContent = tr('bulk.deleteSelected'); }
+        refresh();
+        if(historySelectedCards(masonry).length === 0 && historyCards(masonry).length === 0){
+            exitHistoryBulkMode(masonry, toolbar, state);
         }
-        deleteBtn.addEventListener('click', doDelete);
+        else {
+            toolbar.deleteBtn.disabled = historySelectedCards(masonry).length === 0;
+            toolbar.deleteLabel.textContent = tr('bulk.deleteSelected');
+        }
+    }
 
-        /* 语言切换时刷新文案 */
-        window.addEventListener('studio-lang-change', refreshLabels);
+    function attach(opts){
+        opts = opts || {};
+        const masonrySel = opts.masonry || '#masonry';
+        const masonry = document.querySelector(masonrySel);
+        if(!masonry) return null;
+        if(masonry.dataset.hbmAttached === '1') return masonry._hbm || null;
+        masonry.dataset.hbmAttached = '1';
 
-        refreshLabels();
+        injectStyles();
 
-        const api = { enter, exit, refresh: refreshLabels, isSelecting: () => selecting };
+        const state = { selecting:false };
+        const toolbar = createHistoryToolbar();
+        masonry.parentNode.insertBefore(toolbar.bar, masonry);
+
+        const refresh = () => refreshHistoryToolbar(masonry, toolbar);
+        toolbar.manageBtn.addEventListener('click', () => enterHistoryBulkMode(masonry, toolbar, state));
+        toolbar.exitBtn.addEventListener('click', () => exitHistoryBulkMode(masonry, toolbar, state));
+        bindHistoryBulkSelectAll(toolbar, masonry, refresh);
+        bindHistoryBulkCardSelection(masonry, state, refresh);
+        toolbar.deleteBtn.addEventListener('click', () => deleteSelectedHistoryCards(masonry, toolbar, state, refresh));
+
+        window.addEventListener('studio-lang-change', refresh);
+        refresh();
+
+        const api = { enter:() => enterHistoryBulkMode(masonry, toolbar, state), exit:() => exitHistoryBulkMode(masonry, toolbar, state), refresh, isSelecting:() => state.selecting };
         masonry._hbm = api;
         return api;
     }
-
     window.HistoryBulkManager = { attach };
 })();
