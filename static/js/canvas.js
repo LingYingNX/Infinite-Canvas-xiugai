@@ -793,6 +793,21 @@ function modelscopeLoraOptions(loras, selectedId){
         return `<option value="${escapeHtml(id)}" ${id === selectedId ? 'selected' : ''}>${escapeHtml(label)}</option>`;
     }).join('');
 }
+function aspectRatioOptions(withSource=false, withCustom=false){
+    const extras = [];
+    if(withSource) extras.push(`<option value="source">${tr('canvas.adaptiveRatio')}</option>`);
+    if(withCustom) extras.push(`<option value="custom">${tr('canvas.custom')}</option>`);
+    return `<option value="square">1:1</option>
+                    <option value="portrait">2:3</option>
+                    <option value="landscape">3:2</option>
+                    <option value="portrait43">3:4</option>
+                    <option value="landscape43">4:3</option>
+                    <option value="story">9:16</option>
+                    <option value="wide">16:9</option>
+                    <option value="ultrawide">21:9</option>
+                    <option value="ultratall">9:21</option>
+                    ${extras.join('\n                    ')}`;
+}
 function allChatModels(){
     const providerModels = chatApiProviders().flatMap(p => p.chat_models || []);
     return uniqueModels(hasManagedChatModels ? localChatModels : [...providerModels, ...chatModels, ...localChatModels]);
@@ -3022,16 +3037,7 @@ function msControlsHtml(node, isCustomMs, msLoras, selectedMsLora, loraStrength,
                     <option value="custom">${tr('canvas.custom')}</option>
                 </select>
                 <select class="select-lite ratio compact-select" data-field="msRatio">
-                    <option value="square">1:1</option>
-                    <option value="portrait">2:3</option>
-                    <option value="landscape">3:2</option>
-                        <option value="portrait43">3:4</option>
-                        <option value="landscape43">4:3</option>
-                        <option value="story">9:16</option>
-                        <option value="wide">16:9</option>
-                        <option value="ultrawide">21:9</option>
-                        <option value="ultratall">9:21</option>
-                        <option value="custom">${tr('canvas.custom')}</option>
+                    ${aspectRatioOptions(false, true)}
                     </select>
                     <div class="gen-count-row">
                         <div class="gen-stepper">
@@ -8628,17 +8634,7 @@ function renderGeneratorBody(node){
                     <option value="custom">${tr('canvas.custom')}</option>
                 </select>
                 <select class="select-lite ratio compact-select" data-field="ratio">
-                    <option value="square">1:1</option>
-                    <option value="portrait">2:3</option>
-                    <option value="landscape">3:2</option>
-                    <option value="portrait43">3:4</option>
-                    <option value="landscape43">4:3</option>
-                    <option value="story">9:16</option>
-                    <option value="wide">16:9</option>
-                    <option value="ultrawide">21:9</option>
-                    <option value="ultratall">9:21</option>
-                    <option value="source">${tr('canvas.adaptiveRatio')}</option>
-                    <option value="custom">${tr('canvas.custom')}</option>
+                    ${aspectRatioOptions(true, true)}
                 </select>
                 <select class="select-lite quality-select">
                     <option value="auto">Q auto</option>
@@ -10473,17 +10469,7 @@ function rhModelSettingsHtml(node){
                     <option value="custom">${tr('canvas.custom')}</option>
                 </select>
                 <select class="select-lite ratio compact-select" data-rh-model-field="ratio">
-                    <option value="square">1:1</option>
-                    <option value="portrait">2:3</option>
-                    <option value="landscape">3:2</option>
-                    <option value="portrait43">3:4</option>
-                    <option value="landscape43">4:3</option>
-                    <option value="story">9:16</option>
-                    <option value="wide">16:9</option>
-                    <option value="ultrawide">21:9</option>
-                    <option value="ultratall">9:21</option>
-                    <option value="source">${tr('canvas.adaptiveRatio')}</option>
-                    <option value="custom">${tr('canvas.custom')}</option>
+                    ${aspectRatioOptions(true, true)}
                 </select>
                 <select class="select-lite quality-select" data-rh-model-field="quality">
                     <option value="auto">Q auto</option>
