@@ -9809,6 +9809,13 @@ def raise_chat_upstream_status_error(exc, model, provider):
     friendly = friendly_chat_error_detail(body, model, provider)
     raise HTTPException(status_code=exc.response.status_code, detail=friendly or f"上游接口错误：{body}") from exc
 
+def raise_chat_upstream_http_error(exc, model, provider, log_net=False):
+    if isinstance(exc, httpx.HTTPStatusError):
+        raise_chat_upstream_status_error(exc, model, provider)
+    if log_net:
+        log_net_error(f"对话 网络/TLS错误 provider={provider} model={model}", exc)
+    raise HTTPException(status_code=502, detail=f"请求上游接口失败：{exc}") from exc
+
 def raise_chat_image_http_error(exc, image_size, model):
     if isinstance(exc, httpx.HTTPStatusError):
         text = exc.response.text or ""
@@ -11687,10 +11694,8 @@ async def build_chat_text_reply(payload, conversation):
             response = await client.post(f"{chat_base}/chat/completions", headers=chat_hdrs, json=req_body)
             response.raise_for_status()
             raw = response.json()
-    except httpx.HTTPStatusError as exc:
-        raise_chat_upstream_status_error(exc, model, provider_cfg)
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"请求上游接口失败：{exc}") from exc
+    except (httpx.HTTPStatusError, httpx.HTTPError) as exc:
+        raise_chat_upstream_http_error(exc, model, provider_cfg)
     raw_data = unwrap_apimart_response(raw) if isinstance(raw, dict) else raw
     return {
         "id": uuid.uuid4().hex,
@@ -15811,10 +15816,8 @@ async def canvas_llm(payload: CanvasLLMRequest):
             if not response.content:
                 raise HTTPException(status_code=502, detail="上游接口返回了空响应")
             raw = response.json()
-    except httpx.HTTPStatusError as exc:
-        raise_chat_upstream_status_error(exc, model, _llm_provider)
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"请求上游接口失败：{exc}") from exc
+    except (httpx.HTTPStatusError, httpx.HTTPError) as exc:
+        raise_chat_upstream_http_error(exc, model, _llm_provider)
     except HTTPException:
         raise
     except Exception as exc:
@@ -16870,11 +16873,8 @@ async def caption_image_with_provider(abs_path, prompt, provider_id, model, ms_m
             )
             response.raise_for_status()
             raw = response.json()
-    except httpx.HTTPStatusError as exc:
-        raise_chat_upstream_status_error(exc, resolved_model, llm_provider)
-    except httpx.HTTPError as exc:
-        log_net_error(f"对话 网络/TLS错误 provider={llm_provider} model={resolved_model}", exc)
-        raise HTTPException(status_code=502, detail=f"请求上游接口失败：{exc}") from exc
+    except (httpx.HTTPStatusError, httpx.HTTPError) as exc:
+        raise_chat_upstream_http_error(exc, resolved_model, llm_provider, log_net=True)
     except HTTPException:
         raise
     except Exception as exc:
@@ -17285,10 +17285,8 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
                 )
                 response.raise_for_status()
                 raw = response.json()
-        except httpx.HTTPStatusError as exc:
-            raise_chat_upstream_status_error(exc, model, _conv_provider)
-        except httpx.HTTPError as exc:
-            raise HTTPException(status_code=502, detail=f"请求上游接口失败：{exc}") from exc
+        except (httpx.HTTPStatusError, httpx.HTTPError) as exc:
+            raise_chat_upstream_http_error(exc, model, _conv_provider)
         raw_data = unwrap_apimart_response(raw) if isinstance(raw, dict) else raw
         assistant_message = chat_assistant_message(text_from_chat_response(raw).strip() or "接口返回了空回复。", model, raw_usage=raw_data.get("usage") if isinstance(raw_data, dict) else None)
 
