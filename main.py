@@ -15578,6 +15578,17 @@ async def post_canvas_video_json(client, provider, submit_urls, body):
         ) from last_json_error
     return raw, submit_url
 
+def raise_video_provider_http_error(exc, model, status_detail, request_detail, net_label, friendly_model=None, provider=None):
+    if isinstance(exc, httpx.HTTPStatusError):
+        text = exc.response.text
+        detail = f"{status_detail}：{text}"
+        if friendly_model is not None:
+            friendly = friendly_video_error_detail(text, friendly_model, provider)
+            detail = friendly or detail
+        raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
+    log_net_error(f"视频({net_label}) 网络/TLS错误 model={model}", exc)
+    raise HTTPException(status_code=502, detail=f"{request_detail}：{exc}") from exc
+
 def canvas_video_status_error_hint(exc, provider, requested_model, payload):
     text = exc.response.text
     provider_name = provider.get('name') or provider['id']
@@ -15643,12 +15654,8 @@ async def canvas_video(payload: CanvasVideoRequest):
         except HTTPException as exc:
             print(f"RunningHub 视频生成失败 model={payload.model}: {exc.detail}")
             raise
-        except httpx.HTTPStatusError as exc:
-            text = exc.response.text
-            raise HTTPException(status_code=exc.response.status_code, detail=f"RunningHub 视频接口错误：{text}") from exc
-        except httpx.HTTPError as exc:
-            log_net_error(f"视频(RunningHub) 网络/TLS错误 model={payload.model}", exc)
-            raise HTTPException(status_code=502, detail=f"请求 RunningHub 视频接口失败：{exc}") from exc
+        except (httpx.HTTPStatusError, httpx.HTTPError) as exc:
+            raise_video_provider_http_error(exc, payload.model, "RunningHub 视频接口错误", "请求 RunningHub 视频接口失败", "RunningHub")
     base_url = video_api_root(provider)
     if not base_url:
         raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
@@ -15670,46 +15677,29 @@ async def canvas_video(payload: CanvasVideoRequest):
                 if is_tudou_grok_video_model(requested_model):
                     return await generate_tudou_grok_video(tudou_client, payload, provider, base_url, requested_model)
                 return await generate_tudou_video(tudou_client, payload, provider, base_url, requested_model)
-        except httpx.HTTPStatusError as exc:
-            text = exc.response.text
-            friendly = friendly_video_error_detail(text, requested_model, provider)
-            raise HTTPException(status_code=exc.response.status_code, detail=friendly or f"土豆视频接口错误：{text}") from exc
-        except httpx.HTTPError as exc:
-            log_net_error(f"视频(土豆) 网络/TLS错误 model={requested_model}", exc)
-            raise HTTPException(status_code=502, detail=f"请求土豆视频接口失败：{exc}") from exc
+        except (httpx.HTTPStatusError, httpx.HTTPError) as exc:
+            raise_video_provider_http_error(exc, requested_model, "土豆视频接口错误", "请求土豆视频接口失败", "土豆", friendly_model=requested_model, provider=provider)
     is_veo31 = is_apimart and is_apimart_veo31_model(requested_model)
     if is_agnes:
         try:
             async with httpx.AsyncClient(timeout=VIDEO_POLL_TIMEOUT) as agnes_client:
                 return await generate_agnes_video(agnes_client, payload, provider, base_url, requested_model)
-        except httpx.HTTPStatusError as exc:
-            text = exc.response.text
-            raise HTTPException(status_code=exc.response.status_code, detail=f"Agnes 视频接口错误：{text}") from exc
-        except httpx.HTTPError as exc:
-            log_net_error(f"视频(Agnes) 网络/TLS错误 model={requested_model}", exc)
-            raise HTTPException(status_code=502, detail=f"请求 Agnes 视频接口失败：{exc}") from exc
+        except (httpx.HTTPStatusError, httpx.HTTPError) as exc:
+            raise_video_provider_http_error(exc, requested_model, "Agnes 视频接口错误", "请求 Agnes 视频接口失败", "Agnes")
     if is_lingjing:
         try:
             async with httpx.AsyncClient(timeout=VIDEO_POLL_TIMEOUT) as lingjing_client:
                 return await generate_lingjing_openai_video(lingjing_client, payload, provider, base_url, requested_model)
-        except httpx.HTTPStatusError as exc:
-            text = exc.response.text
-            raise HTTPException(status_code=exc.response.status_code, detail=f"灵境 API 视频接口错误：{text}") from exc
-        except httpx.HTTPError as exc:
-            log_net_error(f"视频(灵境) 网络/TLS错误 model={requested_model}", exc)
-            raise HTTPException(status_code=502, detail=f"请求灵境 API 视频接口失败：{exc}") from exc
+        except (httpx.HTTPStatusError, httpx.HTTPError) as exc:
+            raise_video_provider_http_error(exc, requested_model, "灵境 API 视频接口错误", "请求灵境 API 视频接口失败", "灵境")
     # 玉玉API veo3.1 走 OpenAI multipart 格式（支持 seconds 时长）；其余模型（doubao 等）
     # 沿用下方原生 /v1/video/create JSON 流程。
     if is_yuli and yuli_is_veo_openai_model(requested_model):
         try:
             async with httpx.AsyncClient(timeout=VIDEO_POLL_TIMEOUT) as yuli_client:
                 return await generate_yuli_openai_video(yuli_client, payload, provider, base_url, requested_model)
-        except httpx.HTTPStatusError as exc:
-            text = exc.response.text
-            raise HTTPException(status_code=exc.response.status_code, detail=f"上游视频接口错误：{text}") from exc
-        except httpx.HTTPError as exc:
-            log_net_error(f"视频(玉玉) 网络/TLS错误 model={requested_model}", exc)
-            raise HTTPException(status_code=502, detail=f"请求上游视频接口失败：{exc}") from exc
+        except (httpx.HTTPStatusError, httpx.HTTPError) as exc:
+            raise_video_provider_http_error(exc, requested_model, "上游视频接口错误", "请求上游视频接口失败", "玉玉")
     try:
         async with httpx.AsyncClient(timeout=VIDEO_POLL_TIMEOUT) as client:
             # --- 构造图片载荷 ---
