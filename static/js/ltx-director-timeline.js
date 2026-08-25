@@ -44,7 +44,6 @@ const AUDIO_TRACK_HEIGHT = 80;
 const CANVAS_HEIGHT = RULER_HEIGHT + BLOCK_HEIGHT + AUDIO_TRACK_HEIGHT;
 const HANDLE_HIT_PX = 14;
 const MIN_SEGMENT_LENGTH = 6;
-const MAX_THUMBNAIL_DIM = 512; // Increased to maintain quality for taller images
 
 const HIDDEN_WIDGET_NAMES = ["timeline_data", "local_prompts", "segment_lengths", "guide_strength", "audio_data", "use_custom_audio"];
 
@@ -806,30 +805,6 @@ class TimelineEditor {
     return parseInt((this.frameRateWidget && this.frameRateWidget.value > 0) ? this.frameRateWidget.value : 24, 10);
   }
 
-  // Grow the timeline duration to fit `requiredFrames` if it is currently shorter.
-  // The timeline only ever grows — never shrinks — through this method.
-  growTimelineIfNeeded(requiredFrames) {
-    const current = this.getDurationFrames();
-    if (requiredFrames <= current) return; // already big enough
-
-    const newFrames = Math.ceil(requiredFrames);
-    if (this._canvasMode) {
-      this.node.durationFrames = newFrames;
-      const fps = this.getFrameRate();
-      this.node.durationSeconds = Math.round((newFrames / fps) * 1000) / 1000;
-      if (this._onCanvasCommit) this._onCanvasCommit();
-    } else {
-      if (this.durationFramesWidget) {
-        this.durationFramesWidget.value = newFrames;
-      }
-      if (this.durationSecondsWidget) {
-        this.durationSecondsWidget.value = parseFloat((newFrames / this.getFrameRate()).toFixed(3));
-      }
-      if (window.app && window.app.graph) {
-        window.app.graph.setDirtyCanvas(true, true);
-      }
-    }
-  }
 
   // Returns the maximum allowed zoom level, computed so that at max zoom
   // the viewport shows exactly 4 seconds of the visual timeline.
