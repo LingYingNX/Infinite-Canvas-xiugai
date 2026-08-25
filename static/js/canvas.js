@@ -5199,6 +5199,22 @@ function syncImageEditOverflow(){
     stage.classList.toggle('overflow-x', overflowX);
     stage.classList.toggle('overflow-y', overflowY);
 }
+function resetImageEditViewState(){
+    imageEditZoom = 1.0;
+    imageEditBaseW = 0;
+    imageEditBaseH = 0;
+    imageResizeScale = 0.5;
+    imageEditModeTouched = false;
+    cropAspectPreset = 'free';
+    cropAspectRatio = null;
+    syncCropRatioButtons();
+}
+function resetImageElementStyles(img){
+    img.style.width = '';
+    img.style.height = '';
+    img.style.maxWidth = '';
+    img.style.maxHeight = '';
+}
 function resetImageEditZoom(){
     const stage = document.getElementById('imageEditStage');
     imageEditZoom = 1.0;
@@ -5463,14 +5479,7 @@ function openImageEditor(nodeId, initialMode='crop'){
     gridCustomHistory = [];
     gridCustomDrag = null;
     gridCustomOrientation = 'h';
-    imageEditZoom = 1.0;
-    imageEditBaseW = 0;
-    imageEditBaseH = 0;
-    imageResizeScale = 0.5;
-    imageEditModeTouched = false;
-    cropAspectPreset = 'free';
-    cropAspectRatio = null;
-    syncCropRatioButtons();
+    resetImageEditViewState();
     editTextItems = [];
     editTextSelectedId = '';
     editTextDrag = null;
@@ -5488,10 +5497,7 @@ function openImageEditor(nodeId, initialMode='crop'){
     _updateZoomLabel();
     const modal = document.getElementById('imageEditModal');
     const img = document.getElementById('cropImage');
-    img.style.width = '';
-    img.style.height = '';
-    img.style.maxWidth = '';
-    img.style.maxHeight = '';
+    resetImageElementStyles(img);
     modal.classList.add('open');
     const editorSrcToken = `${nodeId}:${Date.now()}`;
     img.dataset.editorSrcToken = editorSrcToken;
@@ -5533,24 +5539,14 @@ function closeImageEditor(){
     img.onload = null;
     delete img.dataset.editorSrcToken;
     img.removeAttribute('src');
-    img.style.width = '';
-    img.style.height = '';
-    img.style.maxWidth = '';
-    img.style.maxHeight = '';
+    resetImageElementStyles(img);
     clearEditDrawing(true);
     cropState = null;
     cropDrag = null;
     editDrawState = null;
     resetEditDrawingHistory();
     gridCustomDrag = null;
-    imageEditZoom = 1.0;
-    imageEditBaseW = 0;
-    imageEditBaseH = 0;
-    imageResizeScale = 0.5;
-    imageEditModeTouched = false;
-    cropAspectPreset = 'free';
-    cropAspectRatio = null;
-    syncCropRatioButtons();
+    resetImageEditViewState();
     document.getElementById('imageEditStage')?.classList.remove('overflowing', 'overflow-x', 'overflow-y');
     const cropCanvasEl = document.getElementById('cropCanvas');
     cropCanvasEl.classList.remove('grid-custom-h', 'grid-custom-v', 'outpaint-mode', 'outpaint-warning', 'dragging-image', 'text-mode', 'resize-mode');
@@ -5987,6 +5983,16 @@ function measureCanvasOriginalImageNodes(root=nodesEl){
     });
 }
 
+function finishCanvasRefresh(outputScrolls){
+    restoreOutputScrolls(outputScrolls);
+    refreshGeometry();
+    refreshGeometryAfterLayout();
+    refreshIcons();
+    bindCanvasPreviewImageFallbacks(nodesEl);
+    syncCanvasSelectedImageResolution(nodesEl);
+    measureCanvasOriginalImageNodes(nodesEl);
+    refreshOutputTimer();
+}
 function render(){
     const outputScrolls = captureOutputScrolls();
     const mediaStates = captureMediaPlaybackStates();
@@ -6015,14 +6021,7 @@ function render(){
         }
     });
     restoreMediaPlaybackStates(mediaStates);
-    restoreOutputScrolls(outputScrolls);
-    refreshGeometry();
-    refreshGeometryAfterLayout();
-    refreshIcons();
-    bindCanvasPreviewImageFallbacks(nodesEl);
-    syncCanvasSelectedImageResolution(nodesEl);
-    measureCanvasOriginalImageNodes(nodesEl);
-    refreshOutputTimer();
+    finishCanvasRefresh(outputScrolls);
 }
 function refreshNodes(ids=[]){
     const uniqueIds = [...new Set((ids || []).filter(Boolean))];
@@ -6046,14 +6045,7 @@ function refreshNodes(ids=[]){
             console.error('[canvas] refreshNode 失败，已跳过该节点：', id, err);
         }
     }
-    restoreOutputScrolls(outputScrolls);
-    refreshGeometry();
-    refreshGeometryAfterLayout();
-    refreshIcons();
-    bindCanvasPreviewImageFallbacks(nodesEl);
-    syncCanvasSelectedImageResolution(nodesEl);
-    measureCanvasOriginalImageNodes(nodesEl);
-    refreshOutputTimer();
+    finishCanvasRefresh(outputScrolls);
 }
 function refreshRunNodes(node, out=null){
     refreshNodes([node?.id, out?.id]);
@@ -9557,6 +9549,22 @@ function renderPromptPreview(container, promptInputs){
     if(!container) return;
     container.innerHTML = promptInputs.length ? `<div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Prompts</div>${promptInputs.map(src => `<div class="text-[11px] text-slate-500 bg-slate-50 border border-slate-100 rounded-xl px-3 py-2 line-clamp-2">${escapeHtml(src.label)}</div>`).join('')}` : '';
 }
+function bindInputItemDragDrop(item, src, node){
+    item.ondragstart = e => {
+        e.stopPropagation();
+        internalDrag = true;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('application/x-canvas-input', src.id);
+    };
+    item.ondragend = () => { internalDrag = false; };
+    item.ondragover = e => { e.preventDefault(); e.stopPropagation(); };
+    item.ondrop = e => {
+        e.preventDefault();
+        e.stopPropagation();
+        reorderInput(node, e.dataTransfer.getData('application/x-canvas-input'), src.id);
+        internalDrag = false;
+    };
+}
 function renderImageInputList(list, node, imageInputs, emptyText=null){
     if(!list) return;
     list.innerHTML = imageInputs.length ? '' : `<div class="text-[11px] text-gray-300 py-2">${escapeHtml(emptyText || tr('canvas.inputImagesEmpty'))}</div>`;
@@ -9567,20 +9575,7 @@ function renderImageInputList(list, node, imageInputs, emptyText=null){
         item.dataset.sourceId = src.id;
         const previewHtml = src.preview && !isMissingAssetUrl(src.preview) ? canvasPreviewImgHtml(src.preview, 256) : (src.preview ? missingAssetHtml(src.preview, true) : '<i data-lucide="image" class="w-6 h-6 text-slate-400"></i>');
         item.innerHTML = `<span class="input-index">${i + 1}</span>${previewHtml}<span class="input-label">${escapeHtml(src.label)}</span>`;
-        item.ondragstart = e => {
-            e.stopPropagation();
-            internalDrag = true;
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('application/x-canvas-input', src.id);
-        };
-        item.ondragend = () => { internalDrag = false; };
-        item.ondragover = e => { e.preventDefault(); e.stopPropagation(); };
-        item.ondrop = e => {
-            e.preventDefault();
-            e.stopPropagation();
-            reorderInput(node, e.dataTransfer.getData('application/x-canvas-input'), src.id);
-            internalDrag = false;
-        };
+        bindInputItemDragDrop(item, src, node);
         list.appendChild(item);
     });
     refreshIcons();
@@ -9611,10 +9606,7 @@ function renderVideoImageInputs(list, node, imageInputs){
             </div>
             ${frameLabel ? `<div class="video-frame-label">${frameLabel}</div>` : ''}
         `;
-        item.ondragstart = e => { e.stopPropagation(); internalDrag = true; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('application/x-canvas-input', src.id); };
-        item.ondragend = () => { internalDrag = false; };
-        item.ondragover = e => { e.preventDefault(); e.stopPropagation(); };
-        item.ondrop = e => { e.preventDefault(); e.stopPropagation(); reorderInput(node, e.dataTransfer.getData('application/x-canvas-input'), src.id); internalDrag = false; };
+        bindInputItemDragDrop(item, src, node);
         list.appendChild(item);
     });
     refreshIcons();
@@ -9802,20 +9794,7 @@ function renderComfyImages(list, node, imageInputs){
                 ? `<i data-lucide="${icon}" class="w-6 h-6 text-slate-400"></i>`
                 : (src.preview && !isMissingAssetUrl(src.preview) ? canvasPreviewImgHtml(src.preview, 256) : (src.preview ? missingAssetHtml(src.preview, true) : `<i data-lucide="${icon}" class="w-6 h-6 text-slate-400"></i>`));
         item.innerHTML = `<span class="input-index">${i + 1}</span>${previewHtml}<span class="input-label">${escapeHtml(label)}</span>`;
-        item.ondragstart = e => {
-            e.stopPropagation();
-            internalDrag = true;
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('application/x-canvas-input', src.id);
-        };
-        item.ondragend = () => { internalDrag = false; };
-        item.ondragover = e => { e.preventDefault(); e.stopPropagation(); };
-        item.ondrop = e => {
-            e.preventDefault();
-            e.stopPropagation();
-            reorderInput(node, e.dataTransfer.getData('application/x-canvas-input'), src.id);
-            internalDrag = false;
-        };
+        bindInputItemDragDrop(item, src, node);
         list.appendChild(item);
     });
 }
