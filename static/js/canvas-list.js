@@ -661,6 +661,15 @@ function openCreateCard(worldPt){
     };
 }
 
+function appendCanvasToBoard(nc, {projectId, boardX, boardY}){
+    if(!nc) return;
+    if(nc.project == null) nc.project = projectId;
+    if(nc.board_x == null) nc.board_x = boardX;
+    if(nc.board_y == null) nc.board_y = boardY;
+    canvases.push(nc);
+    renderBoard();
+    renderProjects();
+}
 async function createCanvasOnBoard(title, kind, worldPt){
     const isSmart = kind === 'smart';
     const base = isSmart ? L('智能画布','Smart canvas') : L('画布','Canvas');
@@ -679,15 +688,7 @@ async function createCanvasOnBoard(title, kind, worldPt){
                 board_y: Math.round(worldPt.y)
             })
         }, 'create canvas failed');
-        const nc = data.canvas;
-        if(nc){
-            if(nc.project == null) nc.project = currentProjectId;
-            if(nc.board_x == null) nc.board_x = Math.round(worldPt.x);
-            if(nc.board_y == null) nc.board_y = Math.round(worldPt.y);
-            canvases.push(nc);
-            renderBoard();
-            renderProjects();
-        }
+        appendCanvasToBoard(data.canvas, {projectId: currentProjectId, boardX: Math.round(worldPt.x), boardY: Math.round(worldPt.y)});
     } catch(e){ console.error(e); setStatus(L('创建失败','Create failed')); }
 }
 
@@ -815,15 +816,7 @@ async function importCanvasFile(file, worldPt){
             throw new Error(msg);
         }
         const data = await res.json();
-        const nc = data.canvas;
-        if(nc){
-            if(nc.project == null) nc.project = currentProjectId;
-            if(nc.board_x == null) nc.board_x = Math.round(worldPt.x);
-            if(nc.board_y == null) nc.board_y = Math.round(worldPt.y);
-            canvases.push(nc);
-            renderBoard();
-            renderProjects();
-        }
+        appendCanvasToBoard(data.canvas, {projectId: currentProjectId, boardX: Math.round(worldPt.x), boardY: Math.round(worldPt.y)});
         const count = Number(data.resource_count || 0);
         setStatus(count
             ? L(`已导入 ${count} 个资源`,`Imported ${count} assets`)
@@ -1108,15 +1101,7 @@ async function copyCanvasToProject(id, projectId){
             throw new Error(msg);
         }
         const copyData = await copyRes.json();
-        const nc = copyData.canvas;
-        if(nc){
-            if(nc.project == null) nc.project = projectId;
-            if(nc.board_x == null) nc.board_x = source.board_x;
-            if(nc.board_y == null) nc.board_y = source.board_y;
-            canvases.push(nc);
-            renderBoard();
-            renderProjects();
-        }
+        appendCanvasToBoard(copyData.canvas, {projectId, boardX: source.board_x, boardY: source.board_y});
         setStatus(L(`已复制到「${target?.name || '项目'}」`, `Copied to ${target?.name || 'project'}`));
     } catch(e){
         console.error(e);
