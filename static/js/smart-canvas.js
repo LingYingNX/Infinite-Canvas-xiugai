@@ -151,7 +151,6 @@ let smartCascadeRunPath = null;
 const smartCascadeRuns = new Map();
 let smartLoopContext = null;
 let transientSmartCloudLinks = [];
-let runBtnCooldownToken = 0;
 let smartRunStateToken = 0;
 const activeSmartTaskPolls = new Map();
 const smartNodeRunTokens = new Map();
@@ -5474,7 +5473,6 @@ function renderAssetLibrary(){
         items:[]
     })) : [];
     const cats = workflowMode ? baseCats : [...baseCats, ...smartClassCats];
-    const activeCatId = workflowMode ? activeWorkflowAssetCategoryId : activeAssetCategoryId;
     if(workflowMode && !cats.some(cat => cat.id === activeWorkflowAssetCategoryId)) activeWorkflowAssetCategoryId = cats[0]?.id || '';
     if(imageMode && !cats.some(cat => cat.id === activeAssetCategoryId)) activeAssetCategoryId = cats[0]?.id || '';
     assetCategorySelect.innerHTML = cats.map(cat => `<option value="${escapeHtml(cat.id)}" ${cat.id === (workflowMode ? activeWorkflowAssetCategoryId : activeAssetCategoryId) ? 'selected' : ''}>${escapeHtml(cat.name || (workflowMode ? '工作流' : tr('smart.assetFolder')))}</option>`).join('');

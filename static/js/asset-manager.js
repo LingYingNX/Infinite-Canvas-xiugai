@@ -554,7 +554,6 @@ function promptCategoriesFor(lib){
 function activePromptCategories(){
     return promptCategoriesFor(activePromptLibrary());
 }
-const PROMPT_BUILTIN_CATEGORY_IDS = new Set(['view','storyboard','character','product','lighting','custom']);
 const ASSET_CLASS_GROUPS = [
     {id:'environment', name:'环境', dims:['environment','scene','space','mood']},
     {id:'composition', name:'构图', dims:['composition']},
