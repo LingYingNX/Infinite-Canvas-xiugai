@@ -10793,15 +10793,7 @@ async function runRhNode(nodeId, opts={}){
         if(!result) throw new Error(tr('canvas.rhTimeout'));
         const outputs = result.urls || [];
         if(!outputs.length) throw new Error(tr('canvas.rhOutputsEmpty'));
-        const meta = collectRunMeta(out, pendingId);
-        if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
-        appendOutputImages(out, outputs, media.refs[0], [meta]);
-        mergeGeneratedOutputs(node, outputs, Boolean(opts.cascade));
-        addGenerationLog({run, outputs, runMs:meta.runMs || 0});
-        node.runStatus = 'done';
-        node.runError = '';
-        refreshRunNodes(node, out);
-        scheduleSave();
+        completeCanvasRun(node, out, run, pendingId, outputs, media.refs[0], opts);
     } catch(err) {
         const meta = collectRunMeta(out, pendingId);
         addGenerationLog({run, outputs:[], runMs:meta.runMs || 0, error:err.message || String(err)});
@@ -11611,20 +11603,13 @@ async function runVideoNode(nodeId, opts={}){
                 multimodal:Boolean(node.multimodal)
             })
         }, {cascadeTargetId}).then(r => canvasResponseJsonMessage(r, tr('canvas.videoFailed')));
-        const meta = collectRunMeta(out, pendingId);
-        if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
         const outputUrls = resultMediaUrls(result).map(item => {
             const url = outputUrlValue(item);
             return item && typeof item === 'object' ? {...item, url, kind:item.kind || 'video'} : {url, kind:'video'};
         }).filter(item => item.url);
         if(!outputUrls.length) throw new Error(tr('canvas.videoFailed'));
         run.request = requestMetaFromResult(result);
-        appendOutputImages(out, outputUrls, refs[0], [{...meta, kind:'video'}]);
-        mergeGeneratedOutputs(node, outputUrls, Boolean(opts.cascade));
-        addGenerationLog({run, outputs:outputUrls, runMs:meta.runMs || 0});
-        node.runStatus = 'done'; node.runError = '';
-        refreshRunNodes(node, out);
-        scheduleSave();
+        completeCanvasRun(node, out, run, pendingId, outputUrls, refs[0], opts, 'video');
     } catch(err) {
         const meta = collectRunMeta(out, pendingId);
         addGenerationLog({run, outputs:[], runMs:meta.runMs || 0, error:err.message || String(err)});
@@ -11853,16 +11838,7 @@ async function runMiniMaxNode(nodeId, opts={}){
             return item && typeof item === 'object' ? {...item, url, kind} : {url, kind, name:`minimax-${i + 1}.mp4`};
         }).filter(item => item.url);
         if(!normalized.length) throw new Error('MiniMax 未返回视频');
-        const meta = collectRunMeta(out, pendingId);
-        if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
-        appendOutputImages(out, normalized, media.refs[0], [{...meta, kind:'video'}]);
-        if(seg) normalized.forEach(item => miniMaxSetSegmentResult(node, seg, item));
-        mergeGeneratedOutputs(node, normalized, Boolean(opts.cascade));
-        addGenerationLog({run, outputs:normalized, runMs:meta.runMs || 0});
-        node.runStatus = 'done';
-        node.runError = '';
-        refreshRunNodes(node, out);
-        scheduleSave();
+        completeCanvasRun(node, out, run, pendingId, normalized, media.refs[0], opts, 'video', seg);
     } catch(err) {
         const meta = collectRunMeta(out, pendingId);
         const readable = miniMaxReadableError(err, engine);
@@ -12503,15 +12479,7 @@ async function runLTXDirectorNode(nodeId, opts={}){
         if(result.error) throw new Error(result.error);
         const outputs = comfyResultOutputs(result);
         if(!outputs.length) throw new Error(tr('canvas.ltxNoOutput'));
-        const meta = collectRunMeta(out, pendingId);
-        if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
-        appendOutputImages(out, outputs, refs[0], [meta]);
-        mergeGeneratedOutputs(node, outputs, Boolean(opts.cascade));
-        addGenerationLog({run, outputs, runMs:meta.runMs || 0});
-        node.runStatus = 'done';
-        node.runError = '';
-        refreshRunNodes(node, out);
-        scheduleSave();
+        completeCanvasRun(node, out, run, pendingId, outputs, refs[0], opts);
     } catch(err) {
         const meta = collectRunMeta(out, pendingId);
         if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
@@ -12690,14 +12658,7 @@ async function runComfyNode(nodeId, opts={}){
         } else {
             images = await runComfyEditMode(node, run, prompt, refs, cascadeTargetId);
         }
-        const meta = collectRunMeta(out, pendingId);
-        if(out) out._pending = (out._pending||[]).filter(p => p.id !== pendingId);
-        appendOutputImages(out, images, refs[0], [meta]);
-        mergeGeneratedOutputs(node, images, Boolean(opts.cascade));
-        addGenerationLog({run, outputs:images, runMs:meta.runMs || 0});
-        node.runStatus = 'done'; node.runError = '';
-        refreshRunNodes(node, out);
-        scheduleSave();
+        completeCanvasRun(node, out, run, pendingId, images, refs[0], opts);
     } catch(err) {
         const meta = collectRunMeta(out, pendingId);
         addGenerationLog({run, outputs:[], runMs:meta.runMs || 0, error:err.message || String(err)});
@@ -13483,6 +13444,19 @@ function collectRunMetas(out, ids){
 }
 function collectRunMeta(out, id){
     return collectRunMetas(out, [id])[0] || {runMs:0, run:{}};
+}
+function completeCanvasRun(node, out, run, pendingId, items, firstRef, opts, metaKind, segment){
+    const meta = collectRunMeta(out, pendingId);
+    if(out) out._pending = (out._pending || []).filter(p => p.id !== pendingId);
+    const metas = metaKind ? [{...meta, kind:metaKind}] : [meta];
+    appendOutputImages(out, items, firstRef, metas);
+    if(segment) items.forEach(item => miniMaxSetSegmentResult(node, segment, item));
+    mergeGeneratedOutputs(node, items, Boolean(opts.cascade));
+    addGenerationLog({run, outputs:items, runMs:meta.runMs || 0});
+    node.runStatus = 'done';
+    node.runError = '';
+    refreshRunNodes(node, out);
+    scheduleSave();
 }
 function findOutputByPendingId(pendingId){
     return nodes.find(n => n.type === 'output' && (n._pending || []).some(p => p.id === pendingId));
