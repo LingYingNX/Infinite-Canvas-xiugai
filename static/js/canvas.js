@@ -890,6 +890,13 @@ async function canvasResponseJsonMessage(r, fallback){
     return r.json();
 }
 
+async function assertCanvasTaskResponse(res, fallback){
+    if(!res.ok){
+        if(res.status === 404) throw new Error(cascadeBackendRestartMessage());
+        await assertCanvasResponseMessage(res, fallback);
+    }
+}
+
 function closeErrorModal(){
     if(errorModal) errorModal.classList.remove('open');
 }
@@ -13511,10 +13518,7 @@ async function waitCanvasComfyTaskResult(taskId, options={}){
         const cascadeTargetId = cascadeTargetIdFromOptions(options);
         if(cascadeTargetId) ensureCascadeActive(cascadeTargetId);
         const res = await cascadeFetch(`/api/canvas-comfy-tasks/${encodeURIComponent(taskId)}`, {}, {cascadeTargetId});
-        if(!res.ok){
-            if(res.status === 404) throw new Error(cascadeBackendRestartMessage());
-            await assertCanvasResponseMessage(res, actionFailed('canvas.comfyGenerate'));
-        }
+        await assertCanvasTaskResponse(res, actionFailed('canvas.comfyGenerate'));
         const data = await res.json();
         if(data.status === 'succeeded') return data.result || {};
         if(data.status === 'failed') throw new Error(data.error || actionFailed('canvas.comfyGenerate'));
@@ -13613,10 +13617,7 @@ async function pollCanvasImageTask(taskId, options={}){
             const cascadeTargetId = String(options?.cascadeTargetId || found?.pending?.cascadeTargetId || '');
             if(cascadeTargetId) ensureCascadeActive(cascadeTargetId);
             const res = await cascadeFetch(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`, {}, {cascadeTargetId});
-            if(!res.ok){
-                if(res.status === 404) throw new Error(cascadeBackendRestartMessage());
-                await assertCanvasResponseMessage(res, tr('canvas.generationFailed'));
-            }
+            await assertCanvasTaskResponse(res, tr('canvas.generationFailed'));
             const data = await res.json();
             if(data.status === 'succeeded'){
                 completeCanvasImageTask(taskId, data.result || {});
@@ -13643,10 +13644,7 @@ async function waitCanvasImageTaskResult(taskId, options={}){
         const cascadeTargetId = cascadeTargetIdFromOptions(options);
         if(cascadeTargetId) ensureCascadeActive(cascadeTargetId);
         const res = await cascadeFetch(`/api/canvas-image-tasks/${encodeURIComponent(taskId)}`, {}, {cascadeTargetId});
-        if(!res.ok){
-            if(res.status === 404) throw new Error(cascadeBackendRestartMessage());
-            await assertCanvasResponseMessage(res, tr('canvas.generationFailed'));
-        }
+        await assertCanvasTaskResponse(res, tr('canvas.generationFailed'));
         const data = await res.json();
         if(data.status === 'succeeded') return data.result || {};
         if(data.status === 'failed') throw new Error(data.error || tr('canvas.generationFailed'));
