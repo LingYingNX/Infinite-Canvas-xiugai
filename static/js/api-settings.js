@@ -2649,7 +2649,7 @@ async function pollJimengLogin(){
 async function refreshJimengCredit(){
     setJimengStatus('查询余额...');
     try {
-        const data = await apiRequestJson('/api/jimeng/credit', '查询余额失败');
+        const data = await apiRequestJson('/api/jimeng/credit', {}, '查询余额失败');
         setJimengStatus('已登录', true);
         if(jimengCredit) jimengCredit.textContent = jimengCreditText(data.raw);
     } catch(e){

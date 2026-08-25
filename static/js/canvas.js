@@ -1585,7 +1585,7 @@ try {
 } catch(e) { /* 不支持 BroadcastChannel 的旧浏览器忽略 */ }
 async function loadCanvasList(openFirst=true){
     try {
-        const data = await canvasRequestJson('/api/canvases', tr('canvas.canvasListFailed'));
+        const data = await canvasRequestJson('/api/canvases', {}, tr('canvas.canvasListFailed'));
         canvases = data.canvases || [];
         sortCanvasListByUpdated();
         refreshGateViewControls();
@@ -1603,7 +1603,7 @@ async function loadCanvasList(openFirst=true){
 }
 async function loadTrashList(){
     try {
-        const data = await canvasRequestJson('/api/canvases/trash', tr('canvas.trashLoadFailed'));
+        const data = await canvasRequestJson('/api/canvases/trash', {}, tr('canvas.trashLoadFailed'));
         deletedCanvases = data.canvases || [];
         refreshGateViewControls();
         renderCanvasList();
@@ -2084,7 +2084,7 @@ async function setCanvasTitle(id, title){
 async function openCanvas(id){
     setStatus('Opening...');
     try {
-        const data = await canvasRequestJson(`/api/canvases/${id}`, tr('canvas.openFailed'));
+        const data = await canvasRequestJson(`/api/canvases/${id}`, {}, tr('canvas.openFailed'));
         resetCascadeRuntimeState();
         canvas = data.canvas;
         rememberCanvasListProject(canvas.project || 'default');
@@ -2205,7 +2205,7 @@ async function refreshMissingCanvasAssets(){
 async function syncRemoteCanvasNow(){
     if(!canvas) return;
     try {
-        const data = await canvasRequestJson(`/api/canvases/${canvas.id}`, tr('canvas.openFailed'));
+        const data = await canvasRequestJson(`/api/canvases/${canvas.id}`, {}, tr('canvas.openFailed'));
         const remote = data.canvas;
         if(Number(remote?.updated_at || 0) >= Number(lastCanvasUpdatedAt || 0)){
             applyRemoteCanvasData(remote);
@@ -2220,7 +2220,7 @@ async function checkRemoteCanvasVersion(){
     if(document.hidden) return;
     remoteSyncBusy = true;
     try {
-        const meta = await canvasRequestJson(`/api/canvases/${canvas.id}/meta`, 'meta failed');
+        const meta = await canvasRequestJson(`/api/canvases/${canvas.id}/meta`, {}, 'meta failed');
         const remoteUpdatedAt = Number(meta.updated_at || 0);
         if(remoteUpdatedAt > Number(lastCanvasUpdatedAt || 0)){
             await syncRemoteCanvasNow();

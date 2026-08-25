@@ -866,7 +866,7 @@ async function exportCanvas(id){
     const c = canvases.find(x => x.id === id);
     setStatus(L('正在导出...','Exporting...'));
     try {
-        const data = await canvasListRequestJson(`/api/canvases/${encodeURIComponent(id)}`, 'export failed');
+        const data = await canvasListRequestJson(`/api/canvases/${encodeURIComponent(id)}`, {}, 'export failed');
         const cv = data.canvas || data;
         const base = String((c?.title) || cv.title || 'canvas').replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 60) || 'canvas';
         const blob = new Blob([JSON.stringify(cv, null, 2)], { type: 'application/json' });
@@ -1015,7 +1015,7 @@ async function exportCanvasWithResources(id){
     const c = canvases.find(x => x.id === id);
     setStatus(L('正在收集资源...','Collecting assets...'));
     try {
-        const data = await canvasListRequestJson(`/api/canvases/${encodeURIComponent(id)}`, 'export failed');
+        const data = await canvasListRequestJson(`/api/canvases/${encodeURIComponent(id)}`, {}, 'export failed');
         const cv = data.canvas || data;
         const base = safeExportBase((c?.title) || cv.title || 'canvas');
         const urls = collectCanvasResourceUrls(cv).slice(0, 1000);
@@ -1083,7 +1083,7 @@ async function moveCanvasToProject(id, projectId){
 async function copyCanvasToProject(id, projectId){
     const target = projects.find(p => p.id === projectId);
     try {
-        const data = await canvasListRequestJson(`/api/canvases/${encodeURIComponent(id)}`, 'load failed');
+        const data = await canvasListRequestJson(`/api/canvases/${encodeURIComponent(id)}`, {}, 'load failed');
         const source = data.canvas;
         if(!source) throw new Error('load failed');
         const fd = new FormData();
@@ -1168,7 +1168,7 @@ function closeTrashView(){
 }
 async function loadTrash(){
     try {
-        const data = await canvasListRequestJson('/api/canvases/trash', 'trash load failed');
+        const data = await canvasListRequestJson('/api/canvases/trash', {}, 'trash load failed');
         deletedCanvases = data.canvases || [];
         renderTrash();
         updateTrashBadge(deletedCanvases.length);
