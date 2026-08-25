@@ -2856,6 +2856,15 @@ function beginLocalUploadInlineRename(id){
     input.addEventListener('click', event => event.stopPropagation());
     input.addEventListener('blur', () => finish(true));
 }
+function applyLocalUploadFolderData(data){
+    localAssets = Array.isArray(data.items) ? data.items : localAssets;
+    localUploadTree = data.tree || localUploadTree;
+    activeLocalUploadFolder = data.folder?.path || activeLocalUploadFolder;
+    activeLocalUploadClassFilter = '';
+    selectedLocalUploadId = '';
+    selectedLocalUploadIds.clear();
+    render();
+}
 async function createLocalUploadFolder(){
     const name = window.prompt('新建文件夹名称', '新文件夹');
     if(!String(name || '').trim()) return;
@@ -2865,13 +2874,7 @@ async function createLocalUploadFolder(){
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({parent:activeLocalUploadFolder || '', name})
         });
-        localAssets = Array.isArray(data.items) ? data.items : localAssets;
-        localUploadTree = data.tree || localUploadTree;
-        activeLocalUploadFolder = data.folder?.path || activeLocalUploadFolder;
-        activeLocalUploadClassFilter = '';
-        selectedLocalUploadId = '';
-        selectedLocalUploadIds.clear();
-        render();
+        applyLocalUploadFolderData(data);
         setStatus('已新建本地素材文件夹');
     } catch(err) {
         showRequestError(err, '新建文件夹失败');
@@ -2891,13 +2894,7 @@ async function renameLocalUploadFolder(){
             headers:{'Content-Type':'application/json'},
             body:JSON.stringify({path:activeLocalUploadFolder, name})
         });
-        localAssets = Array.isArray(data.items) ? data.items : localAssets;
-        localUploadTree = data.tree || localUploadTree;
-        activeLocalUploadFolder = data.folder?.path || activeLocalUploadFolder;
-        activeLocalUploadClassFilter = '';
-        selectedLocalUploadId = '';
-        selectedLocalUploadIds.clear();
-        render();
+        applyLocalUploadFolderData(data);
         setStatus('已重命名本地素材文件夹');
     } catch(err) {
         showRequestError(err, '重命名文件夹失败');
