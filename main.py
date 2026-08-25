@@ -9809,6 +9809,14 @@ def raise_chat_upstream_status_error(exc, model, provider):
     friendly = friendly_chat_error_detail(body, model, provider)
     raise HTTPException(status_code=exc.response.status_code, detail=friendly or f"上游接口错误：{body}") from exc
 
+def raise_chat_image_http_error(exc, image_size, model):
+    if isinstance(exc, httpx.HTTPStatusError):
+        text = exc.response.text or ""
+        detail = friendly_image_error_detail(text, image_size, model) or f"上游生图接口错误：{text[:300]}"
+        raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
+    log_net_error(f"对话生图 网络/TLS错误 model={model}", exc)
+    raise HTTPException(status_code=502, detail=f"请求上游生图接口失败：{exc}") from exc
+
 async def generate_modelscope_provider_image(prompt, size, model, reference_images=None, provider=None):
     clean_token = modelscope_api_key()
     if not clean_token:
@@ -17223,13 +17231,8 @@ async def chat(payload: ChatRequest, request: Request, x_user_id: str = Header(d
                 payload.resolution,
             )
             local_url = await save_ai_image_to_output(image_data, prefix="chat_")
-        except httpx.HTTPStatusError as exc:
-            text = exc.response.text or ""
-            detail = friendly_image_error_detail(text, image_size, model) or f"上游生图接口错误：{text[:300]}"
-            raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
-        except httpx.HTTPError as exc:
-            log_net_error(f"对话生图 网络/TLS错误 model={model}", exc)
-            raise HTTPException(status_code=502, detail=f"请求上游生图接口失败：{exc}") from exc
+        except (httpx.HTTPStatusError, httpx.HTTPError) as exc:
+            raise_chat_image_http_error(exc, image_size, model)
         assistant_message = {
             "id": uuid.uuid4().hex,
             "role": "assistant",
@@ -17337,13 +17340,8 @@ async def chat_agent(payload: ChatRequest, request: Request, x_user_id: str = He
                 )
                 local_urls.append(await save_ai_image_to_output(image_data, prefix="chat_"))
                 raw_items.append(raw)
-        except httpx.HTTPStatusError as exc:
-            text = exc.response.text or ""
-            detail = friendly_image_error_detail(text, image_size, model) or f"上游生图接口错误：{text[:300]}"
-            raise HTTPException(status_code=exc.response.status_code, detail=detail) from exc
-        except httpx.HTTPError as exc:
-            log_net_error(f"对话生图 网络/TLS错误 model={model}", exc)
-            raise HTTPException(status_code=502, detail=f"请求上游生图接口失败：{exc}") from exc
+        except (httpx.HTTPStatusError, httpx.HTTPError) as exc:
+            raise_chat_image_http_error(exc, image_size, model)
         local_url = local_urls[0] if local_urls else ""
         assistant_message = {
             "id": uuid.uuid4().hex,
