@@ -13514,10 +13514,7 @@ function providerIdForPending(pending){
         || pending?.run?.node?.provider_id
         || 'comfly';
 }
-function completeRecoverPendingOutput(out, pending, result){
-    if(!out || !pending || !result) return;
-    const images = result.images || [];
-    if(!images.length) return;
+function finishCanvasPendingOutput(out, pending, result, images){
     const meta = {
         runMs: nowMs() - Number(pending.startedAt || nowMs()),
         run: pending.run || {},
@@ -13535,6 +13532,12 @@ function completeRecoverPendingOutput(out, pending, result){
     addGenerationLog({run:meta.run, outputs:images, runMs:meta.runMs || 0});
     refreshRunNodes(gen, out);
     scheduleSave();
+}
+function completeRecoverPendingOutput(out, pending, result){
+    if(!out || !pending || !result) return;
+    const images = result.images || [];
+    if(!images.length) return;
+    finishCanvasPendingOutput(out, pending, result, images);
 }
 async function queryRecoverPendingOutput(pendingId){
     const out = findOutputByPendingId(pendingId);
@@ -13628,25 +13631,7 @@ async function waitCanvasImageTaskResult(taskId, options={}){
 function completeCanvasImageTask(taskId, result){
     const found = findPendingTask(taskId);
     if(!found) return;
-    const {out, pending} = found;
-    const meta = {
-        runMs: nowMs() - Number(pending.startedAt || nowMs()),
-        run: pending.run || {},
-    };
-    meta.run.request = requestMetaFromResult(result);
-    const images = result.images || [];
-    out._pending = (out._pending || []).filter(p => p.id !== pending.id);
-    appendOutputImages(out, images, meta.run?.refs?.[0], [meta]);
-    const gen = nodes.find(n => n.id === meta.run?.node?.id);
-    if(gen){
-        mergeGeneratedOutputs(gen, images, Boolean(pending.appendGenerated));
-        gen.runStatus = 'done';
-        gen.runError = '';
-        gen.running = false;
-    }
-    addGenerationLog({run:meta.run, outputs:images, runMs:meta.runMs || 0});
-    refreshRunNodes(gen, out);
-    scheduleSave();
+    finishCanvasPendingOutput(found.out, found.pending, result, result.images || []);
 }
 function failCanvasImageTask(taskId, message, taskData={}){
     const found = findPendingTask(taskId);
