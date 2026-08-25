@@ -11161,6 +11161,243 @@ async def generate_runninghub_video(payload, provider):
         local_urls = [await save_remote_video_to_output(url, prefix="rh_video_") for url in urls]
         return {"videos": local_urls, "task_id": task_id, "raw": result}
 
+def normalize_image_generation_quality(quality):
+    quality = str(quality or "").strip().lower()
+    if quality not in {"low", "medium", "high"}:
+        return ""
+    return quality
+
+def split_image_reference_lists(reference_images):
+    refs = [ref for ref in (reference_images or []) if ref.get("url")]
+    mask_refs = [ref for ref in refs if str(ref.get("role") or "").strip().lower() == "mask" or str(ref.get("name") or "").lower().endswith("_mask.png")]
+    image_refs = [ref for ref in refs if ref not in mask_refs]
+    return refs, mask_refs, image_refs
+
+def image_generation_timeout(is_gpt2, is_apimart, image_request_mode):
+    if is_gpt2 or is_apimart or image_request_mode in {"openai-json", "openai-video-proxy", "openai-responses"}:
+        return httpx.Timeout(connect=20.0, read=1800.0, write=120.0, pool=20.0)
+    return AI_REQUEST_TIMEOUT
+
+def openai_edit_files(image_refs, mask_refs):
+    files = []
+    opened = []
+    try:
+        for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]:
+            path = output_file_from_url(ref.get("url", ""))
+            if not path:
+                continue
+            fh = open(path, "rb")
+            opened.append(fh)
+            files.append(("image", (os.path.basename(path), fh, content_type_for_path(path))))
+        if mask_refs:
+            mask_path = output_file_from_url(mask_refs[0].get("url", ""))
+            if mask_path:
+                fh = open(mask_path, "rb")
+                opened.append(fh)
+                files.append(("mask", (os.path.basename(mask_path), fh, content_type_for_path(mask_path))))
+        return files, opened
+    except BaseException:
+        for fh in opened:
+            fh.close()
+        raise
+
+async def post_openai_edits(client, edit_url, provider, model, prompt, size, quality, edit_files=None):
+    data = {"model": model, "prompt": prompt, "size": size}
+    if quality:
+        data["quality"] = quality
+    return await client.post(
+        edit_url,
+        headers=api_headers(json_body=False, provider=provider, model=model),
+        data=data,
+        files=edit_files if edit_files is not None else {},
+    )
+
+async def post_openai_video_proxy_image(client, provider, model, prompt, size, base_url, image_refs):
+    body = {
+        "model": model,
+        "prompt": prompt,
+        "aspect_ratio": runninghub_aspect_from_size(size, "1:1"),
+    }
+    video_url = f"{base_url}/videos" if base_url.endswith("/v1") else f"{base_url}/v1/videos"
+    refs_for_proxy = image_refs[:6]
+    local_image_paths = [openai_video_proxy_local_image_path(ref) for ref in refs_for_proxy]
+    has_local_images = any(local_image_paths)
+    if has_local_images:
+        form_data = [(key, value) for key, value in body.items()]
+        for ref, local_path in zip(refs_for_proxy, local_image_paths):
+            if local_path:
+                continue
+            url = await openai_video_proxy_public_reference_url(ref)
+            if url:
+                form_data.append(("images", url))
+        files = []
+        opened = []
+        try:
+            for local_path in local_image_paths:
+                if not local_path:
+                    continue
+                fh = open(local_path, "rb")
+                opened.append(fh)
+                files.append(("images", (os.path.basename(local_path), fh, content_type_for_path(local_path))))
+            return await client.post(
+                video_url,
+                headers=api_headers(json_body=False, provider=provider, model=model),
+                data=form_data,
+                files=files,
+            )
+        finally:
+            for fh in opened:
+                fh.close()
+    if refs_for_proxy:
+        body["images"] = [await openai_video_proxy_public_reference_url(ref) for ref in refs_for_proxy]
+    return await httpx_request_with_transient_retries(
+        client,
+        "POST",
+        video_url,
+        attempts=2,
+        headers=api_headers(provider=provider, model=model),
+        json=body,
+    )
+
+async def post_openai_responses_image(client, provider, model, prompt, size, quality, image_refs, base_url):
+    tool = {"type": "image_generation"}
+    tool["action"] = "edit" if image_refs else "generate"
+    if size and str(size).strip().lower() != "auto":
+        tool["size"] = responses_proxy_tool_size(size)
+    if quality:
+        tool["quality"] = quality
+    size_instruction = responses_image_size_instruction(size)
+    input_text = f"{size_instruction}\n\n{prompt}" if size_instruction else prompt
+    content = [{"type": "input_text", "text": input_text}]
+    force_public_refs = bool(locked_recommended_provider_rule(provider.get("id"), provider.get("name"), base_url))
+    for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]:
+        image_url = await responses_input_image_url(ref, require_public_url=force_public_refs)
+        if image_url:
+            content.append({"type": "input_image", "image_url": image_url})
+    body = {
+        "model": model,
+        "input": [{"role": "user", "content": content}],
+        "tools": [tool],
+        "tool_choice": {"type": "image_generation"},
+    }
+    responses_url = provider_endpoint_url(provider, "image_generation_endpoint", "/v1/responses")
+    return await post_openai_responses(client, responses_url, api_headers(provider=provider, model=model), body)
+
+async def post_openai_json_image(client, provider, model, prompt, size, image_refs, gen_url):
+    # Agnes 等“OpenAI JSON 图片接口”统一走 /images/generations：
+    # 不使用 /images/edits，不传顶层 response_format/n/quality；
+    # 文生图只传 extra_body.response_format，图生图把参考图放进 extra_body.image。
+    extra_body = {"response_format": "url"}
+    if image_refs:
+        extra_body["image"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+    body = {"model": model, "prompt": prompt, "size": size, "extra_body": extra_body}
+    return await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
+
+async def post_apimart_image(client, provider, model, prompt, size, image_refs, gen_url):
+    apimart_size, resolution = apimart_size_resolution(size)
+    # APIMart 的 GPT-Image-2 图生图仍走 /images/generations，
+    # 通过 image_urls 传参考图，不使用 OpenAI multipart /images/edits。
+    body = {
+        "model": model,
+        "prompt": prompt,
+        "n": 1,
+        "size": apimart_size,
+        "resolution": resolution,
+        "official_fallback": False,
+    }
+    if image_refs:
+        body["image_urls"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+    return await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
+
+async def post_gpt2_json_image(client, provider, model, prompt, size, quality, gen_url, edit_url):
+    body = {"model": model, "prompt": prompt, "size": size}
+    if quality:
+        body["quality"] = quality
+    response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
+    if response.status_code >= 400 and images_api_unsupported(response):
+        response = await post_openai_edits(client, edit_url, provider, model, prompt, size, quality)
+    return response
+
+async def post_openai_edits_image(client, provider, model, prompt, size, quality, gen_url, edit_url, image_refs, mask_refs, is_gpt2):
+    files, opened = openai_edit_files(image_refs, mask_refs)
+    edit_failed_status = None
+    edit_failed_text = ""
+    try:
+        try:
+            response = await post_openai_edits(client, edit_url, provider, model, prompt, size, quality, files)
+            if response.status_code >= 400:
+                edit_failed_status = response.status_code
+                edit_failed_text = response.text[:500]
+                response = None
+        except httpx.HTTPError as e:
+            edit_failed_status = -1
+            edit_failed_text = str(e)
+            response = None
+    finally:
+        for fh in opened:
+            fh.close()
+    if response is not None:
+        return response
+    if is_gpt2:
+        raise HTTPException(
+            status_code=502,
+            detail=f"GPT-Image-2 编辑接口 /images/edits 调用失败：{edit_failed_text[:300] or edit_failed_status}。已停止自动重试，避免上游可能已扣费后再次请求。"
+        )
+    print(f"/images/edits failed ({edit_failed_status}): {edit_failed_text[:200]} → 回退到 /images/generations + image:[] JSON")
+    image_payload = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
+    body = {
+        "model": model, "prompt": prompt, "size": size,
+        "response_format": "url", "n": 1,
+        "image": image_payload,
+    }
+    if quality:
+        body["quality"] = quality
+    response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
+    if response.status_code >= 400 and images_api_unsupported(response):
+        raise HTTPException(
+            status_code=502,
+            detail=f"编辑接口 /images/edits 调用失败，且该平台不支持 /images/generations：{edit_failed_text[:300] or edit_failed_status}"
+        )
+    return response
+
+async def post_plain_generation(client, provider, model, prompt, size, quality, gen_url, edit_url):
+    body = {"model": model, "prompt": prompt, "size": size, "response_format": "url", "n": 1}
+    if quality:
+        body["quality"] = quality
+    response = await client.post(
+        gen_url,
+        headers=api_headers(provider=provider, model=model),
+        json=body,
+    )
+    if response.status_code >= 400 and images_api_unsupported(response):
+        response = await post_openai_edits(client, edit_url, provider, model, prompt, size, quality)
+    return response
+
+async def resolve_image_generation_response(client, response, image_request_mode, provider):
+    response.raise_for_status()
+    raw = response.json()
+    try:
+        return extract_image(raw), raw
+    except HTTPException as exc:
+        if image_request_mode == "openai-responses":
+            fallback_image = responses_output_text_image(raw)
+            if fallback_image:
+                return fallback_image, raw
+            try:
+                print(f"RS 响应中没有图片，原始返回（截断）：{json.dumps(raw, ensure_ascii=False)[:800]}")
+            except Exception:
+                pass
+            raise HTTPException(status_code=502, detail=responses_no_image_detail(raw) or exc.detail)
+        task_id = extract_task_id(raw)
+        if not task_id:
+            raise
+    try:
+        task_result = await wait_for_image_task(client, task_id, provider)
+        return extract_image(task_result), task_result
+    except HTTPException as exc:
+        setattr(exc, "upstream_task_id", task_id)
+        raise
+
 async def generate_ai_image(prompt, size, quality, model, reference_images=None, provider_id="comfly", aspect_ratio="", resolution=""):
     provider = get_api_provider(provider_id)
     if is_tudou_provider(provider):
@@ -11187,223 +11424,31 @@ async def generate_ai_image(prompt, size, quality, model, reference_images=None,
     is_apimart = is_apimart_provider(provider)
     # 不对 GPT 尺寸做任何缩小/拦截：用户选什么尺寸就原样发给上游；
     # 若超过 GPT 的最大像素限制被上游拒绝，再由 friendly_image_error_detail 给出友好的像素上限提示。
-    quality = str(quality or "").strip().lower()
-    if quality not in {"low", "medium", "high"}:
-        quality = ""
+    quality = normalize_image_generation_quality(quality)
     base_url = (provider.get("base_url") or AI_BASE_URL).rstrip("/")
     if not base_url:
         raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
     gen_url = provider_endpoint_url(provider, "image_generation_endpoint", "/v1/images/generations")
     edit_url = provider_endpoint_url(provider, "image_edit_endpoint", "/v1/images/edits")
-    refs = [ref for ref in (reference_images or []) if ref.get("url")]
-    mask_refs = [ref for ref in refs if str(ref.get("role") or "").strip().lower() == "mask" or str(ref.get("name") or "").lower().endswith("_mask.png")]
-    image_refs = [ref for ref in refs if ref not in mask_refs]
+    refs, mask_refs, image_refs = split_image_reference_lists(reference_images)
     image_request_mode = effective_image_request_mode(provider, model)
-    request_timeout = httpx.Timeout(connect=20.0, read=1800.0, write=120.0, pool=20.0) if (is_gpt2 or is_apimart or image_request_mode in {"openai-json", "openai-video-proxy", "openai-responses"}) else AI_REQUEST_TIMEOUT
+    request_timeout = image_generation_timeout(is_gpt2, is_apimart, image_request_mode)
     async with httpx.AsyncClient(timeout=request_timeout) as client:
-        response = None
-        async def post_openai_edits(edit_files=None):
-            data = {"model": model, "prompt": prompt, "size": size}
-            if quality:
-                data["quality"] = quality
-            return await client.post(
-                edit_url,
-                headers=api_headers(json_body=False, provider=provider, model=model),
-                data=data,
-                files=edit_files if edit_files is not None else {},
-            )
-
         if image_request_mode == "openai-video-proxy":
-            body = {
-                "model": model,
-                "prompt": prompt,
-                "aspect_ratio": runninghub_aspect_from_size(size, "1:1"),
-            }
-            video_url = f"{base_url}/videos" if base_url.endswith("/v1") else f"{base_url}/v1/videos"
-            refs_for_proxy = image_refs[:6]
-            local_image_paths = [openai_video_proxy_local_image_path(ref) for ref in refs_for_proxy]
-            has_local_images = any(local_image_paths)
-            if has_local_images:
-                form_data = [(key, value) for key, value in body.items()]
-                for ref, local_path in zip(refs_for_proxy, local_image_paths):
-                    if local_path:
-                        continue
-                    url = await openai_video_proxy_public_reference_url(ref)
-                    if url:
-                        form_data.append(("images", url))
-                files = []
-                opened = []
-                try:
-                    for local_path in local_image_paths:
-                        if not local_path:
-                            continue
-                        fh = open(local_path, "rb")
-                        opened.append(fh)
-                        files.append(("images", (os.path.basename(local_path), fh, content_type_for_path(local_path))))
-                    response = await client.post(
-                        video_url,
-                        headers=api_headers(json_body=False, provider=provider, model=model),
-                        data=form_data,
-                        files=files,
-                    )
-                finally:
-                    for fh in opened:
-                        fh.close()
-            else:
-                if refs_for_proxy:
-                    body["images"] = [await openai_video_proxy_public_reference_url(ref) for ref in refs_for_proxy]
-                response = await httpx_request_with_transient_retries(
-                    client,
-                    "POST",
-                    video_url,
-                    attempts=2,
-                    headers=api_headers(provider=provider, model=model),
-                    json=body,
-                )
+            response = await post_openai_video_proxy_image(client, provider, model, prompt, size, base_url, image_refs)
         elif image_request_mode == "openai-responses":
-            tool = {"type": "image_generation"}
-            tool["action"] = "edit" if image_refs else "generate"
-            if size and str(size).strip().lower() != "auto":
-                tool["size"] = responses_proxy_tool_size(size)
-            if quality:
-                tool["quality"] = quality
-            size_instruction = responses_image_size_instruction(size)
-            input_text = f"{size_instruction}\n\n{prompt}" if size_instruction else prompt
-            content = [{"type": "input_text", "text": input_text}]
-            force_public_refs = bool(locked_recommended_provider_rule(provider.get("id"), provider.get("name"), base_url))
-            for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]:
-                image_url = await responses_input_image_url(ref, require_public_url=force_public_refs)
-                if image_url:
-                    content.append({"type": "input_image", "image_url": image_url})
-            body = {
-                "model": model,
-                "input": [{"role": "user", "content": content}],
-                "tools": [tool],
-                "tool_choice": {"type": "image_generation"},
-            }
-            responses_url = provider_endpoint_url(provider, "image_generation_endpoint", "/v1/responses")
-            response = await post_openai_responses(client, responses_url, api_headers(provider=provider, model=model), body)
+            response = await post_openai_responses_image(client, provider, model, prompt, size, quality, image_refs, base_url)
         elif image_request_mode == "openai-json":
-            # Agnes 等“OpenAI JSON 图片接口”统一走 /images/generations：
-            # 不使用 /images/edits，不传顶层 response_format/n/quality；
-            # 文生图只传 extra_body.response_format，图生图把参考图放进 extra_body.image。
-            extra_body = {"response_format": "url"}
-            if image_refs:
-                extra_body["image"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
-            body = {"model": model, "prompt": prompt, "size": size, "extra_body": extra_body}
-            response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
+            response = await post_openai_json_image(client, provider, model, prompt, size, image_refs, gen_url)
         elif is_apimart:
-            apimart_size, resolution = apimart_size_resolution(size)
-            # APIMart 的 GPT-Image-2 图生图仍走 /images/generations，
-            # 通过 image_urls 传参考图，不使用 OpenAI multipart /images/edits。
-            body = {
-                "model": model,
-                "prompt": prompt,
-                "n": 1,
-                "size": apimart_size,
-                "resolution": resolution,
-                "official_fallback": False,
-            }
-            if image_refs:
-                body["image_urls"] = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
-            response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
+            response = await post_apimart_image(client, provider, model, prompt, size, image_refs, gen_url)
         elif is_gpt2 and not image_refs and not mask_refs:
-            body = {"model": model, "prompt": prompt, "size": size}
-            if quality:
-                body["quality"] = quality
-            response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
-            if response.status_code >= 400 and images_api_unsupported(response):
-                response = await post_openai_edits()
+            response = await post_gpt2_json_image(client, provider, model, prompt, size, quality, gen_url, edit_url)
         elif image_refs:
-            # 1) OpenAI 协议的图生图/编辑用 multipart 提交到 /images/edits；
-            # GPT-Image-2 参考图不能走 /images/generations JSON，否则部分平台会忽略原图或报 Images API unsupported。
-            files = []
-            opened = []
-            edit_failed_status = None
-            edit_failed_text = ""
-            try:
-                for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]:
-                    path = output_file_from_url(ref.get("url", ""))
-                    if not path:
-                        continue
-                    fh = open(path, "rb")
-                    opened.append(fh)
-                    files.append(("image", (os.path.basename(path), fh, content_type_for_path(path))))
-                if mask_refs:
-                    mask_path = output_file_from_url(mask_refs[0].get("url", ""))
-                    if mask_path:
-                        fh = open(mask_path, "rb")
-                        opened.append(fh)
-                        files.append(("mask", (os.path.basename(mask_path), fh, content_type_for_path(mask_path))))
-                try:
-                    response = await post_openai_edits(files)
-                    if response.status_code >= 400:
-                        edit_failed_status = response.status_code
-                        edit_failed_text = response.text[:500]
-                        response = None
-                except httpx.HTTPError as e:
-                    edit_failed_status = -1
-                    edit_failed_text = str(e)
-                    response = None
-            finally:
-                for fh in opened:
-                    fh.close()
-            # 2) edits 失败 → 非 GPT-Image-2 可回退到 /images/generations + JSON image:[urls/base64]（grsai 风格）
-            if response is None:
-                if is_gpt2:
-                    raise HTTPException(
-                        status_code=502,
-                        detail=f"GPT-Image-2 编辑接口 /images/edits 调用失败：{edit_failed_text[:300] or edit_failed_status}。已停止自动重试，避免上游可能已扣费后再次请求。"
-                    )
-                print(f"/images/edits failed ({edit_failed_status}): {edit_failed_text[:200]} → 回退到 /images/generations + image:[] JSON")
-                image_payload = [reference_to_data_url(ref, max_size=1536) for ref in image_refs[:ONLINE_IMAGE_REFERENCE_MAX]]
-                body = {
-                    "model": model, "prompt": prompt, "size": size,
-                    "response_format": "url", "n": 1,
-                    "image": image_payload,
-                }
-                if quality:
-                    body["quality"] = quality
-                response = await client.post(gen_url, headers=api_headers(provider=provider, model=model), json=body)
-                if response.status_code >= 400 and images_api_unsupported(response):
-                    raise HTTPException(
-                        status_code=502,
-                        detail=f"编辑接口 /images/edits 调用失败，且该平台不支持 /images/generations：{edit_failed_text[:300] or edit_failed_status}"
-                    )
+            response = await post_openai_edits_image(client, provider, model, prompt, size, quality, gen_url, edit_url, image_refs, mask_refs, is_gpt2)
         else:
-            body = {"model": model, "prompt": prompt, "size": size, "response_format": "url", "n": 1}
-            if quality:
-                body["quality"] = quality
-            response = await client.post(
-                gen_url,
-                headers=api_headers(provider=provider, model=model),
-                json=body,
-            )
-            if response.status_code >= 400 and images_api_unsupported(response):
-                response = await post_openai_edits()
-        response.raise_for_status()
-        raw = response.json()
-        try:
-            return extract_image(raw), raw
-        except HTTPException as exc:
-            if image_request_mode == "openai-responses":
-                fallback_image = responses_output_text_image(raw)
-                if fallback_image:
-                    return fallback_image, raw
-                try:
-                    print(f"RS 响应中没有图片，原始返回（截断）：{json.dumps(raw, ensure_ascii=False)[:800]}")
-                except Exception:
-                    pass
-                raise HTTPException(status_code=502, detail=responses_no_image_detail(raw) or exc.detail)
-            task_id = extract_task_id(raw)
-            if not task_id:
-                raise
-        try:
-            task_result = await wait_for_image_task(client, task_id, provider)
-            return extract_image(task_result), task_result
-        except HTTPException as exc:
-            setattr(exc, "upstream_task_id", task_id)
-            raise
+            response = await post_plain_generation(client, provider, model, prompt, size, quality, gen_url, edit_url)
+        return await resolve_image_generation_response(client, response, image_request_mode, provider)
 
 def upstream_message_from_record(item):
     role = item.get("role")
