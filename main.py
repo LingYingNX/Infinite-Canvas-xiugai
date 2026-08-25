@@ -2783,9 +2783,6 @@ class GenerateRequest(BaseModel):
 class DeleteHistoryRequest(BaseModel):
     timestamp: float
 
-class TokenRequest(BaseModel):
-    token: str
-
 class CloudGenRequest(BaseModel):
     prompt: str
     api_key: str = ""
@@ -2850,10 +2847,6 @@ class MidjourneyModalRequest(BaseModel):
     prompt: str = Field(default="", max_length=ONLINE_IMAGE_PROMPT_MAX_LENGTH)
     speed: str = "relax"
     mask_image: Optional[AIReference] = None
-
-class ImageTaskQueryRequest(BaseModel):
-    provider_id: str = "comfly"
-    task_id: str = Field(min_length=1, max_length=240)
 
 CANVAS_TASKS: Dict[str, Dict[str, Any]] = {}
 CANVAS_TASK_LOCK = Lock()
