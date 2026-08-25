@@ -969,17 +969,8 @@ function renderPreviewField(f){
         const randomBtn = randomButtonHtml(f);
         return `<div class="pfield">${label}<div class="pfield-random-row" style="${randomBtn ? '' : 'grid-template-columns:1fr'}"><input class="pfield-input" type="number" value="${escapeAttr(v)}" oninput="setPreviewValue('${f.id}',parseFloat(this.value)||0)">${randomBtn}</div></div>`;
     }
-    if(f.type === 'slider'){
-        const min = f.min ?? 0, max = f.max ?? 10, step = f.step ?? 1;
-        return `<div class="pfield">${label}<div class="pfield-random-row" style="grid-template-columns:1fr"><div class="pfield-slider">
-            <input type="range" min="${min}" max="${max}" step="${step}" value="${escapeAttr(v)}" oninput="setPreviewValue('${f.id}',parseFloat(this.value))">
-            <span class="pfield-slider-val" data-slider-val="${f.id}">${v}</span>
-        </div></div></div>`;
-    }
-    if(f.type === 'dropdown'){
-        const opts = (f.options || []).map(o => `<option value="${escapeAttr(o)}" ${String(v)===String(o)?'selected':''}>${escapeHtml(o)}</option>`).join('');
-        return `<div class="pfield">${label}<select class="pfield-select" onchange="setPreviewValue('${f.id}',this.value)">${opts || `<option value="">${tr('comfy.noOptions')}</option>`}</select></div>`;
-    }
+    if(f.type === 'slider') return previewSliderHtml(label, f, v);
+    if(f.type === 'dropdown') return previewDropdownHtml(label, f, v);
     if(isMediaField(f)){
         // 浏览器显示用本地 blob URL；如果没有就尝试用 /output/ 之类的可访问 URL；都没有显示占位文字
         const displayUrl = previewImageUrls[f.id] || (typeof v === 'string' && /^(\/|https?:|blob:|data:)/.test(v) ? v : '');
@@ -997,6 +988,17 @@ function renderPreviewField(f){
     return `<div class="pfield">${label}<input class="pfield-input" type="text" value="${escapeAttr(v)}" oninput="setPreviewValue('${f.id}',this.value)"></div>`;
 }
 
+function previewSliderHtml(label, f, v){
+    const min = f.min ?? 0, max = f.max ?? 10, step = f.step ?? 1;
+    return `<div class="pfield">${label}<div class="pfield-random-row" style="grid-template-columns:1fr"><div class="pfield-slider">
+        <input type="range" min="${min}" max="${max}" step="${step}" value="${escapeAttr(v)}" oninput="setPreviewValue('${f.id}',parseFloat(this.value))">
+        <span class="pfield-slider-val" data-slider-val="${f.id}">${v}</span>
+    </div></div></div>`;
+}
+function previewDropdownHtml(label, f, v){
+    const opts = (f.options || []).map(o => `<option value="${escapeAttr(o)}" ${String(v)===String(o)?'selected':''}>${escapeHtml(o)}</option>`).join('');
+    return `<div class="pfield">${label}<select class="pfield-select" onchange="setPreviewValue('${f.id}',this.value)">${opts || `<option value="">${tr('comfy.noOptions')}</option>`}</select></div>`;
+}
 function renderWorkspaceView(){
     const graphWrap = document.querySelector('.graph-svg-wrap');
     const nodesToggle = document.getElementById('nodesToggle');
@@ -1098,17 +1100,8 @@ function renderMiniField(f){
         const randomBtn = randomButtonHtml(f);
         return `<div class="pfield">${label}<div class="pfield-random-row" style="${randomBtn ? '' : 'grid-template-columns:1fr'}"><input class="mini-input" type="number" value="${escapeAttr(v)}" oninput="setPreviewValue('${f.id}',parseFloat(this.value)||0)">${randomBtn}</div></div>`;
     }
-    if(f.type === 'slider'){
-        const min = f.min ?? 0, max = f.max ?? 10, step = f.step ?? 1;
-        return `<div class="pfield">${label}<div class="pfield-random-row" style="grid-template-columns:1fr"><div class="pfield-slider">
-            <input type="range" min="${min}" max="${max}" step="${step}" value="${escapeAttr(v)}" oninput="setPreviewValue('${f.id}',parseFloat(this.value))">
-            <span class="pfield-slider-val" data-slider-val="${f.id}">${v}</span>
-        </div></div></div>`;
-    }
-    if(f.type === 'dropdown'){
-        const opts = (f.options || []).map(o => `<option value="${escapeAttr(o)}" ${String(v)===String(o)?'selected':''}>${escapeHtml(o)}</option>`).join('');
-        return `<div class="pfield">${label}<select class="pfield-select" onchange="setPreviewValue('${f.id}',this.value)">${opts || `<option value="">${tr('comfy.noOptions')}</option>`}</select></div>`;
-    }
+    if(f.type === 'slider') return previewSliderHtml(label, f, v);
+    if(f.type === 'dropdown') return previewDropdownHtml(label, f, v);
     if(f.type === 'boolean'){
         return `<div class="pfield">${label}<div class="pfield-bool"><div class="pfield-bool-track ${v?'on':''}" onclick="setPreviewValue('${f.id}',!${!!v});this.classList.toggle('on')"><div class="pfield-bool-thumb"></div></div></div></div>`;
     }
