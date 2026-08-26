@@ -9,3 +9,9 @@ data/canvases/
 data/media_previews/
 data/projects.json
 data/prompt_libraries.json
+
+# Local test/runtime artifacts
+assets/output/
+data/api_providers.json
+history.json
+.learnings/
