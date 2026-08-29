@@ -10,10 +10,12 @@
     --shadow:rgba(0,0,0,.28); --strong:#d8dee9; --strong-text:#10141d;
 }
 * { box-sizing:border-box; }
+html,body { cursor:default; }
 body { margin:0; height:100vh; overflow:hidden; color:var(--text); font-family:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--page); }
 button,input,select,textarea { font:inherit; }
 button { border:0; cursor:pointer; }
-.shell { position:relative; width:100vw; height:100vh; overflow:hidden; background-color:var(--page); background-image:radial-gradient(var(--grid) 1px, transparent 1px); background-size:24px 24px; cursor:grab; }
+.shell,.world { cursor:default !important; }
+.shell { position:relative; width:100vw; height:100vh; overflow:hidden; background-color:var(--page); background-image:radial-gradient(var(--grid) 1px, transparent 1px); background-size:24px 24px; }
 html[data-studio-scale="off"].studio-scale-managed .smart-back,
 html[data-studio-scale="off"].studio-scale-managed .smart-title,
 html[data-studio-scale="off"].studio-scale-managed .smart-log-toggle,
@@ -34,7 +36,7 @@ html[data-studio-scale="off"].studio-scale-managed .image-edit-modal,
 html[data-studio-scale="off"].studio-scale-managed .preview-modal {
     zoom: var(--studio-ui-scale, 1);
 }
-.shell.panning { cursor:grabbing; }
+.shell.panning { cursor:default !important; }
 .shell.zoom-preview { cursor:crosshair; }
 .world { position:absolute; left:0; top:0; width:6000px; height:4000px; transform-origin:0 0; }
 /* 画布缩放（非 1:1）时，关闭 world 内卡片的 backdrop-filter，避免合成层位图被缩放导致“参数设置”等组件发虚。

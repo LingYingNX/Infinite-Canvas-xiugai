@@ -320,6 +320,70 @@ def smart_flow(page, cid):
     dom_count = page.locator(".image-node").count()
     record("smart node DOM rendered", dom_count >= 3, "dom=%d" % dom_count)
 
+    cursors = page.evaluate(
+        """() => ['documentElement', 'body', 'shell', 'world'].map(key => {
+            const el = key === 'documentElement' ? document.documentElement
+                : key === 'body' ? document.body
+                : document.getElementById(key);
+            return [key, getComputedStyle(el).cursor];
+        })"""
+    )
+    record(
+        "smart canvas uses arrow cursor",
+        all(cursor in {"default", "auto"} for _, cursor in cursors),
+        "cursors=%s" % json.dumps(cursors),
+    )
+
+    port_source = page.evaluate(
+        """() => {
+            const node = createImageNodeAt({x:260, y:560}, [{url:'/static/images/logo.png', name:'port-source'}], {select:false, skipUndo:true});
+            selectedId = '';
+            selectedIds = [];
+            selectedImage = {nodeId:'', index:-1};
+            render();
+            return node.id;
+        }"""
+    )
+    page.wait_for_timeout(150)
+    page.locator('.image-node[data-id="' + port_source + '"]').hover()
+    port = page.locator(
+        '.image-node[data-id="' + port_source + '"] .node-port.port-out'
+    )
+    port_box = port.bounding_box()
+    shell_box = page.locator("#shell").bounding_box()
+    port_ok = bool(port_box and shell_box)
+    if port_ok:
+        page.mouse.move(port_box["x"] + port_box["width"] / 2, port_box["y"] + port_box["height"] / 2)
+        page.mouse.down()
+        port_drag_down = page.evaluate("() => Boolean(portDragState)")
+        page.mouse.move(shell_box["x"] + 1080, shell_box["y"] + 780, steps=10)
+        port_drag_move = page.evaluate("() => portDragState ? {moved:portDragState.moved, hover:portDragState.hoverTargetId} : null")
+        page.mouse.up()
+        page.wait_for_timeout(180)
+        port_state = page.evaluate(
+            """(id) => {
+                const conn = (canvas.connections || []).find(item => item.from === id && item.kind === 'input');
+                const target = conn ? nodes.find(item => item.id === conn.to) : null;
+                return {
+                    targetId: target?.id || '',
+                    targetEmpty: Boolean(target && !(target.images || []).length),
+                    composerOpen: Boolean(composer?.classList.contains('open')),
+                    nodeCount: nodes.length,
+                    selectedId,
+                };
+            }""",
+            port_source,
+        )
+        record(
+            "smart port drop creates node without composer",
+            bool(port_state["targetId"])
+            and port_state["targetEmpty"]
+            and not port_state["composerOpen"],
+            "down=%s move=%s state=%s" % (port_drag_down, json.dumps(port_drag_move), json.dumps(port_state)),
+        )
+    else:
+        record("smart port drop creates node without composer", False, "port not rendered")
+
     drag = page.evaluate(
         """(id) => {
             const n = nodes.find(x => x.id === id);
@@ -354,6 +418,67 @@ def smart_flow(page, cid):
         record("smart drag node", moved, "before=%s after=%s" % (d, after))
     else:
         record("smart drag node", False, "no smart image node")
+
+    drag_selection = page.evaluate(
+        """() => {
+            const oldNode = createImageNodeAt({x:260, y:760}, [{url:'/static/images/logo.png', name:'drag-old'}], {select:false, skipUndo:true});
+            const draggedNode = createImageNodeAt({x:760, y:760}, [{url:'/static/images/logo.png', name:'drag-new'}], {select:false, skipUndo:true});
+            selectedId = oldNode.id;
+            selectedIds = [];
+            selectedImage = {nodeId:'', index:-1};
+            render();
+            const el = document.querySelector('.image-node[data-id="' + CSS.escape(draggedNode.id) + '"] .node-body');
+            if(!el) return {ok:false};
+            const r = el.getBoundingClientRect();
+            return {
+                ok:true,
+                oldId:oldNode.id,
+                draggedId:draggedNode.id,
+                cx:r.x + r.width / 2,
+                cy:r.y + r.height / 2,
+            };
+        }"""
+    )
+    if drag_selection.get("ok"):
+        page.mouse.move(drag_selection["cx"], drag_selection["cy"])
+        page.mouse.down()
+        page.mouse.move(drag_selection["cx"] + 90, drag_selection["cy"] + 40, steps=8)
+        page.mouse.up()
+        selected_after_drag = page.evaluate(
+            """(ids) => ({
+                selectedId,
+                selectedIds:selectedIds.slice(),
+                oldExists:Boolean(nodes.find(node => node.id === ids.oldId)),
+                draggedExists:Boolean(nodes.find(node => node.id === ids.draggedId)),
+            })""",
+            {"oldId": drag_selection["oldId"], "draggedId": drag_selection["draggedId"]},
+        )
+        selected_ok = (
+            selected_after_drag["selectedId"] == drag_selection["draggedId"]
+            and not selected_after_drag["selectedIds"]
+        )
+        record(
+            "smart drag selects dragged node",
+            selected_ok,
+            "state=%s" % json.dumps(selected_after_drag),
+        )
+        page.keyboard.press("Delete")
+        page.wait_for_timeout(120)
+        delete_after_drag = page.evaluate(
+            """(ids) => ({
+                oldExists:Boolean(nodes.find(node => node.id === ids.oldId)),
+                draggedExists:Boolean(nodes.find(node => node.id === ids.draggedId)),
+            })""",
+            {"oldId": drag_selection["oldId"], "draggedId": drag_selection["draggedId"]},
+        )
+        record(
+            "smart delete after drag removes dragged node",
+            delete_after_drag["oldExists"] and not delete_after_drag["draggedExists"],
+            "state=%s" % json.dumps(delete_after_drag),
+        )
+    else:
+        record("smart drag selects dragged node", False, "drag setup failed")
+        record("smart delete after drag removes dragged node", False, "drag setup failed")
 
     sel_setup = page.evaluate(
         """() => {
@@ -408,6 +533,188 @@ def smart_flow(page, cid):
     page.evaluate("() => closeImageEditor()")
     record("smart image editor open/close", True, "logo.png loaded")
 
+    composer_check = page.evaluate(
+        """(id) => {
+            const node = nodes.find(item => item.id === id);
+            if (!node) return {ok:false, reason:'image node missing'};
+            selectedId = id;
+            selectedIds = [];
+            selectedImage = {nodeId:id, index:0};
+            updateComposer();
+            if (!composer?.classList.contains('open')) return {ok:false, reason:'composer not open'};
+            if (!composerPinned) composerPinBtn?.click();
+            return {ok:Boolean(composerPinned), nodeId:id};
+        }""",
+        image_id,
+    )
+    if composer_check.get("ok"):
+        image_delete = page.locator(
+            '.image-node[data-id="' + image_id + '"] .image-delete'
+        )
+        page.locator(
+            '.image-node[data-id="' + image_id + '"] .image-wrap'
+        ).hover()
+        image_delete.dispatch_event("click")
+        page.wait_for_timeout(120)
+        composer_state = page.evaluate(
+            """(id) => {
+                const node = nodes.find(item => item.id === id);
+                return {
+                    composerOpen: Boolean(composer?.classList.contains('open')),
+                    pinned: Boolean(composerPinned),
+                    nodeExists: Boolean(node),
+                    imageCount: node ? (node.images || []).length : -1,
+                };
+            }""",
+            image_id,
+        )
+        record(
+            "smart delete last image closes pinned composer",
+            not composer_state["composerOpen"]
+            and not composer_state["pinned"]
+            and composer_state["nodeExists"]
+            and composer_state["imageCount"] == 0,
+            "state=%s" % json.dumps(composer_state),
+        )
+    else:
+        record(
+            "smart delete last image closes pinned composer",
+            False,
+            "setup failed: %s" % composer_check.get("reason", "unknown"),
+        )
+
+    toolbar_image = page.evaluate(
+        """() => createImageNodeAt({x: 1080, y: 420}, [{url:'/static/images/logo.png', name:'toolbar-e2e'}]).id"""
+    )
+    toolbar_check = page.evaluate(
+        """(id) => {
+            selectedId = id;
+            selectedIds = [];
+            selectedImage = {nodeId:id, index:0};
+            updateComposer();
+            if (!composer?.classList.contains('open')) return {ok:false, reason:'composer not open'};
+            if (!composerPinned) composerPinBtn?.click();
+            return {ok:Boolean(composerPinned)};
+        }""",
+        toolbar_image,
+    )
+    if toolbar_check.get("ok"):
+        node_delete = page.locator(
+            '.image-node[data-id="' + toolbar_image + '"] .node-delete'
+        ).last
+        node_delete.click()
+        page.wait_for_timeout(120)
+        toolbar_state = page.evaluate(
+            """(id) => {
+                const node = nodes.find(item => item.id === id);
+                return {
+                    composerOpen: Boolean(composer?.classList.contains('open')),
+                    pinned: Boolean(composerPinned),
+                    nodeExists: Boolean(node),
+                    imageCount: node ? (node.images || []).length : -1,
+                };
+            }""",
+            toolbar_image,
+        )
+        record(
+            "smart node delete clears pinned composer",
+            not toolbar_state["composerOpen"]
+            and not toolbar_state["pinned"]
+            and toolbar_state["nodeExists"]
+            and toolbar_state["imageCount"] == 0,
+            "state=%s" % json.dumps(toolbar_state),
+        )
+    else:
+        record(
+            "smart node delete clears pinned composer",
+            False,
+            "setup failed: %s" % toolbar_check.get("reason", "unknown"),
+        )
+
+    multi_image = page.evaluate(
+        """() => createImageNodeAt({x: 1460, y: 420}, [
+            {url:'/static/images/logo.png', name:'multi-a'},
+            {url:'/static/images/logo.png', name:'multi-b'}
+        ]).id"""
+    )
+    multi_check = page.evaluate(
+        """(id) => {
+            selectedId = id;
+            selectedIds = [];
+            selectedImage = {nodeId:id, index:0};
+            updateComposer();
+            if (!composer?.classList.contains('open')) return {ok:false, reason:'composer not open'};
+            if (!composerPinned) composerPinBtn?.click();
+            return {ok:Boolean(composerPinned)};
+        }""",
+        multi_image,
+    )
+    if multi_check.get("ok"):
+        image_delete = page.locator(
+            '.image-node[data-id="' + multi_image + '"] .image-delete'
+        ).first
+        page.locator(
+            '.image-node[data-id="' + multi_image + '"] .thumb-item'
+        ).first.hover()
+        image_delete.click()
+        page.wait_for_timeout(120)
+        multi_state = page.evaluate(
+            """(id) => {
+                const node = nodes.find(item => item.id === id);
+                return {
+                    composerOpen: Boolean(composer?.classList.contains('open')),
+                    pinned: Boolean(composerPinned),
+                    nodeExists: Boolean(node),
+                    imageCount: node ? (node.images || []).length : -1,
+                };
+            }""",
+            multi_image,
+        )
+        record(
+            "smart delete image always clears composer",
+            not multi_state["composerOpen"]
+            and not multi_state["pinned"]
+            and multi_state["nodeExists"]
+            and multi_state["imageCount"] == 1,
+            "state=%s" % json.dumps(multi_state),
+        )
+    else:
+        record(
+            "smart delete image always clears composer",
+            False,
+            "setup failed: %s" % multi_check.get("reason", "unknown"),
+        )
+
+    wheel_image = page.evaluate(
+        """() => {
+            const point = screenToWorld({clientX:560, clientY:180});
+            return createImageNodeAt(point, [{url:'/static/images/logo.png', name:'wheel-e2e'}], {select:false}).id;
+        }"""
+    )
+    wheel_check = page.evaluate(
+        """(id) => {
+            selectedId = id;
+            selectedIds = [];
+            selectedImage = {nodeId:id, index:0};
+            updateComposer();
+            return Boolean(composer?.classList.contains('open'));
+        }""",
+        wheel_image,
+    )
+    if wheel_check:
+        page.locator("#composer").hover()
+        before_zoom = page.evaluate("() => viewport.scale")
+        page.mouse.wheel(0, -180)
+        page.wait_for_timeout(120)
+        after_zoom = page.evaluate("() => viewport.scale")
+        record(
+            "smart composer wheel zooms canvas",
+            abs(after_zoom - before_zoom) > 0.001,
+            "before=%s after=%s" % (before_zoom, after_zoom),
+        )
+    else:
+        record("smart composer wheel zooms canvas", False, "composer not open")
+
     comfy = page.evaluate(
         """async () => {
             const origText = smartRequestJsonText;
@@ -455,6 +762,54 @@ def smart_flow(page, cid):
     record("smart no page/console errors", not real_errors, "; ".join(real_errors[:5]))
 
 
+def smart_cross_canvas_copy_flow(page, source_cid, target_cid):
+    errors = attach_errors(page)
+    page.goto(BASE + "/static/smart-canvas.html?id=" + source_cid, wait_until="domcontentloaded")
+    page.wait_for_function(
+        "cid => typeof canvas !== 'undefined' && !!canvas && canvas.id === cid",
+        arg=source_cid,
+        timeout=25000,
+    )
+    source = page.evaluate(
+        """() => {
+            const a = createPromptNode(220, 220, {select:false, skipUndo:true});
+            const b = createPromptNode(620, 220, {select:false, skipUndo:true});
+            connectInputNode(a.id, b.id);
+            selectedId = '';
+            selectedIds = [a.id, b.id];
+            selectedImage = {nodeId:'', index:-1};
+            render();
+            return {ids:[a.id, b.id], connectionCount:(canvas.connections || []).length};
+        }"""
+    )
+    page.keyboard.press("Control+C")
+    page.wait_for_timeout(150)
+    page.goto(BASE + "/static/smart-canvas.html?id=" + target_cid, wait_until="domcontentloaded")
+    page.wait_for_function(
+        "cid => typeof canvas !== 'undefined' && !!canvas && canvas.id === cid",
+        arg=target_cid,
+        timeout=25000,
+    )
+    page.keyboard.press("Control+V")
+    page.wait_for_timeout(260)
+    state = page.evaluate(
+        """() => {
+            const copied = nodes.filter(node => node.type === 'smart-prompt');
+            const ids = new Set(copied.map(node => node.id));
+            const internal = (canvas.connections || []).filter(conn => ids.has(conn.from) && ids.has(conn.to));
+            return {promptCount:copied.length, internalConnections:internal.length};
+        }"""
+    )
+    record(
+        "smart copy/paste works across canvases",
+        state["promptCount"] >= 2 and state["internalConnections"] >= 1,
+        "source=%s target=%s state=%s" % (json.dumps(source), target_cid, json.dumps(state)),
+    )
+    page.wait_for_timeout(300)
+    real_errors = [e for e in errors if "runninghub/workflows" not in e]
+    record("smart cross-canvas copy no page/console errors", not real_errors, "; ".join(real_errors[:5]))
+
+
 def main():
     global BASE
     parser = argparse.ArgumentParser(description="Classic and smart canvas interaction regression")
@@ -477,6 +832,10 @@ def main():
                 smart_id = create_canvas("smart")
                 cids.append(smart_id)
                 smart_flow(context.new_page(), smart_id)
+
+                smart_target_id = create_canvas("smart")
+                cids.append(smart_target_id)
+                smart_cross_canvas_copy_flow(context.new_page(), smart_id, smart_target_id)
             finally:
                 for cid in cids:
                     cleanup_canvas(cid)

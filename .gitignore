@@ -25,3 +25,22 @@ data/api_providers.json
 history.json
 static/runninghub/thumbnails/
 .learnings/
+
+# Test reports and tool caches
+artifacts/
+playwright-report/
+test-results/
+coverage/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+node_modules/
+**/__pycache__/
+*.py[cod]
+
+# Local logs and scratch files
+*.log
+tmp/
+temp/

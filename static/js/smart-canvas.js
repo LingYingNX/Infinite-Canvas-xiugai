@@ -135,6 +135,7 @@ let promptPresetDeleteArmed = false;
 let createMenuPoint = {x:0, y:0};
 let createMenuGroupId = '';
 let nodeClipboard = null;
+const SMART_NODE_CLIPBOARD_KEY = 'smart_canvas_node_clipboard_v1';
 let imageClickTimer = null;
 let suppressImageClickUntil = 0;
 let lastMouseWorld = null;
@@ -1211,7 +1212,7 @@ function rememberCanvasListProject(projectId){
 }
 function canvasListUrlForProject(projectId){
     const pid = rememberCanvasListProject(projectId);
-    return `/static/canvas-list.html?project=${encodeURIComponent(pid)}`;
+    return `/static/canvas-list.html?v=2026.08.29.1787995002&project=${encodeURIComponent(pid)}`;
 }
 function backToCanvasList(){
     savePromptDraftForCurrent();
@@ -6072,6 +6073,21 @@ function cloneSmartNode(node, dx=0, dy=0){
     if(copy.type === 'smart-group') copy.title = copy.title || '智能分组';
     return copy;
 }
+function readNodeClipboard(){
+    if(nodeClipboard?.nodes?.length) return nodeClipboard;
+    try {
+        const stored = JSON.parse(localStorage.getItem(SMART_NODE_CLIPBOARD_KEY) || 'null');
+        if(stored?.format === 'infinite-smart-canvas-nodes' && Array.isArray(stored.nodes) && stored.nodes.length){
+            nodeClipboard = {
+                format:stored.format,
+                version:stored.version || 1,
+                nodes:stored.nodes.map(serializableSmartNode).filter(Boolean),
+                connections:Array.isArray(stored.connections) ? stored.connections.map(conn => ({...conn})) : []
+            };
+        }
+    } catch(_) {}
+    return nodeClipboard;
+}
 function copySelectedNodes(){
     if(!canvas || isEditableTarget(document.activeElement)) return;
     const ids = selectedNodeIds();
@@ -6080,16 +6096,20 @@ function copySelectedNodes(){
     const idSet = new Set(copiedNodes.map(n => n.id));
     const copiedConnections = (canvas.connections || []).filter(c => idSet.has(c.from) && idSet.has(c.to));
     nodeClipboard = {
-        nodes:JSON.parse(JSON.stringify(copiedNodes)),
+        format:'infinite-smart-canvas-nodes',
+        version:1,
+        nodes:copiedNodes.map(serializableSmartNode).filter(Boolean),
         connections:JSON.parse(JSON.stringify(copiedConnections))
     };
+    try { localStorage.setItem(SMART_NODE_CLIPBOARD_KEY, JSON.stringify(nodeClipboard)); } catch(_) {}
     toast(`已复制 ${copiedNodes.length} 个节点`);
 }
 function pasteNodes(){
-    if(!canvas || !nodeClipboard?.nodes?.length || isEditableTarget(document.activeElement)) return;
+    const clipboard = readNodeClipboard();
+    if(!canvas || !clipboard?.nodes?.length || isEditableTarget(document.activeElement)) return;
     lastNodePasteAt = Date.now();
     pushUndo();
-    const sourceNodes = nodeClipboard.nodes;
+    const sourceNodes = clipboard.nodes;
     const xs = sourceNodes.map(n => Number(n.x) || 0);
     const ys = sourceNodes.map(n => Number(n.y) || 0);
     const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
@@ -6108,8 +6128,9 @@ function pasteNodes(){
             copy.inputNodeIds = copy.inputNodeIds.map(id => idMap.get(id)).filter(Boolean);
         }
         if(copy.sourceNodeId) copy.sourceNodeId = idMap.get(copy.sourceNodeId) || '';
+        if(Array.isArray(copy.items)) copy.items = copy.items.map(id => idMap.get(id)).filter(Boolean);
     });
-    const newConnections = (nodeClipboard.connections || []).map(conn => ({
+    const newConnections = (clipboard.connections || []).map(conn => ({
         ...conn,
         from:idMap.get(conn.from),
         to:idMap.get(conn.to)
@@ -9514,8 +9535,16 @@ function handlePortDrop(drag, e){
     }
     const p = screenToWorld(e);
     undoSuppressed = true;
-    const newNode = createImageNodeAt(p, [], {select:true, skipUndo:true});
+    const selectionSnapshot = {
+        selectedId,
+        selectedIds:selectedIds.slice(),
+        selectedImage:{...selectedImage}
+    };
+    const newNode = createImageNodeAt(p, [], {select:false, skipUndo:true});
     undoSuppressed = false;
+    selectedId = selectionSnapshot.selectedId;
+    selectedIds = selectionSnapshot.selectedIds;
+    selectedImage = selectionSnapshot.selectedImage;
     const fromId = drag.fromPort === 'out' ? drag.fromId : newNode.id;
     const toId = drag.fromPort === 'out' ? newNode.id : drag.fromId;
     connectInputNode(fromId, toId);
@@ -9804,6 +9833,15 @@ function bindNodeDragAndDrop(el, id){
                 const n = nodes.find(x => x.id === dragId);
                 return n ? {id:n.id, ox:Number(n.x) || 0, oy:Number(n.y) || 0} : null;
             }).filter(Boolean);
+            if(selectedIds.includes(node.id)){
+                selectedId = '';
+                selectedIds = dragIds.slice();
+            } else {
+                selectedId = node.id;
+                selectedIds = [];
+            }
+            selectedImage = {nodeId:'', index:-1};
+            syncSelectionUi();
             dragState = {id:node.id, startX:e.clientX, startY:e.clientY, ox:node.x || 0, oy:node.y || 0, group, groupIds:group.map(item => item.id), ctrlGroup:Boolean(e.ctrlKey)};
             document.body.classList.add('smart-node-drag');
             capturePendingUndo();
@@ -9988,6 +10026,9 @@ function deleteNode(id){
     selectedIds = selectedIds.filter(selected => !deleteIds.has(selected));
     if(deleteIds.has(selectedImage.nodeId)) selectedImage = {nodeId:'', index:-1};
     render();
+    if([...deleteIds].some(deleteId => composerSubjectMatchesNode(deleteId))){
+        clearComposerSubject({unpin:true});
+    }
     scheduleSave();
 }
 function clearNodeMediaBeforeDelete(id){
@@ -10011,6 +10052,9 @@ function clearNodeMediaBeforeDelete(id){
     selectedId = id;
     selectedIds = [];
     render();
+    if(composerSubjectMatchesNode(id)){
+        clearComposerSubject({unpin:true});
+    }
     scheduleSave();
     return true;
 }
@@ -10204,6 +10248,9 @@ function deleteImage(id, imageIndex){
     if(selectedImage.nodeId === id) selectedImage = {nodeId:id, index:Math.min(selectedImage.index, node.images.length - 1)};
     if(selectedImage.index < 0) selectedImage = {nodeId:'', index:-1};
     render();
+    if(composerSubjectMatchesNode(id)){
+        clearComposerSubject({unpin:true});
+    }
     scheduleSave();
 }
 async function renameSmartNodeImage(nodeId, imageIndex){
@@ -12848,6 +12895,39 @@ function applyImageEdit(){
 let lastComposerNodeId = '';
 let activeComposerSubject = null;
 let composerPinned = false;
+function composerSubjectMatchesNode(id){
+    const target = String(id || '');
+    return Boolean(target) && (
+        String(lastComposerNodeId || '').split(':')[0] === target
+        || String(activeComposerSubject?.id || '') === target
+    );
+}
+function clearComposerSubject({unpin=false}={}){
+    activeComposerSubject = null;
+    lastComposerNodeId = '';
+    composer?.classList.remove('open');
+    if(cascadeRunBtn) cascadeRunBtn.style.display = 'none';
+    setPromptInputLocked(false);
+    setPromptText('');
+    if(unpin){
+        composerPinned = false;
+        composerPinBtn?.classList.remove('active');
+        const icon = composerPinBtn?.querySelector('i');
+        const label = composerPinBtn?.querySelector('span');
+        const title = tr('smart.pinComposer');
+        if(icon) icon.setAttribute('data-lucide', 'pin');
+        if(label){
+            label.textContent = title;
+            label.removeAttribute('data-i18n');
+        }
+        if(composerPinBtn){
+            composerPinBtn.title = title;
+            composerPinBtn.setAttribute('aria-label', title);
+            composerPinBtn.removeAttribute('data-i18n-title');
+        }
+        refreshIcons();
+    }
+}
 function savePromptDraftForCurrent(){
     if(promptInput?.dataset?.promptLocked === '1') return;
     const subject = activeComposerNode();
@@ -17642,9 +17722,11 @@ function handleSmartThumbDragMove(e){
                 }
                 const point = screenToWorld(e);
                 selectedId = '';
+                selectedIds = [];
                 selectedImage = {nodeId:'', index:-1};
                 const newNode = createImageNodeAt(point, [img], {select:false, skipUndo:true});
                 undoSuppressed = false;
+                selectedId = newNode.id;
                 dragState = {id:newNode.id, startX:e.clientX, startY:e.clientY, ox:newNode.x, oy:newNode.y, thumbDetached:true};
                 thumbDragState.detached = true;
                 render();
@@ -17929,7 +18011,7 @@ window.onmouseup = e => {
     handleSmartNodeDragUp(e);
 };
 shell.addEventListener('wheel', e => {
-    if(e.target.closest('.composer,.smart-back,.image-edit-modal,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,.minimax-library-list,.minimax-ref-track,[data-thumb-scroll]')) return;
+    if(e.target.closest('.smart-back,.image-edit-modal,.asset-panel,.asset-toggle,.smart-log-toggle,.smart-shortcut-toggle,.smart-workflow-toggle,.workflow-transfer-panel,.log-modal,.shortcut-modal,.prompt-node-segments,.prompt-node-text,.prompt-node-llm,.smart-group-list,.minimax-library-list,.minimax-ref-track,[data-thumb-scroll]')) return;
     e.preventDefault();
     const rect = shell.getBoundingClientRect();
     const sx = e.clientX - rect.left;
@@ -17990,7 +18072,7 @@ window.addEventListener('paste', e => {
         e.preventDefault();
         return;
     }
-    if(nodeClipboard?.nodes?.length && !isEditableTarget(e.target)){
+    if(readNodeClipboard()?.nodes?.length && !isEditableTarget(e.target)){
         e.preventDefault();
         pasteNodes();
     }
@@ -18040,12 +18122,12 @@ window.addEventListener('keydown', e => {
         copySelectedNodes();
         return;
     }
-    if((e.ctrlKey || e.metaKey) && key === 'v' && !isEditableTarget(e.target) && nodeClipboard?.nodes?.length){
+    if((e.ctrlKey || e.metaKey) && key === 'v' && !isEditableTarget(e.target)){
         const requestedAt = Date.now();
         setTimeout(() => {
             if(lastImagePasteAt >= requestedAt) return;
             if(lastNodePasteAt >= requestedAt) return;
-            pasteNodes();
+            if(readNodeClipboard()?.nodes?.length) pasteNodes();
         }, 90);
     }
     if(e.key === 'Escape' && imageEditModal.classList.contains('open')){

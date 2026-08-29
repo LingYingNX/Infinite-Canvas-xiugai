@@ -2511,7 +2511,7 @@ function requestedCanvasListProject(){
 
 function canvasListUrlForProject(projectId){
     const pid = rememberCanvasListProject(projectId);
-    return `/static/canvas-list.html?project=${encodeURIComponent(pid)}`;
+    return `/static/canvas-list.html?v=2026.08.29.1787995002&project=${encodeURIComponent(pid)}`;
 }
 
 function addNode(node){

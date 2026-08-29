@@ -138,9 +138,9 @@ html[data-studio-scale="off"].studio-scale-managed .workspace {
 .theme-dark .ws-paste-btn { background:#2563eb; color:#fff; border-color:rgba(147,197,253,.28); box-shadow:0 10px 24px rgba(37,99,235,.34); }
 .theme-dark .ws-paste-btn:hover { background:#1d4ed8; }
 
-.ws-board { position:relative; flex:1; min-height:0; overflow:hidden; background:var(--page); background-image:linear-gradient(rgba(100,116,139,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(100,116,139,.08) 1px, transparent 1px); background-size:20px 20px, 20px 20px; cursor:grab; user-select:none; }
+.ws-board { position:relative; flex:1; min-height:0; overflow:hidden; background:var(--page); background-image:linear-gradient(rgba(100,116,139,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(100,116,139,.08) 1px, transparent 1px); background-size:20px 20px, 20px 20px; cursor:default; user-select:none; }
 .theme-dark .ws-board { background-image:linear-gradient(rgba(148,163,184,.12) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,.12) 1px, transparent 1px); }
-.ws-board.panning { cursor:grabbing; }
+.ws-board.panning { cursor:default; }
 .ws-board-world { position:absolute; left:0; top:0; transform-origin:0 0; }
 
 .ws-board-empty { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center; gap:12px; width:min(320px, calc(100% - 48px)); color:var(--faint); }
