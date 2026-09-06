@@ -158,7 +158,13 @@ function onBoardMouseDown(e){
     if(activeRename) activeRename.blur();
     e.preventDefault();
     closeCardMenu();
-    marqueeState = { start: screenToWorld(e.clientX, e.clientY), startScreen: {x:e.clientX, y:e.clientY}, moved: false };
+    marqueeState = {
+        start: screenToWorld(e.clientX, e.clientY),
+        startScreen: {x:e.clientX, y:e.clientY},
+        moved: false,
+        additive: e.ctrlKey || e.metaKey,
+        baseIds: new Set(selectedIds)
+    };
 }
 function onBoardPanMove(e){
     if(!panState) return;
@@ -180,6 +186,7 @@ function onMarqueeMove(e){
     if(!marqueeState.moved){
         if(Math.abs(p.x - sx) * viewport.scale <= 4 && Math.abs(p.y - sy) * viewport.scale <= 4) return;
         marqueeState.moved = true;
+        board.classList.add('marquee-selecting');
     }
     const z = uiScale();
     const rect = board.getBoundingClientRect();
@@ -189,30 +196,32 @@ function onMarqueeMove(e){
         (e.clientX - rect.left) / z,
         (e.clientY - rect.top) / z
     );
+    applyMarqueeSelection(e);
+}
+function applyMarqueeSelection(e){
+    if(!marqueeState) return;
+    const a = marqueeState.start, b = screenToWorld(e.clientX, e.clientY);
+    const rect = {
+        left: Math.min(a.x, b.x),
+        top: Math.min(a.y, b.y),
+        right: Math.max(a.x, b.x),
+        bottom: Math.max(a.y, b.y)
+    };
+    const ids = Array.from(boardWorld.querySelectorAll('.ws-card'))
+        .filter(card => rectsIntersect(cardWorldRect(card), rect))
+        .map(card => card.dataset.canvasId);
+    selectedIds = marqueeState.additive ? new Set([...marqueeState.baseIds, ...ids]) : new Set(ids);
+    lastSelectedId = selectedIds.size ? Array.from(selectedIds)[0] : null;
+    syncSelectionUI();
 }
 function onMarqueeEnd(e){
     if(!marqueeState) return;
     const ms = marqueeState;
+    if(ms.moved) applyMarqueeSelection(e);
     marqueeState = null;
+    board.classList.remove('marquee-selecting');
     SelectionBox.hide();
     if(ms.moved){
-        const a = ms.start, b = screenToWorld(e.clientX, e.clientY);
-        const rect = {
-            left: Math.min(a.x, b.x),
-            top: Math.min(a.y, b.y),
-            right: Math.max(a.x, b.x),
-            bottom: Math.max(a.y, b.y)
-        };
-        const ids = Array.from(boardWorld.querySelectorAll('.ws-card'))
-            .filter(card => rectsIntersect(cardWorldRect(card), rect))
-            .map(card => card.dataset.canvasId);
-        if(e.ctrlKey || e.metaKey){
-            ids.forEach(id => selectedIds.add(id));
-        } else {
-            selectedIds = new Set(ids);
-        }
-        lastSelectedId = selectedIds.size ? Array.from(selectedIds)[0] : null;
-        syncSelectionUI();
     } else {
         selectedIds.clear();
         lastSelectedId = null;

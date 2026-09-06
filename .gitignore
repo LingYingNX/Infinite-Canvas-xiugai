@@ -5,7 +5,42 @@ resources/
 
 # Local user data
 assets/input/
+assets/library/
+assets/uploads/
 data/canvases/
+data/conversations/
 data/media_previews/
 data/projects.json
 data/prompt_libraries.json
+data/asset_library.json
+data/runninghub_workflows.json
+data/shared_folders.json
+data/storage_settings.json
+global_config.json
+
+# Local test/runtime artifacts
+output/
+assets/output/
+data/api_providers.json
+history.json
+static/runninghub/thumbnails/
+.learnings/
+
+# Test reports and tool caches
+artifacts/
+playwright-report/
+test-results/
+coverage/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+node_modules/
+**/__pycache__/
+*.py[cod]
+
+# Local logs and scratch files
+*.log
+tmp/
+temp/
