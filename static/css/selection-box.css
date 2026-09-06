@@ -1,2 +1,2 @@
-.selection-box { position:absolute; z-index:45; border:1px solid var(--strong); background:rgba(15,23,42,.08); border-radius:10px; pointer-events:none; display:none; }
-.theme-dark .selection-box { background:rgba(248,250,252,.1); }
+.selection-box { position:absolute; z-index:45; border:1px solid #8b5cf6; background:transparent; border-radius:5px; pointer-events:none; display:none; }
+.theme-dark .selection-box { border-color:#a78bfa; background:transparent; }

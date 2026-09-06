@@ -1575,3 +1575,22 @@ input[type=range].smart-range::-webkit-slider-thumb { -webkit-appearance:none; w
 .smart-group-summary i,.smart-group-summary svg { width:13px; height:13px; }
 .smart-group-empty { flex:1 1 auto; min-height:74px; display:flex; align-items:center; justify-content:center; gap:6px; color:var(--faint); font-size:10px; font-weight:700; text-align:center; border-radius:10px; border:1px dashed var(--line); background:var(--soft); }
 .smart-group-empty i,.smart-group-empty svg { width:14px; height:14px; }
+
+body.smart-selecting .image-node,
+body.smart-selecting .image-node:hover { transform:none !important; transition:none !important; }
+body.smart-selecting .image-node { box-shadow:none !important; }
+body.smart-selecting .image-node:hover,
+body.smart-selecting .image-node.group-node:hover,
+body.smart-selecting .image-node.empty-node:hover,
+body.smart-selecting .image-node.prompt-smart-node:hover,
+body.smart-selecting .image-node.loop-smart-node:hover,
+body.smart-selecting .image-node.minimax-smart-node:hover { box-shadow:none !important; }
+body.smart-selecting .image-node:hover .floating-node-actions,
+body.smart-selecting .image-node:hover .node-port,
+body.smart-selecting .image-node:hover .node-resize-handle,
+body.smart-selecting .image-node:hover .image-resolution-badge { opacity:0 !important; pointer-events:none !important; }
+.image-node.selected,
+.image-node.selected:hover { border-color:#8b5cf6 !important; box-shadow:0 0 0 2px rgba(139,92,246,.35) !important; transform:none !important; }
+.image-node.selected .image-wrap > img,
+.image-node.selected .image-wrap > .node-img,
+.image-node.selected .image-wrap > .media-video-card { border-color:#8b5cf6 !important; box-shadow:0 0 0 1px rgba(139,92,246,.55) !important; }

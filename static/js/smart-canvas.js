@@ -1199,10 +1199,10 @@ function activeComposerNode(){
     return isSmartRunnableNode(node) ? node : null;
 }
 function persistActiveSmartSettings(){
-    if(!composer?.classList?.contains('open')) return;
+    canvasDefaultSmartSettings = settingsForStorage(settings);
     const subject = activeComposerNode();
-    if(!subject) return;
-    subject.runSettings = settingsForStorage(settings);
+    if(!composer?.classList?.contains('open') || !subject) return;
+    subject.runSettings = cloneSmartSettings(canvasDefaultSmartSettings);
     rememberRecentSmartSettings(settings, subject);
 }
 function rememberCanvasListProject(projectId){
@@ -17105,22 +17105,34 @@ function resumeSmartPendingTasks(){
 function updateSelectionBox(event){
     if(!selectionState) return;
     SelectionBox.update(selectionState.startScreen.x, selectionState.startScreen.y, event.clientX, event.clientY);
+    if(!selectionState.moved){
+        if(Math.abs(event.clientX - selectionState.startScreen.x) <= 4 && Math.abs(event.clientY - selectionState.startScreen.y) <= 4) return;
+        selectionState.moved = true;
+    }
+    applySmartSelectionPreview(event);
 }
-function finishSelection(event){
+function applySmartSelectionPreview(event){
     if(!selectionState) return;
     const a = selectionState.startWorld;
     const b = screenToWorld(event);
     const minX = Math.min(a.x, b.x), minY = Math.min(a.y, b.y);
     const maxX = Math.max(a.x, b.x), maxY = Math.max(a.y, b.y);
-    selectedIds = nodes.filter(node => {
+    const ids = nodes.filter(node => {
         const r = nodeRect(node);
         return r.x < maxX && r.x + r.width > minX && r.y < maxY && r.y + r.height > minY;
     }).map(n => n.id);
+    selectedIds = selectionState.additive ? [...new Set([...selectionState.baseIds, ...ids])] : ids;
     selectedId = selectedIds.length === 1 ? selectedIds[0] : '';
     selectedImage = {nodeId:'', index:-1};
+    syncSelectionUi();
+}
+function finishSelection(event){
+    if(!selectionState) return;
+    applySmartSelectionPreview(event);
     selectionState = null;
     selectionJustFinished = true;
     SelectionBox.hide();
+    document.body.classList.remove('smart-selecting');
     render();
     setTimeout(() => { selectionJustFinished = false; }, 0);
 }
@@ -17393,7 +17405,14 @@ shell.onmousedown = e => {
     if(e.button === 0){
         e.preventDefault();
         didPan = false;
-        selectionState = {startScreen:{x:e.clientX, y:e.clientY}, startWorld:screenToWorld(e)};
+        selectionState = {
+            startScreen:{x:e.clientX, y:e.clientY},
+            startWorld:screenToWorld(e),
+            moved:false,
+            additive:e.ctrlKey || e.metaKey,
+            baseIds:selectedIds.slice()
+        };
+        document.body.classList.add('smart-selecting');
         updateSelectionBox(e);
         return;
     }
@@ -18163,6 +18182,11 @@ window.addEventListener('keyup', e => {
 });
 window.addEventListener('blur', () => {
     isRKeyDown = false;
+    if(selectionState){
+        selectionState = null;
+        SelectionBox.hide();
+        document.body.classList.remove('smart-selecting');
+    }
 });
 engineSelect.onchange = () => {
     settings.engine = engineSelect.value;

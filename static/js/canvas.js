@@ -14544,7 +14544,7 @@ function startSelection(e){
     e.preventDefault();
     e.stopPropagation();
     if(document.activeElement && document.activeElement !== document.body) document.activeElement.blur();
-    selectDrag = {sx:e.clientX, sy:e.clientY, x:e.clientX, y:e.clientY};
+    selectDrag = {sx:e.clientX, sy:e.clientY, x:e.clientX, y:e.clientY, moved:false};
     document.body.classList.add('canvas-selecting');
     SelectionBox.update(selectDrag.sx, selectDrag.sy, selectDrag.x, selectDrag.y);
     window.onmousemove = e2 => updateSelectionBox(e2.clientX, e2.clientY);
@@ -14554,17 +14554,27 @@ function updateSelectionBox(x, y){
     if(!selectDrag) return;
     selectDrag.x = x; selectDrag.y = y;
     SelectionBox.update(selectDrag.sx, selectDrag.sy, x, y);
+    if(!selectDrag.moved){
+        if(Math.abs(x - selectDrag.sx) <= 4 && Math.abs(y - selectDrag.sy) <= 4) return;
+        selectDrag.moved = true;
+    }
+    applyCanvasSelectionPreview();
 }
-function finishSelection(){
+function applyCanvasSelectionPreview(){
     if(!selectDrag) return;
     const rect = selectionBox.getBoundingClientRect();
-    SelectionBox.hide();
     selected.clear();
     nodesEl.querySelectorAll('.node').forEach(el => {
         const r = el.getBoundingClientRect();
         const overlaps = r.left < rect.right && r.right > rect.left && r.top < rect.bottom && r.bottom > rect.top;
         if(overlaps) selected.add(el.dataset.id);
     });
+    refreshSelectionVisuals();
+}
+function finishSelection(){
+    if(!selectDrag) return;
+    applyCanvasSelectionPreview();
+    SelectionBox.hide();
     selectDrag = null;
     document.body.classList.remove('canvas-selecting');
     window.onmousemove = null;
