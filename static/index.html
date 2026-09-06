@@ -1525,6 +1525,12 @@
                     </svg>
                     <span class="nav-text" data-i18n="nav.online">在线生图</span>
                 </div>
+                <div class="nav-item" onclick="switchUI(this, 'repair-studio')">
+                    <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                    </svg>
+                    <span class="nav-text" data-i18n="nav.repairStudio">在线编辑</span>
+                </div>
                 <div class="nav-item" onclick="switchUI(this, 'gpt-chat')">
                     <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
@@ -1677,6 +1683,7 @@
             <iframe id="frame-klein" data-src="/static/klein.html?v=2026.08.04.1787556490" scrolling="yes"></iframe>
             <iframe id="frame-angle" data-src="/static/angle.html?v=2026.08.04.1787556490" scrolling="yes"></iframe>
             <iframe id="frame-online" data-src="/static/online.html?v=2026.08.04.1787556490" scrolling="yes"></iframe>
+            <iframe id="frame-repair-studio" data-src="/static/repair-studio.html?v=2026.09.05.1" scrolling="yes"></iframe>
             <iframe id="frame-gpt-chat" data-src="/static/gpt-chat.html?v=2026.08.04.1787217867" scrolling="yes"></iframe>
             <iframe id="frame-asset-manager" data-src="/static/asset-manager.html?v=2026.08.04.1787636247" scrolling="yes"></iframe>
             <iframe id="frame-api-settings" data-src="/static/api-settings.html?v=2026.08.04.1787639845" scrolling="yes"></iframe>
@@ -1792,7 +1799,7 @@
         const SIDEBAR_SETTINGS_COLLAPSED_KEY = 'studio_sidebar_settings_collapsed';
         const SIDEBAR_PINNED_KEY = 'studio_sidebar_pinned';
         const DEFAULT_PAGE_ID = 'zimage';
-        const PAGE_IDS = ['zimage','enhance','klein','angle','online','gpt-chat','canvas','asset-manager','api-settings','comfyui-settings'];
+        const PAGE_IDS = ['zimage','enhance','klein','angle','online','repair-studio','gpt-chat','canvas','asset-manager','api-settings','comfyui-settings'];
         const LOCAL_PAGE_IDS = ['zimage','enhance','klein','angle'];
         const PROJECT_URL = 'https://github.com/hero8152/Infinite-Canvas';
         let appInfo = { version:'', repo_url:PROJECT_URL, version_url:'https://raw.githubusercontent.com/hero8152/Infinite-Canvas/main/VERSION' };
