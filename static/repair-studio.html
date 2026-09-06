@@ -27,7 +27,7 @@
         .container-box { max-width:1280px; margin:0 auto; padding:0 40px; margin-top:50px; }
         .nano-input { background:var(--card); border:1px solid #eef0f2; transition:all .3s var(--easing); }
         .nano-input:focus { border-color:#000; box-shadow:0 0 0 1px #000; }
-        .upload-item { background:var(--card); border:1px dashed #e2e8f0; transition:all .4s var(--easing); position:relative; overflow:hidden; }
+        .upload-item { background:var(--card); border:1px solid #e2e8f0; transition:all .4s var(--easing); position:relative; overflow:hidden; }
         .upload-item:hover,.upload-item.drag-over { border-color:#000; transform:translateY(-2px); }
         .preview-img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; animation:fadeIn .5s var(--easing); }
         .glass-btn { background:#111827; transition:all .3s var(--easing); }
@@ -82,6 +82,7 @@
         .repair-left { display:grid; gap:8px; min-width:0; }
         .repair-left .space-y-4 > * + * { margin-top:6px; }
         .repair-compact .nano-input { min-height:68px; padding:8px 12px; border-radius:12px; font-size:12px; }
+        .repair-compact #promptInput { min-height:0; padding:24px; border-radius:24px; font-size:14px; line-height:1.25rem; }
         .repair-compact .upload-item { aspect-ratio:4 / 3; border-radius:12px; }
         .repair-compact .repair-toolbar { gap:6px; }
         .repair-compact .repair-tool { min-height:30px; padding:0 8px; border-radius:8px; font-size:11px; }
@@ -91,10 +92,10 @@
         .repair-compact .size-custom { height:30px; border-radius:9px; font-size:10px; }
         .repair-compact .size-fit-btn { height:30px; border-radius:9px; font-size:9px; }
         .repair-compact #genBtn { padding-top:10px; padding-bottom:10px; border-radius:16px; box-shadow:none; }
-        #repairStage { aspect-ratio:4 / 3; min-height:0; border:1px dashed #cbd5e1; border-radius:16px; background:#f8fafc; box-shadow:none; }
-        .image-bounds { position:absolute; z-index:2; border:1.5px dashed #2563eb; border-radius:8px; pointer-events:none; display:none; }
-        .image-bounds.guide { inset:6%; display:block; }
-        .timeline-frame { margin-top:12px; min-height:150px; border:1px dashed #cbd5e1; border-radius:16px; background:transparent; padding:10px; }
+        #repairStage { aspect-ratio:4 / 3; min-height:0; border:1px solid #cbd5e1; border-radius:16px; background:#f8fafc; box-shadow:none; }
+        .image-bounds { position:absolute; z-index:2; border:0; border-radius:8px; pointer-events:none; display:none !important; }
+        .image-bounds.guide { inset:6%; display:none !important; }
+        .timeline-frame { margin-top:12px; min-height:150px; border:1px solid #cbd5e1; border-radius:16px; background:transparent; padding:10px; }
         .repair-compact .timeline-list { gap:8px; margin:0; }
         .repair-compact .timeline-item { padding:6px; border-radius:10px; }
         .repair-compact .timeline-outputs { width:48px; min-height:36px; }
@@ -104,6 +105,8 @@
         .project-tab { flex:0 0 auto; min-width:112px; height:40px; display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:0 14px; border:1px solid #e5e7eb; border-radius:12px; background:#fff; color:#1f2937; font-size:13px; font-weight:500; }
         .project-tab:hover { border-color:#d9dce1; }
         .project-tab.active { background:#111827; border-color:#111827; color:#fff; }
+        .project-title-input { flex:0 1 auto; width:auto; min-width:2ch; max-width:calc(100% - 14px); height:24px; padding:1px 3px; border:1px solid #9ca3af; border-radius:3px; background:#fff; color:#111827; font:inherit; outline:none; }
+        .project-tab.active .project-title-input { border-color:#9ca3af; }
         .project-dot { width:6px; height:6px; border-radius:50%; background:#c7cbd1; }
         .project-tab.running .project-dot { background:#2563eb; animation:pulse 1.2s infinite; }
         .project-tab.done .project-dot { background:#16a34a; }
@@ -115,7 +118,9 @@
         .stage-layer { position:absolute; inset:0; opacity:0; pointer-events:none; }
         .stage-layer.active { opacity:1; pointer-events:auto; }
         .stage-layer canvas { position:absolute; inset:0; width:100%; height:100%; display:block; }
-        .maskCanvas { cursor:crosshair; touch-action:none; }
+        .maskCanvas { cursor:default; touch-action:none; }
+        .stage-layer.has-source .maskCanvas { cursor:crosshair; }
+        #repairStage.drag-over { border-color:#2563eb; box-shadow:0 0 0 2px rgba(37,99,235,.18); }
         .timeline-list { list-style:none; margin:12px 0 0; padding:0; display:grid; gap:10px; max-height:380px; overflow:auto; }
         .timeline-item { display:grid; grid-template-columns:64px minmax(0,1fr); gap:10px; padding:8px; border:1px solid #e5e7eb; border-radius:12px; background:#f6f7f8; }
         .timeline-outputs { width:64px; min-height:48px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:3px; }
@@ -160,7 +165,7 @@
                         <i data-lucide="terminal" class="w-3.5 h-3.5"></i>
                         <span class="text-[10px] font-black uppercase tracking-widest">修复说明</span>
                     </div>
-                    <textarea id="promptInput" rows="2" class="nano-input w-full p-6 rounded-3xl text-sm outline-none resize-none placeholder-gray-300" placeholder="例如：把遮罩位置修复干净，保持原有材质和光线"></textarea>
+                    <textarea id="promptInput" rows="5" class="nano-input w-full p-6 rounded-3xl text-sm outline-none resize-none placeholder-gray-300" placeholder="例如：把遮罩位置修复干净，保持原有材质和光线"></textarea>
                 </section>
 
                 <section class="space-y-4">
@@ -473,8 +478,10 @@
             setStageBounds(canvas.closest('.stage-layer'), x, y, width, height);
         }
         function drawProjectSource(project){
+            const layer = projectLayer(project.id);
             const {imageCanvas} = projectCanvases(project.id);
             if(!imageCanvas) return;
+            layer?.classList.toggle('has-source', Boolean(project.source));
             const ctx = imageCanvas.getContext('2d');
             ctx.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
             ctx.fillStyle = '#f6f7f8'; ctx.fillRect(0, 0, imageCanvas.width, imageCanvas.height);
@@ -494,6 +501,63 @@
                 return `<button class="project-tab ${project.id === repairState.active ? 'active' : ''} ${status}" type="button" role="tab" aria-selected="${project.id === repairState.active}" data-project="${project.id}"><span class="project-dot"></span>${escapeRepairHtml(project.name)}</button>`;
             }).join('');
             document.getElementById('projectCount').textContent = `${repairState.projects.length} 个项目`;
+        }
+        let projectRenameState = null;
+        function finishProjectRename(commit = true){
+            const state = projectRenameState;
+            if(!state) return;
+            projectRenameState = null;
+            const project = repairState.projects.find(item => item.id === state.id);
+            const nextName = state.input.value.trim();
+            if(commit && project && nextName && nextName !== project.name){
+                project.name = nextName;
+                scheduleRepairPersistence();
+            }
+            if(project && state.tab?.isConnected){
+                state.tab.replaceChildren();
+                const dot = document.createElement('span');
+                dot.className = 'project-dot';
+                state.tab.append(dot, document.createTextNode(project.name));
+            } else {
+                renderProjectTabs();
+            }
+        }
+        function startProjectRename(id, tab){
+            if(projectRenameState) finishProjectRename();
+            const project = repairState.projects.find(item => item.id === id);
+            if(!project || project.status === 'running' || !tab) return;
+            const input = document.createElement('input');
+            input.className = 'project-title-input';
+            input.type = 'text';
+            input.value = project.name;
+            input.size = Math.max(2, project.name.length);
+            input.maxLength = 80;
+            input.setAttribute('aria-label', '项目名称');
+            input.addEventListener('click', event => event.stopPropagation());
+            input.addEventListener('dblclick', event => event.stopPropagation());
+            input.addEventListener('input', () => { input.size = Math.max(2, input.value.length); });
+            input.addEventListener('keydown', event => {
+                if(event.key === 'Enter'){ event.preventDefault(); finishProjectRename(); }
+                if(event.key === 'Escape'){ event.preventDefault(); finishProjectRename(false); }
+            });
+            input.addEventListener('blur', () => finishProjectRename());
+            tab.replaceChildren();
+            const dot = document.createElement('span');
+            dot.className = 'project-dot';
+            tab.append(dot, input);
+            projectRenameState = {id, input, tab};
+            input.focus();
+            input.select();
+            requestAnimationFrame(() => {
+                if(projectRenameState?.input === input){ input.focus(); input.select(); }
+            });
+        }
+        function syncProjectTabSelection(){
+            document.querySelectorAll('.project-tab').forEach(tab => {
+                const active = tab.dataset.project === repairState.active;
+                tab.classList.toggle('active', active);
+                tab.setAttribute('aria-selected', active ? 'true' : 'false');
+            });
         }
         function renderReferenceSlots(){
             const project = currentProject();
@@ -530,9 +594,10 @@
             drawProjectSource(project);
             return true;
         }
-        function renderRepairUi(){
+        function renderRepairUi(options = {}){
             const project = currentProject();
-            renderProjectTabs(); renderReferenceSlots(); renderTimeline();
+            if(options.renderTabs !== false) renderProjectTabs();
+            renderReferenceSlots(); renderTimeline();
             const promptInput = document.getElementById('promptInput');
             if(document.activeElement !== promptInput) promptInput.value = project.prompt || '';
             document.getElementById('genBtn').disabled = project.status === 'running';
@@ -553,7 +618,8 @@
             refs = project.refs; refDims = project.refDims;
             document.querySelectorAll('.stage-layer').forEach(layer => layer.classList.toggle('active', layer.dataset.project === id));
             document.getElementById('file1').value = document.getElementById('file2').value = document.getElementById('file3').value = '';
-            renderRepairUi();
+            renderRepairUi({renderTabs:false});
+            syncProjectTabSelection();
             scheduleRepairPersistence();
         }
         function addRepairProject(){
@@ -569,7 +635,7 @@
             return {x:(event.clientX - rect.left) * canvas.width / rect.width, y:(event.clientY - rect.top) * canvas.height / rect.height};
         }
         function onMaskPointerDown(event){
-            if(currentProject().status === 'running') return;
+            if(currentProject().status === 'running' || !currentProject().source) return;
             const canvas = event.currentTarget, ctx = canvas.getContext('2d'), point = maskPosition(event, canvas);
             ctx.globalCompositeOperation = maskTool === 'erase' ? 'destination-out' : 'source-over';
             ctx.strokeStyle = ctx.fillStyle = maskTool === 'erase' ? 'rgba(0,0,0,1)' : 'rgba(17,24,39,.24)';
@@ -579,7 +645,7 @@
             canvas.setPointerCapture(event.pointerId);
         }
         function onMaskPointerMove(event){
-            if(!maskDrawing || !lastMaskPoint) return;
+            if(!maskDrawing || !lastMaskPoint || !currentProject().source) return;
             const canvas = event.currentTarget, ctx = canvas.getContext('2d'), point = maskPosition(event, canvas);
             ctx.beginPath(); ctx.moveTo(lastMaskPoint.x, lastMaskPoint.y); ctx.lineTo(point.x, point.y); ctx.stroke();
             lastMaskPoint = point;
@@ -1057,9 +1123,29 @@
             document.getElementById('projectTabs').addEventListener('click', event => {
                 const tab = event.target.closest('.project-tab'); if(tab) setActiveProject(tab.dataset.project);
             });
+            document.getElementById('projectTabs').addEventListener('dblclick', event => {
+                const tab = event.target.closest('.project-tab');
+                if(tab){ event.preventDefault(); startProjectRename(tab.dataset.project, tab); }
+            });
             document.getElementById('addProjectBtn').addEventListener('click', addRepairProject);
             document.getElementById('repairStage').addEventListener('dblclick', () => {
                 if(currentProject().status !== 'running') document.getElementById('file1').click();
+            });
+            const repairStage = document.getElementById('repairStage');
+            repairStage.addEventListener('dragover', event => {
+                if(currentProject().status === 'running') return;
+                const file = [...(event.dataTransfer?.items || [])].some(item => item.kind === 'file' && item.type.startsWith('image/'));
+                if(!file) return;
+                event.preventDefault();
+                repairStage.classList.add('drag-over');
+            });
+            repairStage.addEventListener('dragleave', event => {
+                if(!repairStage.contains(event.relatedTarget)) repairStage.classList.remove('drag-over');
+            });
+            repairStage.addEventListener('drop', event => {
+                event.preventDefault();
+                repairStage.classList.remove('drag-over');
+                if(currentProject().status !== 'running') handleFile([...event.dataTransfer.files].find(file => file.type.startsWith('image/')), 1);
             });
             document.getElementById('toolMask').addEventListener('click', () => { maskTool='mask'; toolMask.classList.add('active'); toolErase.classList.remove('active'); });
             document.getElementById('toolErase').addEventListener('click', () => { maskTool='erase'; toolErase.classList.add('active'); toolMask.classList.remove('active'); });
