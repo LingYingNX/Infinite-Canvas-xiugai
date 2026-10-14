@@ -71,6 +71,8 @@ let pendingDeleteProjectId = null;
 let statusTimer = null;
 let selectedIds = new Set();
 let lastSelectedId = null;
+let undoDeleteCanvases = [];
+let canvasMutationPending = false;
 
 // board viewport (mirrors smart-canvas math)
 const viewport = { x: 0, y: 0, scale: 1 };
@@ -1133,21 +1135,77 @@ async function persistMeta(id, patch){
     } catch(e){ console.error(e); setStatus(L('保存失败','Save failed')); }
 }
 
-/* ===== Delete canvas (soft -> trash, with confirm) ===== */
+/* ===== Delete canvas (soft -> trash) ===== */
 async function deleteCanvas(id){
-    const c = canvases.find(x => x.id === id);
-    if(!c) return;
+    return deleteCanvases([id]);
+}
+async function deleteCanvases(ids){
+    const targets = Array.from(new Set(ids))
+        .map(id => canvases.find(canvas => canvas.id === id))
+        .filter(Boolean);
+    if(!targets.length || canvasMutationPending) return;
+    const deleted = [];
+    let failed = false;
+    canvasMutationPending = true;
     try {
-        const res = await fetch(`/api/canvases/${encodeURIComponent(id)}`, { method: 'DELETE' });
-        assertCanvasListResponseOk(res, 'delete failed');
-        canvases = canvases.filter(x => x.id !== id);
-        selectedIds.delete(id);
-        if(lastSelectedId === id) lastSelectedId = selectedIds.size ? Array.from(selectedIds)[0] : null;
+        for(const canvas of targets){
+            await canvasListRequestJson(`/api/canvases/${encodeURIComponent(canvas.id)}`, { method: 'DELETE' }, 'delete failed');
+            deleted.push(canvas);
+        }
+    } catch(e){
+        failed = true;
+        console.error(e);
+    } finally {
+        if(!deleted.length){
+            setStatus(L('删除失败','Delete failed'));
+            canvasMutationPending = false;
+            return;
+        }
+        const deletedIds = new Set(deleted.map(canvas => canvas.id));
+        canvases = canvases.filter(canvas => !deletedIds.has(canvas.id));
+        selectedIds.clear();
+        lastSelectedId = null;
+        undoDeleteCanvases = deleted;
         renderBoard();
         renderProjects();
-        refreshTrashCount();
-        setStatus(L('已移入回收站','Moved to trash'));
-    } catch(e){ console.error(e); setStatus(L('删除失败','Delete failed')); }
+        await refreshTrashCount();
+        setStatus(failed
+            ? L(`已移入回收站 ${deleted.length} 个画布，按 Ctrl+Z 撤回`, `Moved ${deleted.length} canvases to trash. Press Ctrl+Z to undo`)
+            : L(`已移入回收站，按 Ctrl+Z 撤回`, `Moved to trash. Press Ctrl+Z to undo`));
+        canvasMutationPending = false;
+    }
+}
+async function undoLastCanvasDelete(){
+    if(!undoDeleteCanvases.length || canvasMutationPending) return;
+    const pending = undoDeleteCanvases.slice();
+    const restored = [];
+    let failed = false;
+    canvasMutationPending = true;
+    try {
+        for(const canvas of pending){
+            const data = await canvasListRequestJson(`/api/canvases/${encodeURIComponent(canvas.id)}/restore`, { method: 'POST' }, 'restore failed');
+            restored.push({...canvas, ...(data.canvas || {})});
+        }
+    } catch(e){
+        failed = true;
+        console.error(e);
+    } finally {
+        if(!restored.length){
+            setStatus(L('撤回失败','Undo failed'));
+            canvasMutationPending = false;
+            return;
+        }
+        const restoredIds = new Set(restored.map(canvas => canvas.id));
+        canvases = [...canvases.filter(canvas => !restoredIds.has(canvas.id)), ...restored];
+        undoDeleteCanvases = pending.filter(canvas => !restoredIds.has(canvas.id));
+        renderBoard();
+        renderProjects();
+        await refreshTrashCount();
+        setStatus(failed
+            ? L(`已撤回 ${restored.length} 个画布`, `Restored ${restored.length} canvases`)
+            : L('已撤回删除','Deletion undone'));
+        canvasMutationPending = false;
+    }
 }
 
 /* ===== Trash / recycle bin ===== */
@@ -1297,9 +1355,25 @@ document.addEventListener('mousedown', e => {
 });
 
 document.addEventListener('keydown', e => {
+    const target = e.target;
+    const isTextEditing = target && (target.closest?.('input,textarea,select') || target.isContentEditable);
+    if(isTextEditing) return;
+    if((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z'){
+        if(trashPanel.classList.contains('active') || !undoDeleteCanvases.length || canvasMutationPending) return;
+        e.preventDefault();
+        undoLastCanvasDelete();
+        return;
+    }
+    if(e.key === 'Delete' || e.code === 'Delete'){
+        if(trashPanel.classList.contains('active') || !selectedIds.size || canvasMutationPending) return;
+        e.preventDefault();
+        closeCardMenu();
+        closeCreateCard();
+        boardWorld.querySelectorAll('.ws-card.confirming-delete').forEach(el => el.classList.remove('confirming-delete'));
+        deleteCanvases(Array.from(selectedIds));
+        return;
+    }
     if(e.key === 'F2' || e.code === 'F2'){
-        const t = e.target;
-        if(t && (t.closest?.('input,textarea,select') || t.isContentEditable)) return;
         if(trashPanel.classList.contains('active')) return;
         const id = selectedIds.size === 1 ? Array.from(selectedIds)[0] : lastSelectedId;
         if(!id || !canvases.some(x => x.id === id)) return;
