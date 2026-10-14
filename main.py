@@ -2185,27 +2185,6 @@ def github_update_file_list() -> Tuple[List[str], List[str], List[str]]:
         raise RuntimeError("GitHub 未返回 static 文件，已取消更新")
     return root_files, static_files, files
 
-def staged_update_file_list(staging_root: str) -> Tuple[List[str], List[str], List[str]]:
-    root_files = []
-    static_files = []
-    for root_dir, _, names in os.walk(staging_root):
-        for name in names:
-            path = os.path.abspath(os.path.join(root_dir, name))
-            rel = os.path.relpath(path, staging_root).replace("\\", "/")
-            if not update_allowed_file(rel):
-                continue
-            if rel.startswith("static/"):
-                static_files.append(rel)
-            else:
-                root_files.append(rel)
-    if "main.py" not in root_files or "VERSION" not in root_files:
-        raise RuntimeError("更新源缺少 main.py 或 VERSION")
-    if not static_files:
-        raise RuntimeError("更新源未返回 static 文件，已取消更新")
-    root_files = sorted(set(root_files))
-    static_files = sorted(set(static_files))
-    return root_files, static_files, root_files + static_files
-
 UPDATE_SOURCE_LABELS = {"github": "GitHub"}
 
 def normalize_update_source(value: str) -> str:
@@ -9053,9 +9032,7 @@ def extract_apimart_avatar_asset_uri(payload) -> str:
 
 async def submit_apimart_avatar_asset(provider, public_url: str, name: str, kind: str, project_name: str = "default", group_name: str = "") -> str:
     """把一个公网可访问的素材提交到 APIMart private-avatar 审核，立即返回任务 ID（不阻塞轮询）。"""
-    base_url = video_api_root(provider)
-    if not base_url:
-        raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
+    base_url = require_video_base_url(provider)
     register_url = f"{base_url}/v1/seedance2/private-avatar"
     body = {
         "project_name": str(project_name or "default").strip() or "default",
@@ -9079,9 +9056,7 @@ AVATAR_TASK_FAIL_STATUSES = {"failed", "fail", "error", "rejected", "canceled", 
 
 async def check_apimart_avatar_task(provider, task_id: str) -> Dict[str, Any]:
     """查询一次 APIMart 审核任务。返回 {status: Active/Processing/Failed, asset_uri, detail}。"""
-    base_url = video_api_root(provider)
-    if not base_url:
-        raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
+    base_url = require_video_base_url(provider)
     task_url = f"{base_url}/v1/tasks/{task_id}"
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.get(task_url, headers=api_headers(provider=provider), timeout=60)
@@ -14623,6 +14598,12 @@ def video_api_root(provider):
         base_url = base_url.rsplit("/", 1)[0]
     return base_url
 
+def require_video_base_url(provider) -> str:
+    base_url = video_api_root(provider)
+    if not base_url:
+        raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
+    return base_url
+
 def looks_like_html_response(text: str) -> bool:
     sample = str(text or "").lstrip()[:200].lower()
     return sample.startswith("<!doctype html") or sample.startswith("<html") or "<head" in sample
@@ -14714,9 +14695,7 @@ def humanize_video_task_failure(reason) -> str:
     return f"视频生成任务失败：{text}"
 
 async def wait_for_video_task(client, provider, task_id, submit_url=""):
-    base_url = video_api_root(provider)
-    if not base_url:
-        raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
+    base_url = require_video_base_url(provider)
     task_urls = video_task_url_candidates(provider, base_url, task_id, submit_url)
     deadline = time.monotonic() + VIDEO_POLL_TIMEOUT
     delay = max(2.0, IMAGE_POLL_INTERVAL)
@@ -14804,9 +14783,7 @@ async def agnes_video_image_url(ref):
     return uploaded.get("url") or ""
 
 async def wait_for_agnes_video_task(client, provider, video_id, model):
-    base_url = video_api_root(provider)
-    if not base_url:
-        raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
+    base_url = require_video_base_url(provider)
     query_url = f"{base_url}/agnesapi?{urllib.parse.urlencode({'video_id': video_id, 'model_name': model})}"
     legacy_url = f"{base_url}/v1/videos/{urllib.parse.quote(str(video_id), safe='')}"
     deadline = time.monotonic() + VIDEO_POLL_TIMEOUT
@@ -15759,9 +15736,7 @@ async def canvas_video(payload: CanvasVideoRequest):
             raise
         except (httpx.HTTPStatusError, httpx.HTTPError) as exc:
             raise_video_provider_http_error(exc, payload.model, "RunningHub 视频接口错误", "请求 RunningHub 视频接口失败", "RunningHub")
-    base_url = video_api_root(provider)
-    if not base_url:
-        raise HTTPException(status_code=400, detail=f"{provider.get('name') or provider['id']} 未配置 Base URL")
+    base_url = require_video_base_url(provider)
     api_key = provider_env_key_value(provider["id"])
     if not api_key:
         raise HTTPException(status_code=400, detail=f"未配置 {provider.get('name') or provider['id']} 的 API Key，请在 API 设置中填写。")
