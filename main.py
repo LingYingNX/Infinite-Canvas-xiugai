@@ -1607,19 +1607,53 @@ def read_local_update_notes(version: str = "") -> Dict[str, Any]:
         pass
     return {"version": version or current_app_version(), "updated_at": "", "items": []}
 
+def system_proxies() -> Optional[Dict[str, str]]:
+    """requests 可用的代理表。
+
+    urllib.request.getproxies() 只认 HTTP_PROXY/HTTPS_PROXY；本机这类
+    ZCODE_HTTP_PROXY 变量会被它解析成无效的 scheme 键，导致请求实际直连。
+    """
+    def first(*names: str) -> str:
+        for name in names:
+            value = (os.environ.get(name) or "").strip()
+            if value:
+                return value
+        return ""
+
+    http = first("HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy", "ZCODE_HTTP_PROXY")
+    https = first("HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy",
+                  "ZCODE_HTTPS_PROXY", "ZCODE_HTTP_PROXY")
+    proxies: Dict[str, str] = {}
+    if http:
+        proxies["http"] = http
+    if https:
+        proxies["https"] = https
+    if proxies:
+        return proxies
+    legacy = urllib.request.getproxies()
+    return {key: legacy[key] for key in ("http", "https") if legacy.get(key)} or None
+
 def updater_get(url: str, timeout: float):
-    try:
-        resp = requests.get(
-            f"{url}{'&' if '?' in url else '?'}t={int(time.time())}",
-            headers={"User-Agent": "Infinite-Canvas-Updater"},
-            timeout=timeout,
-            proxies=urllib.request.getproxies() or None,
-        )
-        if 200 <= resp.status_code < 400:
-            return resp, ""
-        return None, f"HTTP {resp.status_code}"
-    except requests.RequestException as exc:
-        return None, str(exc)
+    target = f"{url}{'&' if '?' in url else '?'}t={int(time.time())}"
+    proxies = system_proxies()
+    # 代理失效（或未配置）时再试一次直连，避免环境变量过期把更新检查锁死。
+    attempts = [proxies, None] if proxies else [None]
+    error = ""
+    for index, attempt in enumerate(attempts):
+        attempt_timeout = timeout if index == 0 else min(timeout, 2.5)
+        try:
+            resp = requests.get(
+                target,
+                headers={"User-Agent": "Infinite-Canvas-Updater"},
+                timeout=attempt_timeout,
+                proxies=attempt,
+            )
+            if 200 <= resp.status_code < 400:
+                return resp, ""
+            error = f"HTTP {resp.status_code}"
+        except requests.RequestException as exc:
+            error = str(exc)
+    return None, error
 
 def fetch_remote_update_notes(url: str, version: str = "", timeout: float = 5.0) -> Dict[str, Any]:
     info: Dict[str, Any] = {"ok": False, "error": "", "url": url, "version": version, "items": []}
@@ -1861,26 +1895,32 @@ def connectivity_probe(name: str, url: str, timeout: float = 5.0) -> Dict[str, A
         "error": "",
         "timed_out": False,
     }
-    try:
-        response = requests.get(
-            url,
-            headers={"User-Agent": "Infinite-Canvas-Updater"},
-            timeout=timeout,
-            stream=True,
-            proxies=urllib.request.getproxies() or None,
-        )
-        item["status"] = response.status_code
-        item["ok"] = 200 <= response.status_code < 400
-        if not item["ok"]:
-            item["error"] = f"HTTP {response.status_code} {response.reason}"
-        response.close()
-    except requests.Timeout:
-        item["timed_out"] = True
-        item["error"] = f"连接超时（超过 {timeout:g}s）"
-    except requests.RequestException as exc:
-        item["error"] = str(exc)
-    finally:
-        item["elapsed_ms"] = int((time.time() - started) * 1000)
+    proxies = system_proxies()
+    attempts = [proxies, None] if proxies else [None]
+    for index, attempt in enumerate(attempts):
+        attempt_timeout = timeout if index == 0 else min(timeout, 2.5)
+        item["timed_out"] = False
+        item["error"] = ""
+        try:
+            response = requests.get(
+                url,
+                headers={"User-Agent": "Infinite-Canvas-Updater"},
+                timeout=attempt_timeout,
+                stream=True,
+                proxies=attempt,
+            )
+            item["status"] = response.status_code
+            item["ok"] = 200 <= response.status_code < 400
+            if not item["ok"]:
+                item["error"] = f"HTTP {response.status_code} {response.reason}"
+            response.close()
+            break
+        except requests.Timeout:
+            item["timed_out"] = True
+            item["error"] = f"连接超时（超过 {attempt_timeout:g}s）"
+        except requests.RequestException as exc:
+            item["error"] = str(exc)
+    item["elapsed_ms"] = int((time.time() - started) * 1000)
     return item
 
 def update_connectivity_targets() -> List[Tuple[str, str, str, bool]]:
@@ -1973,7 +2013,8 @@ def check_update():
     for t in threads:
         t.start()
     for t in threads:
-        t.join(timeout=5.5)
+        # 代理失败后会再试一次直连（最多 +2.5s），这里要等得下第二次尝试
+        t.join(timeout=8.0)
     github = holder.get("github") or {"version": "", "ok": False, "error": "检测超时（超过 5s）", "url": GITHUB_VERSION_URL, "source": "github"}
     best: Dict[str, Any] = {}
     for item in (github,):
@@ -2005,18 +2046,25 @@ def update_allowed_file(path: str) -> bool:
 GITHUB_TREE_CACHE: Dict[str, Any] = {"etag": "", "data": None, "expires_at": 0.0}
 
 def github_get(url: str, headers: Optional[Dict[str, str]] = None, timeout: int = 30) -> requests.Response:
-    try:
-        response = requests.get(
-            url,
-            headers=headers or {},
-            timeout=timeout,
-            proxies=urllib.request.getproxies() or None,
-        )
-    except requests.RequestException as exc:
-        raise urllib.error.URLError(str(exc)) from exc
-    if response.status_code >= 400 or response.status_code == 304:
-        raise urllib.error.HTTPError(url, response.status_code, response.reason, response.headers, None)
-    return response
+    proxies = system_proxies()
+    attempts = [proxies, None] if proxies else [None]
+    error: Optional[Exception] = None
+    for index, attempt in enumerate(attempts):
+        attempt_timeout = timeout if index == 0 else min(timeout, 10)
+        try:
+            response = requests.get(
+                url,
+                headers=headers or {},
+                timeout=attempt_timeout,
+                proxies=attempt,
+            )
+        except requests.RequestException as exc:
+            error = exc
+            continue
+        if response.status_code >= 400 or response.status_code == 304:
+            raise urllib.error.HTTPError(url, response.status_code, response.reason, response.headers, None)
+        return response
+    raise urllib.error.URLError(str(error or "request failed"))
 
 def github_json(url: str, use_etag_cache: bool = False):
     headers = {
@@ -3875,7 +3923,7 @@ def log_net_error(context, exc, url=""):
             if req is not None:
                 url = str(getattr(req, "url", "") or "")
         try:
-            proxies = urllib.request.getproxies() or "无"
+            proxies = system_proxies() or "无"
         except Exception:
             proxies = "?"
         print(f"[NET-ERR] {context} | url={url or '?'} | sys_proxy={proxies} | " + " <- ".join(chain), flush=True)
