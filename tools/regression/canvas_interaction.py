@@ -762,6 +762,131 @@ def smart_flow(page, cid):
     record("smart no page/console errors", not real_errors, "; ".join(real_errors[:5]))
 
 
+PIN_STATE = """() => ({
+    pinned: Boolean(composerPinned),
+    pinnedIds: [...composerPinnedNodeIds].map(String).sort(),
+    anchor: String(composerPinAnchorId || ''),
+    btnActive: composerPinBtn.classList.contains('active'),
+    label: (composerPinBtn.querySelector('span') || {}).textContent || '',
+    composerOpen: Boolean(composer && composer.classList.contains('open')),
+    panelId: String(lastComposerNodeId || '').split(':')[0],
+    selectedId: String(selectedId || ''),
+})"""
+
+PIN_CHECK_NAMES = (
+    "smart pin binds the panel to that node",
+    "smart new node does not steal the pinned panel",
+    "smart keeps the pinned panel after deselect",
+    "smart pinning another node moves the panel there",
+    "smart unpin releases only its own node",
+)
+
+
+def select_smart_node(page, node_id):
+    return page.evaluate(
+        """(id) => {
+            selectedId = id; selectedIds = []; selectedImage = {nodeId:'', index:-1};
+            updateComposer();
+        }""",
+        node_id,
+    )
+
+
+def deselect_smart_node(page):
+    return page.evaluate(
+        """() => {
+            selectedId = ''; selectedIds = []; selectedImage = {nodeId:'', index:-1};
+            updateComposer();
+        }"""
+    )
+
+
+def smart_pin_scope_flow(page, cid):
+    """Pin nails the panel to one node: creating or selecting another node never
+    moves the panel off a pinned node, and each node keeps its own pin state."""
+    page.goto(BASE + "/static/smart-canvas.html?id=" + cid, wait_until="domcontentloaded")
+    page.wait_for_function(
+        "cid => typeof canvas !== 'undefined' && !!canvas && canvas.id === cid",
+        arg=cid,
+        timeout=25000,
+    )
+    page.wait_for_timeout(300)
+
+    setup = page.evaluate(
+        """() => {
+            const n = createImageNodeAt({x: 420, y: 300}, []);
+            selectedId = n.id; selectedIds = []; selectedImage = {nodeId:'', index:-1};
+            updateComposer();
+            if (!composer.classList.contains('open')) return {ok:false, reason:'composer not open'};
+            composerPinBtn.click();
+            return {ok:true, nodeId:n.id};
+        }"""
+    )
+    if not setup.get("ok"):
+        record(PIN_CHECK_NAMES[0], False, "setup failed: %s" % setup.get("reason", "?"))
+        for name in PIN_CHECK_NAMES[1:]:
+            record(name, False, "setup failed")
+        return
+
+    node_a = setup["nodeId"]
+    after_pin = page.evaluate(PIN_STATE)
+    record(
+        PIN_CHECK_NAMES[0],
+        after_pin["pinned"] and after_pin["pinnedIds"] == [node_a]
+        and after_pin["anchor"] == node_a
+        and after_pin["btnActive"] and after_pin["label"] == "取消固定"
+        and after_pin["panelId"] == node_a,
+        "state=%s" % json.dumps(after_pin, ensure_ascii=False),
+    )
+
+    node_b = page.evaluate(
+        """() => createImageNodeAt({x: 900, y: 300}, []).id"""
+    )
+    select_smart_node(page, node_b)
+    after_new = page.evaluate(PIN_STATE)
+    record(
+        PIN_CHECK_NAMES[1],
+        after_new["pinnedIds"] == [node_a] and after_new["anchor"] == node_a
+        and after_new["panelId"] == node_a and after_new["composerOpen"]
+        and after_new["selectedId"] == node_b
+        # B 自己没被固定，所以按钮显示「固定面板」——点了就能把 B 也固定，不必先取消 A。
+        and not after_new["btnActive"] and after_new["label"] == "固定面板",
+        "state=%s" % json.dumps(after_new, ensure_ascii=False),
+    )
+
+    deselect_smart_node(page)
+    after_deselect = page.evaluate(PIN_STATE)
+    record(
+        PIN_CHECK_NAMES[2],
+        after_deselect["pinnedIds"] == [node_a] and after_deselect["anchor"] == node_a
+        and after_deselect["pinned"] and after_deselect["btnActive"]
+        and after_deselect["label"] == "取消固定"
+        and after_deselect["panelId"] == node_a and after_deselect["composerOpen"],
+        "state=%s" % json.dumps(after_deselect, ensure_ascii=False),
+    )
+
+    select_smart_node(page, node_b)
+    page.evaluate("() => { composerPinBtn.click(); return null; }")
+    after_both = page.evaluate(PIN_STATE)
+    record(
+        PIN_CHECK_NAMES[3],
+        after_both["pinnedIds"] == sorted([node_a, node_b])
+        and after_both["anchor"] == node_b and after_both["panelId"] == node_b
+        and after_both["btnActive"] and after_both["label"] == "取消固定",
+        "state=%s" % json.dumps(after_both, ensure_ascii=False),
+    )
+
+    page.evaluate("() => { composerPinBtn.click(); return null; }")
+    after_unpin_b = page.evaluate(PIN_STATE)
+    record(
+        PIN_CHECK_NAMES[4],
+        after_unpin_b["pinnedIds"] == [node_a] and after_unpin_b["anchor"] == node_a
+        and after_unpin_b["panelId"] == node_a and not after_unpin_b["btnActive"]
+        and after_unpin_b["label"] == "固定面板",
+        "state=%s" % json.dumps(after_unpin_b, ensure_ascii=False),
+    )
+
+
 def smart_cross_canvas_copy_flow(page, source_cid, target_cid):
     errors = attach_errors(page)
     page.goto(BASE + "/static/smart-canvas.html?id=" + source_cid, wait_until="domcontentloaded")
@@ -836,6 +961,10 @@ def main():
                 smart_target_id = create_canvas("smart")
                 cids.append(smart_target_id)
                 smart_cross_canvas_copy_flow(context.new_page(), smart_id, smart_target_id)
+
+                pin_id = create_canvas("smart")
+                cids.append(pin_id)
+                smart_pin_scope_flow(context.new_page(), pin_id)
             finally:
                 for cid in cids:
                     cleanup_canvas(cid)

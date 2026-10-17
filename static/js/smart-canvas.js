@@ -10027,7 +10027,7 @@ function deleteNode(id){
     if(deleteIds.has(selectedImage.nodeId)) selectedImage = {nodeId:'', index:-1};
     render();
     if([...deleteIds].some(deleteId => composerSubjectMatchesNode(deleteId))){
-        clearComposerSubject({unpin:true});
+        clearComposerSubject({unpin:true, nodeId:[...deleteIds].find(deleteId => composerSubjectMatchesNode(deleteId))});
     }
     scheduleSave();
 }
@@ -10053,7 +10053,7 @@ function clearNodeMediaBeforeDelete(id){
     selectedIds = [];
     render();
     if(composerSubjectMatchesNode(id)){
-        clearComposerSubject({unpin:true});
+        clearComposerSubject({unpin:true, nodeId:id});
     }
     scheduleSave();
     return true;
@@ -10249,7 +10249,7 @@ function deleteImage(id, imageIndex){
     if(selectedImage.index < 0) selectedImage = {nodeId:'', index:-1};
     render();
     if(composerSubjectMatchesNode(id)){
-        clearComposerSubject({unpin:true});
+        clearComposerSubject({unpin:true, nodeId:id});
     }
     scheduleSave();
 }
@@ -12895,6 +12895,72 @@ function applyImageEdit(){
 let lastComposerNodeId = '';
 let activeComposerSubject = null;
 let composerPinned = false;
+// 固定 = 按节点各自记账：每张节点记住自己是否被固定，面板钉在最后固定/点中的那张上（anchor）。
+let composerPinnedNodeIds = new Set();
+let composerPinAnchorId = '';
+// 只有真正带 composer 的节点能被固定（minimax 节点的面板本来就关闭）。
+function isComposerPinnableNode(node){
+    return Boolean(isSmartImageNode(node) || isSmartGroupNode(node));
+}
+function isComposerNodePinned(id){
+    return Boolean(id) && composerPinnedNodeIds.has(String(id));
+}
+function composerNodeById(id){
+    const node = String(id || '') ? nodes.find(n => n.id === String(id)) : null;
+    return isComposerPinnableNode(node) ? node : null;
+}
+// 面板钉在哪张节点上：anchor 失效就退回集合里最后固定的一张。
+function pinnedComposerNode(){
+    const anchored = composerNodeById(composerPinAnchorId);
+    if(anchored) return anchored;
+    const fallback = composerNodeById([...composerPinnedNodeIds].pop());
+    composerPinAnchorId = fallback ? fallback.id : '';
+    if(!fallback) composerPinnedNodeIds.clear();
+    return fallback;
+}
+// 节点被删后清掉它的固定记账，避免面板钉在一张不存在的节点上。
+function pruneComposerPins(){
+    if(!composerPinnedNodeIds.size) return;
+    const alive = new Set(nodes.filter(isComposerPinnableNode).map(n => n.id));
+    composerPinnedNodeIds.forEach(id => { if(!alive.has(id)) composerPinnedNodeIds.delete(id); });
+    if(composerPinAnchorId && !composerPinnedNodeIds.has(composerPinAnchorId)){
+        composerPinAnchorId = [...composerPinnedNodeIds].pop() || '';
+    }
+}
+function syncComposerPinButton(pinned){
+    pinned = Boolean(pinned);
+    if(pinned === composerPinned) return;
+    composerPinned = pinned;
+    if(!composerPinBtn) return;
+    composerPinBtn.classList.toggle('active', pinned);
+    // 图标已被 lucide 换成 <svg data-lucide>，按属性找而不是按 <i> 找。
+    const icon = composerPinBtn.querySelector('[data-lucide]');
+    const label = composerPinBtn.querySelector('span');
+    const title = tr(pinned ? 'smart.unpinComposer' : 'smart.pinComposer');
+    if(icon) icon.setAttribute('data-lucide', pinned ? 'pin-off' : 'pin');
+    if(label){
+        label.textContent = title;
+        label.removeAttribute('data-i18n');
+    }
+    composerPinBtn.title = title;
+    composerPinBtn.setAttribute('aria-label', title);
+    composerPinBtn.removeAttribute('data-i18n-title');
+    refreshIcons();
+}
+function setComposerPinned(pinned, nodeId){
+    const id = String(nodeId || '');
+    if(!pinned){
+        if(id) composerPinnedNodeIds.delete(id);
+        else composerPinnedNodeIds.clear();
+        if(!composerPinnedNodeIds.size || (id && composerPinAnchorId === id)){
+            composerPinAnchorId = [...composerPinnedNodeIds].pop() || '';
+        }
+        return;
+    }
+    if(!id) return;
+    composerPinnedNodeIds.add(id);
+    composerPinAnchorId = id;
+}
 function composerSubjectMatchesNode(id){
     const target = String(id || '');
     return Boolean(target) && (
@@ -12902,7 +12968,8 @@ function composerSubjectMatchesNode(id){
         || String(activeComposerSubject?.id || '') === target
     );
 }
-function clearComposerSubject({unpin=false}={}){
+function clearComposerSubject({unpin=false, nodeId=''}={}){
+    const subjectId = String(nodeId || activeComposerSubject?.id || String(lastComposerNodeId || '').split(':')[0] || '');
     activeComposerSubject = null;
     lastComposerNodeId = '';
     composer?.classList.remove('open');
@@ -12910,22 +12977,8 @@ function clearComposerSubject({unpin=false}={}){
     setPromptInputLocked(false);
     setPromptText('');
     if(unpin){
-        composerPinned = false;
-        composerPinBtn?.classList.remove('active');
-        const icon = composerPinBtn?.querySelector('i');
-        const label = composerPinBtn?.querySelector('span');
-        const title = tr('smart.pinComposer');
-        if(icon) icon.setAttribute('data-lucide', 'pin');
-        if(label){
-            label.textContent = title;
-            label.removeAttribute('data-i18n');
-        }
-        if(composerPinBtn){
-            composerPinBtn.title = title;
-            composerPinBtn.setAttribute('aria-label', title);
-            composerPinBtn.removeAttribute('data-i18n-title');
-        }
-        refreshIcons();
+        setComposerPinned(false, subjectId);
+        syncComposerPinButton(false);
     }
 }
 function savePromptDraftForCurrent(){
@@ -12995,9 +13048,14 @@ function updateComposer(){
     }
     composerUpdateSeq++;
     const node = selectedNode();
-    const subjectNode = (node && isSmartRunnableNode(node))
-        ? node
-        : (composerPinned ? (activeComposerNode() || activeComposerSubject) : node);
+    const runnable = (node && isSmartRunnableNode(node)) ? node : null;
+    pruneComposerPins();
+    // 选中一张自己已被固定的节点时，面板跟到它；否则面板留在 anchor 上（不被新选中/新节点带走）。
+    if(runnable && isComposerNodePinned(runnable.id)) composerPinAnchorId = runnable.id;
+    const pinnedNode = pinnedComposerNode();
+    const subjectNode = pinnedNode || runnable || node;
+    // 按钮是「当前选中节点」的开关；没有选中时退回面板主体。
+    syncComposerPinButton(isComposerNodePinned((runnable || pinnedNode || node)?.id));
     syncRunButtonState(subjectNode);
     if(smartCascadeSilentSelection && !activeComposerSubject){
         composer.classList.remove('open');
@@ -17479,18 +17537,13 @@ smartArrangeBtn?.addEventListener('click', e => {
 composerPinBtn?.addEventListener('click', e => {
     e.preventDefault();
     e.stopPropagation();
-    composerPinned = !composerPinned;
-    composerPinBtn.classList.toggle('active', composerPinned);
-    const icon = composerPinBtn.querySelector('i');
-    const label = composerPinBtn.querySelector('span');
-    const title = composerPinned ? tr('smart.unpinComposer') : tr('smart.pinComposer');
-    if(icon) icon.setAttribute('data-lucide', composerPinned ? 'pin-off' : 'pin');
-    if(label) label.textContent = title;
-    if(label) label.removeAttribute('data-i18n');
-    composerPinBtn.title = title;
-    composerPinBtn.setAttribute('aria-label', title);
-    composerPinBtn.removeAttribute('data-i18n-title');
-    refreshIcons();
+    // 开关的是「当前选中节点」自己的固定位：选中 B 时无需先取消 A 就能固定 B。
+    const node = selectedNode();
+    const subject = (node && isComposerPinnableNode(node))
+        ? node
+        : (activeComposerNode() || activeComposerSubject || node);
+    if(!isComposerPinnableNode(subject)) return;
+    setComposerPinned(!isComposerNodePinned(subject.id), subject.id);
     updateComposer();
 });
 function handleSmartMinimapDragMove(e){
