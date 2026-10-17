@@ -1307,6 +1307,11 @@ function syncSelectionUi(){
     const ids = selectedNodeIds();
     const nextIds = new Set(ids);
     const touchedIds = new Set([...smartSelectionUiNodeIds, ...nextIds]);
+    // render() 生成的 selected 类不一定经过本函数，取消选中时也要把它们纳入清理。
+    world.querySelectorAll('.image-node.selected').forEach(el => {
+        const id = el.dataset?.id || '';
+        if(id) touchedIds.add(id);
+    });
     if(smartSelectionUiImage.nodeId) touchedIds.add(smartSelectionUiImage.nodeId);
     if(selectedImage.nodeId) touchedIds.add(selectedImage.nodeId);
     world.classList.toggle('smart-multi-selected', ids.length > 1);
@@ -4714,6 +4719,9 @@ async function openPromptTemplatePanel(nodeId='', templateId='', options={}){
     promptTemplateSearch?.focus();
 }
 function closePromptTemplatePanel(){
+    // 面板本来就没打开时直接返回：这个函数挂在全局 click 上，
+    // 每次点空白都会走到这里，里面的 render() 会让所有节点 DOM 重建、阴影闪一下。
+    if(!promptTemplatePanel?.classList.contains('open')) return;
     promptTemplatePanel?.classList.remove('open');
     syncComposerTemplateButton();
     render();
@@ -6344,6 +6352,8 @@ function moveNodeElementsDuringDrag(){
     if(active && (dragState.group || [{id:dragState.id}]).some(item => item.id === active.id)){
         positionComposerForNode(active);
     }
+    // 被固定的快照卡同样要跟着节点走。
+    positionComposerSnapshots();
     scheduleInteractionLayerRefresh();
 }
 function updateNodeElementDuringResize(node){
@@ -8332,6 +8342,7 @@ function render(){
     const keepEls = new Set();
     reusableNodes.forEach(el => keepEls.add(el));
     if(composerEl) keepEls.add(composerEl);
+    if(composerSnapshotsEl?.isConnected) keepEls.add(composerSnapshotsEl);
     [...world.childNodes].forEach(child => {
         if(!keepEls.has(child)) child.remove();
     });
@@ -9910,7 +9921,9 @@ function bindNodeBaseEvents(el, id){
                 updateComposer();
                 return;
             }
-            render();
+            // 节点元素没有结构性变化时只同步选中态，避免重建 DOM 导致边框瞬变。
+            syncSelectionUi();
+            updateComposer();
         };
         if(nodeForControls?.type !== 'smart-group') el.ondblclick = e => e.stopPropagation();
         const nodeDrop = el.querySelector('.node-drop');
@@ -12895,9 +12908,9 @@ function applyImageEdit(){
 let lastComposerNodeId = '';
 let activeComposerSubject = null;
 let composerPinned = false;
-// 固定 = 按节点各自记账：每张节点记住自己是否被固定，面板钉在最后固定/点中的那张上（anchor）。
+// 固定 = 按节点各自记账：每张节点记住自己是否被固定。
+// 可编辑面板只有一个，跟随当前选中节点；其余被固定的节点用只读快照常驻在各自下方。
 let composerPinnedNodeIds = new Set();
-let composerPinAnchorId = '';
 // 只有真正带 composer 的节点能被固定（minimax 节点的面板本来就关闭）。
 function isComposerPinnableNode(node){
     return Boolean(isSmartImageNode(node) || isSmartGroupNode(node));
@@ -12909,23 +12922,11 @@ function composerNodeById(id){
     const node = String(id || '') ? nodes.find(n => n.id === String(id)) : null;
     return isComposerPinnableNode(node) ? node : null;
 }
-// 面板钉在哪张节点上：anchor 失效就退回集合里最后固定的一张。
-function pinnedComposerNode(){
-    const anchored = composerNodeById(composerPinAnchorId);
-    if(anchored) return anchored;
-    const fallback = composerNodeById([...composerPinnedNodeIds].pop());
-    composerPinAnchorId = fallback ? fallback.id : '';
-    if(!fallback) composerPinnedNodeIds.clear();
-    return fallback;
-}
 // 节点被删后清掉它的固定记账，避免面板钉在一张不存在的节点上。
 function pruneComposerPins(){
     if(!composerPinnedNodeIds.size) return;
     const alive = new Set(nodes.filter(isComposerPinnableNode).map(n => n.id));
     composerPinnedNodeIds.forEach(id => { if(!alive.has(id)) composerPinnedNodeIds.delete(id); });
-    if(composerPinAnchorId && !composerPinnedNodeIds.has(composerPinAnchorId)){
-        composerPinAnchorId = [...composerPinnedNodeIds].pop() || '';
-    }
 }
 function syncComposerPinButton(pinned){
     pinned = Boolean(pinned);
@@ -12952,14 +12953,10 @@ function setComposerPinned(pinned, nodeId){
     if(!pinned){
         if(id) composerPinnedNodeIds.delete(id);
         else composerPinnedNodeIds.clear();
-        if(!composerPinnedNodeIds.size || (id && composerPinAnchorId === id)){
-            composerPinAnchorId = [...composerPinnedNodeIds].pop() || '';
-        }
         return;
     }
     if(!id) return;
     composerPinnedNodeIds.add(id);
-    composerPinAnchorId = id;
 }
 function composerSubjectMatchesNode(id){
     const target = String(id || '');
@@ -13027,6 +13024,97 @@ function positionComposerForNode(node){
     composer.style.left = `${rect.x + rect.width / 2 - cardW / 2}px`;
     composer.style.top = `${rect.y + rect.height + gap}px`;
 }
+// 被固定但不是当前可编辑主体的节点：在它下方挂一张只读快照卡。
+// 这样「固定 A 后点 B」时 A 的面板仍在屏幕上，B 的面板也能正常展开。
+let composerSnapshotsEl = null;
+function composerSnapshotsLayer(){
+    if(composerSnapshotsEl && composerSnapshotsEl.isConnected) return composerSnapshotsEl;
+    composerSnapshotsEl = document.createElement('div');
+    composerSnapshotsEl.className = 'composer-snapshots';
+    world.appendChild(composerSnapshotsEl);
+    return composerSnapshotsEl;
+}
+function engineLabelFor(engine){
+    const value = String(engine || 'api');
+    const opt = [...(engineSelect?.options || [])].find(o => o.value === value);
+    return opt ? opt.textContent.trim() : value;
+}
+function composerSnapshotHtml(node){
+    const settings = smartSettingsForNode(node);
+    const prompt = String(node.promptDraftText || node.runPrompt || '').trim();
+    const imgs = (node.images || []).slice(0, 4);
+    const thumbs = imgs.length
+        ? `<div class="composer-snapshot-thumbs">${imgs.map(img => smartPreviewImgHtml(img, 96, 'draggable="false" alt=""')).join('')}</div>`
+        : '';
+    return `<div class="composer-snapshot" data-snapshot-node-id="${escapeHtml(node.id)}">
+        <div class="composer-snapshot-head">
+            <span class="composer-snapshot-engine">${escapeHtml(engineLabelFor(settings.engine))}</span>
+            <span class="composer-snapshot-pin" title="${escapeHtml(tr('smart.unpinComposer'))}"><i data-lucide="pin"></i></span>
+        </div>
+        ${thumbs}
+        <div class="composer-snapshot-prompt${prompt ? '' : ' is-empty'}">${prompt ? escapeHtml(prompt) : escapeHtml(tr('smart.promptPlaceholder'))}</div>
+    </div>`;
+}
+function renderComposerSnapshots(){
+    const layer = composerSnapshotsLayer();
+    const activeId = String(activeComposerSubject?.id || '');
+    const ids = [...composerPinnedNodeIds].filter(id => id !== activeId);
+    if(!ids.length){
+        if(layer.innerHTML) layer.innerHTML = '';
+        layer.dataset.signature = '';
+        return;
+    }
+    const gap = 14;
+    const cardW = 540;
+    // 内容签名：只有提示词/引擎/图片变化时才重建 DOM，拖动时仅改位置。
+    const signature = ids.map(id => {
+        const node = composerNodeById(id);
+        if(!node) return id + ':missing';
+        return [id, smartSettingsForNode(node).engine, node.promptDraftText || node.runPrompt || '',
+            (node.images || []).map(img => img.url).join('|')].join('\u0001');
+    }).join('\u0002');
+    if(layer.dataset.signature === signature){
+        positionComposerSnapshots();
+        return;
+    }
+    layer.dataset.signature = signature;
+    layer.innerHTML = ids.map(id => {
+        const node = composerNodeById(id);
+        if(!node) return '';
+        const rect = nodeRect(node);
+        return `<div class="composer-snapshot-slot" style="left:${rect.x + rect.width / 2 - cardW / 2}px;top:${rect.y + rect.height + gap}px;width:${cardW}px">${composerSnapshotHtml(node)}</div>`;
+    }).join('');
+    layer.querySelectorAll('[data-snapshot-node-id]').forEach(el => {
+        el.addEventListener('mousedown', e => e.stopPropagation());
+        el.addEventListener('click', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            const id = el.dataset.snapshotNodeId;
+            if(!id) return;
+            selectedId = id;
+            selectedIds = [];
+            selectedImage = {nodeId:'', index:-1};
+            render();
+            scheduleSave();
+        });
+    });
+    refreshIcons();
+}
+// 拖动节点时只更新快照卡位置，不重建卡片内容。
+function positionComposerSnapshots(){
+    const layer = composerSnapshotsEl;
+    if(!layer?.isConnected || !layer.children.length) return;
+    const gap = 14;
+    const cardW = 540;
+    layer.querySelectorAll('[data-snapshot-node-id]').forEach(card => {
+        const node = composerNodeById(card.dataset.snapshotNodeId);
+        const slot = card.closest('.composer-snapshot-slot');
+        if(!node || !slot) return;
+        const rect = nodeRect(node);
+        slot.style.left = `${rect.x + rect.width / 2 - cardW / 2}px`;
+        slot.style.top = `${rect.y + rect.height + gap}px`;
+    });
+}
 let composerUpdateTimer = 0;
 let composerUpdateSeq = 0;
 function scheduleComposerUpdate(delay=120){
@@ -13042,6 +13130,12 @@ function scheduleComposerUpdate(delay=120){
     }, Math.max(0, Number(delay) || 0));
 }
 function updateComposer(){
+    updateComposerCore();
+    // 核心逻辑有多处提前 return（点空白/取消选中/minimax），
+    // 快照重绘放在外层，保证每条路径都会刷新常驻面板。
+    renderComposerSnapshots();
+}
+function updateComposerCore(){
     if(composerUpdateTimer){
         clearTimeout(composerUpdateTimer);
         composerUpdateTimer = 0;
@@ -13050,12 +13144,10 @@ function updateComposer(){
     const node = selectedNode();
     const runnable = (node && isSmartRunnableNode(node)) ? node : null;
     pruneComposerPins();
-    // 选中一张自己已被固定的节点时，面板跟到它；否则面板留在 anchor 上（不被新选中/新节点带走）。
-    if(runnable && isComposerNodePinned(runnable.id)) composerPinAnchorId = runnable.id;
-    const pinnedNode = pinnedComposerNode();
-    const subjectNode = pinnedNode || runnable || node;
+    // 可编辑面板跟随当前选中节点；被固定但未选中的节点由快照面板常驻显示。
+    const subjectNode = runnable || node;
     // 按钮是「当前选中节点」的开关；没有选中时退回面板主体。
-    syncComposerPinButton(isComposerNodePinned((runnable || pinnedNode || node)?.id));
+    syncComposerPinButton(isComposerNodePinned(subjectNode?.id));
     syncRunButtonState(subjectNode);
     if(smartCascadeSilentSelection && !activeComposerSubject){
         composer.classList.remove('open');
@@ -17166,6 +17258,8 @@ function updateSelectionBox(event){
     if(!selectionState.moved){
         if(Math.abs(event.clientX - selectionState.startScreen.x) <= 4 && Math.abs(event.clientY - selectionState.startScreen.y) <= 4) return;
         selectionState.moved = true;
+        // 真正开始框选才隐藏节点阴影；单纯按下/点击空白不应影响任何节点。
+        document.body.classList.add('smart-selecting');
     }
     applySmartSelectionPreview(event);
 }
@@ -17191,7 +17285,11 @@ function finishSelection(event){
     selectionJustFinished = true;
     SelectionBox.hide();
     document.body.classList.remove('smart-selecting');
-    render();
+    // 只同步选中态，不整页重渲染：整页 render() 会重建每个节点 DOM，
+    // 造成所有节点阴影同时闪一下（用户明确报告过）。
+    syncSelectionUi();
+    updateComposer();
+    scheduleSave();
     setTimeout(() => { selectionJustFinished = false; }, 0);
 }
 function groupSelectedNodes(){
@@ -17470,8 +17568,6 @@ shell.onmousedown = e => {
             additive:e.ctrlKey || e.metaKey,
             baseIds:selectedIds.slice()
         };
-        document.body.classList.add('smart-selecting');
-        updateSelectionBox(e);
         return;
     }
     e.preventDefault();
@@ -17518,7 +17614,11 @@ shell.onclick = e => {
     if(document.getElementById('imageEditModal')?.classList.contains('open')) return;
     closeCreateMenu();
     clearSelection();
-    render();
+    // 点空白只清选中：用增量同步代替整页 render()，否则每个节点 DOM 都会重建，
+    // 所有节点的阴影/边框会同时闪一下。
+    syncSelectionUi();
+    updateComposer();
+    scheduleSave();
 };
 minimap?.addEventListener('mousedown', e => {
     if(e.button !== 0) return;

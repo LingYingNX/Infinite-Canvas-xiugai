@@ -765,7 +765,8 @@ def smart_flow(page, cid):
 PIN_STATE = """() => ({
     pinned: Boolean(composerPinned),
     pinnedIds: [...composerPinnedNodeIds].map(String).sort(),
-    anchor: String(composerPinAnchorId || ''),
+    snapshots: [...document.querySelectorAll('.composer-snapshot-slot [data-snapshot-node-id]')]
+        .map(el => String(el.dataset.snapshotNodeId)).sort(),
     btnActive: composerPinBtn.classList.contains('active'),
     label: (composerPinBtn.querySelector('span') || {}).textContent || '',
     composerOpen: Boolean(composer && composer.classList.contains('open')),
@@ -774,11 +775,11 @@ PIN_STATE = """() => ({
 })"""
 
 PIN_CHECK_NAMES = (
-    "smart pin binds the panel to that node",
-    "smart new node does not steal the pinned panel",
-    "smart keeps the pinned panel after deselect",
-    "smart pinning another node moves the panel there",
-    "smart unpin releases only its own node",
+    "smart pin pins the selected node",
+    "smart new node opens its own panel and keeps the pinned one visible",
+    "smart deselect closes the editable panel but keeps the pinned snapshot",
+    "smart pinning another node keeps both panels visible",
+    "smart unpin removes only that node's panel",
 )
 
 
@@ -833,9 +834,8 @@ def smart_pin_scope_flow(page, cid):
     record(
         PIN_CHECK_NAMES[0],
         after_pin["pinned"] and after_pin["pinnedIds"] == [node_a]
-        and after_pin["anchor"] == node_a
         and after_pin["btnActive"] and after_pin["label"] == "取消固定"
-        and after_pin["panelId"] == node_a,
+        and after_pin["panelId"] == node_a and after_pin["snapshots"] == [],
         "state=%s" % json.dumps(after_pin, ensure_ascii=False),
     )
 
@@ -846,8 +846,8 @@ def smart_pin_scope_flow(page, cid):
     after_new = page.evaluate(PIN_STATE)
     record(
         PIN_CHECK_NAMES[1],
-        after_new["pinnedIds"] == [node_a] and after_new["anchor"] == node_a
-        and after_new["panelId"] == node_a and after_new["composerOpen"]
+        after_new["pinnedIds"] == [node_a] and after_new["snapshots"] == [node_a]
+        and after_new["panelId"] == node_b and after_new["composerOpen"]
         and after_new["selectedId"] == node_b
         # B 自己没被固定，所以按钮显示「固定面板」——点了就能把 B 也固定，不必先取消 A。
         and not after_new["btnActive"] and after_new["label"] == "固定面板",
@@ -858,10 +858,9 @@ def smart_pin_scope_flow(page, cid):
     after_deselect = page.evaluate(PIN_STATE)
     record(
         PIN_CHECK_NAMES[2],
-        after_deselect["pinnedIds"] == [node_a] and after_deselect["anchor"] == node_a
-        and after_deselect["pinned"] and after_deselect["btnActive"]
-        and after_deselect["label"] == "取消固定"
-        and after_deselect["panelId"] == node_a and after_deselect["composerOpen"],
+        after_deselect["pinnedIds"] == [node_a] and after_deselect["snapshots"] == [node_a]
+        and not after_deselect["composerOpen"]
+        and not after_deselect["btnActive"] and after_deselect["label"] == "固定面板",
         "state=%s" % json.dumps(after_deselect, ensure_ascii=False),
     )
 
@@ -871,7 +870,7 @@ def smart_pin_scope_flow(page, cid):
     record(
         PIN_CHECK_NAMES[3],
         after_both["pinnedIds"] == sorted([node_a, node_b])
-        and after_both["anchor"] == node_b and after_both["panelId"] == node_b
+        and after_both["snapshots"] == [node_a] and after_both["panelId"] == node_b
         and after_both["btnActive"] and after_both["label"] == "取消固定",
         "state=%s" % json.dumps(after_both, ensure_ascii=False),
     )
@@ -880,8 +879,8 @@ def smart_pin_scope_flow(page, cid):
     after_unpin_b = page.evaluate(PIN_STATE)
     record(
         PIN_CHECK_NAMES[4],
-        after_unpin_b["pinnedIds"] == [node_a] and after_unpin_b["anchor"] == node_a
-        and after_unpin_b["panelId"] == node_a and not after_unpin_b["btnActive"]
+        after_unpin_b["pinnedIds"] == [node_a] and after_unpin_b["snapshots"] == [node_a]
+        and after_unpin_b["panelId"] == node_b and not after_unpin_b["btnActive"]
         and after_unpin_b["label"] == "固定面板",
         "state=%s" % json.dumps(after_unpin_b, ensure_ascii=False),
     )
