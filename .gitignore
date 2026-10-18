@@ -16,7 +16,9 @@ data/asset_library.json
 data/runninghub_workflows.json
 data/shared_folders.json
 data/storage_settings.json
+data/.access_token
 global_config.json
+API/.env
 
 # Local test/runtime artifacts
 output/

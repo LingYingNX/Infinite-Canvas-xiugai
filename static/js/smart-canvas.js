@@ -102,6 +102,9 @@ let connectionEraseState = null;
 let rightEraseGesture = null;
 let rightEraseJustFinished = false;
 let saveTimer = null;
+let canvasSaveRetryTimer = null;
+let canvasSaveRetryDelay = 1000;
+let canvasSaveDirty = false;
 let apiProviders = [];
 let comfyWorkflows = [];
 let comfyInstanceCount = 1;
@@ -5376,8 +5379,12 @@ function connectAssetLibrarySyncSocket(){
             try { socket.close(); } catch(e) {}
         };
     };
-    window.addEventListener('beforeunload', () => {
+    window.addEventListener('beforeunload', event => {
         clearTimeout(retryTimer);
+        if(canvasSaveDirty || canvasSyncInFlight){
+            event.preventDefault();
+            event.returnValue = '';
+        }
         try { socket?.close(); } catch(e) {}
     });
     connect();
@@ -5901,12 +5908,24 @@ async function loadCanvas(){
         startCanvasMetaPoll();
     } catch(e) { toast(tr('smart.toastCanvasFail')); }
 }
-function scheduleSave(){
+function scheduleSave(delay=450){
+    canvasSaveDirty = true;
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveCanvas, 450);
+    clearTimeout(canvasSaveRetryTimer);
+    canvasSaveRetryTimer = null;
+    if(canvasSyncInFlight) return;
+    saveTimer = setTimeout(() => {
+        saveTimer = null;
+        saveCanvas();
+    }, delay);
 }
 async function saveCanvas(){
     if(!canvasId || !canvas) return;
+    if(canvasSyncInFlight){
+        canvasSaveDirty = true;
+        return;
+    }
+    canvasSaveDirty = false;
     savePromptDraftForCurrent();
     nodes.forEach(node => {
         node.images = (node.images || []).map(img => mediaItemForStorage(stripImageGenerationMeta(img)));
@@ -5936,6 +5955,7 @@ async function saveCanvas(){
         if(res.ok){
             const data = await res.json();
             if(data.canvas && data.canvas.updated_at) canvas.updated_at = data.canvas.updated_at;
+            canvasSaveRetryDelay = 1000;
         } else if(res.status === 409) {
             // 冲突：别人先保存了。合并对方的状态（节点 id 合并、图片取并集，谁都不丢），
             // 然后用对方最新的 updated_at 作为基底重存，把合并结果落盘——而不是直接覆盖对方。
@@ -5951,11 +5971,25 @@ async function saveCanvas(){
             } else if(data.detail?.updated_at) {
                 canvas.updated_at = data.detail.updated_at;
             }
-            clearTimeout(saveTimer);
-            saveTimer = setTimeout(saveCanvas, 300);
+            canvasSaveDirty = true;
+            scheduleSave(300);
+            return;
+        } else {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data?.detail?.message || data?.detail || `保存失败 HTTP ${res.status}`);
         }
-    } catch(e) {} finally {
+    } catch(e) {
+        canvasSaveDirty = true;
+        toast(e?.message || '画布保存失败，稍后自动重试');
+        clearTimeout(canvasSaveRetryTimer);
+        canvasSaveRetryTimer = setTimeout(() => {
+            canvasSaveRetryTimer = null;
+            saveCanvas();
+        }, canvasSaveRetryDelay);
+        canvasSaveRetryDelay = Math.min(30000, canvasSaveRetryDelay * 2);
+    } finally {
         canvasSyncInFlight = false;
+        if(canvasSaveDirty && !canvasSaveRetryTimer && !saveTimer) scheduleSave(450);
     }
 }
 function applyNodeMetaToImage(image, node){
@@ -12986,8 +13020,8 @@ function savePromptDraftForCurrent(){
         delete promptInput.dataset.preserveDraftOnce;
         return;
     }
-    subject.promptDraftHtml = promptInput.innerHTML;
     subject.promptDraftText = promptPlainText();
+    subject.promptDraftHtml = promptHtmlWithMentionTokens(subject.promptDraftText, subject.runPromptRefs || []) || escapeHtml(subject.promptDraftText);
     subject.runSettings = cloneSmartSettings(settings);
 }
 function setPromptDraftForNode(node, text){
@@ -13002,15 +13036,11 @@ function setPromptDraftForNode(node, text){
     }
 }
 function loadPromptDraft(subject){
-    if(subject?.promptDraftHtml){
-        const hasToken = String(subject.promptDraftHtml || '').includes('mention-image-token');
-        promptInput.innerHTML = hasToken
-            ? subject.promptDraftHtml
-            : (promptHtmlWithMentionTokens(subject.runPrompt || subject.promptDraftText || '', subject.runPromptRefs || []) || subject.promptDraftHtml);
-    } else if(typeof subject?.runPrompt === 'string'){
-        const rebuilt = promptHtmlWithMentionTokens(subject.runPrompt, subject.runPromptRefs || []);
+    const text = subject?.runPrompt || subject?.promptDraftText || '';
+    if(text){
+        const rebuilt = promptHtmlWithMentionTokens(text, subject.runPromptRefs || []);
         if(rebuilt) promptInput.innerHTML = rebuilt;
-        else setPromptText(subject.runPrompt);
+        else setPromptText(text);
     } else {
         setPromptText('');
     }
@@ -13914,10 +13944,11 @@ function promptHtmlWithMentionTokens(text, refs=[]){
     return html;
 }
 function snapshotRunMeta(prompt, sourceId, displayPrompt='', refs=[]){
+    const safeDisplayPrompt = displayPrompt || promptPlainText() || prompt;
     return {
         prompt,
-        displayPrompt:displayPrompt || promptPlainText() || prompt,
-        promptHtml: promptInput ? promptInput.innerHTML : '',
+        displayPrompt:safeDisplayPrompt,
+        promptHtml:promptHtmlWithMentionTokens(safeDisplayPrompt, refs) || escapeHtml(safeDisplayPrompt),
         promptText: promptPlainText(),
         promptRefs:(refs || []).map(ref => ({url:ref.url || '', name:ref.name || '', nodeId:ref.nodeId || '', imageIndex:ref.imageIndex ?? ''})).filter(ref => ref.url),
         inputRefs:(refs || []).map(ref => ({url:ref.url || '', name:ref.name || '', nodeId:ref.nodeId || '', imageIndex:ref.imageIndex ?? '', kind:ref.kind || ''})).filter(ref => ref.url),
@@ -13943,12 +13974,9 @@ function attachRunMeta(targetNode, meta){
     else delete targetNode.sourceNodeId;
     targetNode.runAt = meta.createdAt;
     // 保存可编辑的 @-提及表单到草稿字段，方便点输出节点时还原原始可编辑形式
-    if(meta.promptHtml != null){
-        const htmlHasToken = String(meta.promptHtml || '').includes('mention-image-token');
-        const rebuiltHtml = htmlHasToken ? '' : promptHtmlWithMentionTokens(meta.displayPrompt || meta.promptText || '', meta.promptRefs || []);
-        targetNode.promptDraftHtml = htmlHasToken ? meta.promptHtml : (rebuiltHtml || meta.promptHtml);
-        targetNode.promptDraftText = meta.promptText || '';
-    }
+    const draftText = meta.displayPrompt || meta.promptText || meta.prompt || '';
+    targetNode.promptDraftHtml = promptHtmlWithMentionTokens(draftText, meta.promptRefs || []) || escapeHtml(draftText);
+    targetNode.promptDraftText = draftText;
     targetNode.images = (targetNode.images || []).map(img => stripImageGenerationMeta(img));
 }
 function stripRunInputMeta(meta){
@@ -15421,16 +15449,10 @@ function syncCascadeRunButton(node=selectedNode()){
     refreshIcons();
 }
 function loadNodePromptDraftToInput(node){
-    if(node?.promptDraftHtml) {
-        const hasToken = String(node.promptDraftHtml || '').includes('mention-image-token');
-        promptInput.innerHTML = hasToken
-            ? node.promptDraftHtml
-            : (promptHtmlWithMentionTokens(node.runPrompt || node.promptDraftText || '', node.runPromptRefs || []) || node.promptDraftHtml);
-    } else {
-        const rebuilt = promptHtmlWithMentionTokens(node?.runPrompt || '', node?.runPromptRefs || []);
-        if(rebuilt) promptInput.innerHTML = rebuilt;
-        else setPromptText(node?.runPrompt || '');
-    }
+    const text = node?.runPrompt || node?.promptDraftText || '';
+    const rebuilt = promptHtmlWithMentionTokens(text, node?.runPromptRefs || []);
+    if(rebuilt) promptInput.innerHTML = rebuilt;
+    else setPromptText(text);
 }
 async function createSmartComfyTask(payload){
     const res = await fetch('/api/canvas-comfy-tasks', {

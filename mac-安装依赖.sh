@@ -33,5 +33,5 @@ if [ $? -ne 0 ]; then
 fi
 
 echo ""
-echo "Done. Run './启动服务.sh' to start."
+echo "Done. Run 'bash mac-启动服务.sh' to start."
 read -p "Press Enter to exit..."

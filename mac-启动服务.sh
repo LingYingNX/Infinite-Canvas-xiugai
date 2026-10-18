@@ -1,13 +1,12 @@
 #!/bin/bash
 cd "$(dirname "$0")"
-LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)"
-if [ -z "$LAN_IP" ]; then
-  LAN_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+BIND_HOST="${APP_BIND_HOST:-127.0.0.1}"
+if [ "$BIND_HOST" = "0.0.0.0" ] || [ "$BIND_HOST" = "::" ]; then
+  LAN_ADDR="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')"
+  APP_URL="http://${LAN_ADDR:-127.0.0.1}:3000/"
+else
+  APP_URL="http://${BIND_HOST}:3000/"
 fi
-if [ -z "$LAN_IP" ]; then
-  LAN_IP="127.0.0.1"
-fi
-APP_URL="http://${LAN_IP}:3000/"
 
 echo "Starting ComfyUI-API-Modelscope..."
 echo "Visit: ${APP_URL}"

@@ -1,6 +1,6 @@
 <!-- FOR AI AGENTS - Human readability is a side effect, not a goal -->
 <!-- Managed by agent: keep sections and order; edit content, not structure -->
-<!-- Last updated: 2026-10-14 | Last verified: 2026-10-14 -->
+<!-- Last updated: 2026-10-18 | Last verified: 2026-10-18 -->
 
 # AGENTS.md
 
@@ -40,13 +40,14 @@
 | macOS 启动 | `bash mac-启动服务.sh` | macOS 启动脚本 |
 | 即梦 CLI 安装/登录 | `powershell -File .\tools\jimeng_cli_install.ps1` / `jimeng_cli_login.ps1` | 即梦 CLI |
 
-依赖（`requirements.txt`）：`fastapi`、`uvicorn`、`requests`、`pydantic`、`python-multipart`、`httpx`、`pillow`。
+依赖（`requirements.txt`）：`fastapi`、`uvicorn`、`requests`、`pydantic`、`python-multipart`、`httpx`、`pillow`、`websockets`。
 
 ## Build/Tests
 
 无标准测试框架/CI/lint（`detect-project.sh` 均为 unknown/none）。
 
-- 唯一回归：`tools/test-canvas-list-keyboard.js`（Node 脚本，回归画布列表键盘交互；需已装 Node.js）。
+- 安全与数据自检：`.\python\python.exe tools/regression/security_regression.py`（来源校验、密钥绑定、原子写、ZIP/请求体限制）。
+- 前端静态守卫：`node tools/test-smart-canvas-guards.js` 与 `node tools/test-canvas-list-keyboard.js`。
 - 后端改动自检：`.\python\python.exe -c "import ast; ast.parse(open('main.py',encoding='utf-8').read())"`（语法门），再启动 `run.bat` 冒烟首页 HTTP 200。
 
 ## File Map
@@ -72,27 +73,44 @@
 
 ## Security
 
-- 全服务无鉴权，仅面向本机（127.0.0.1），不要暴露到公网。
+- 默认只监听 `127.0.0.1`。确需局域网访问时显式设置 `APP_BIND_HOST=0.0.0.0`，并按需配置 `TRUSTED_WEB_ORIGINS`；API 仍会校验同源令牌 Cookie、Origin 或本机来源。
 - `API/.env`、`data/api_providers.json` 含真实凭据，禁止提交或写入日志。
 - 禁止在工作区外递归删除/移动；先解析绝对路径再执行。
 
 ## Checklist
 
 - [ ] 改 `main.py` 后跑语法门 + 启动冒烟
+- [ ] 改鉴权、存储、上传、更新逻辑后跑 `tools/regression/security_regression.py`
 - [ ] 改构建/测试命令或目录结构时，同步更新本文件「Commands」「File Map」
-- [ ] 改前端页面后，涉及列表页键盘交互时跑 `tools/test-canvas-list-keyboard.js`
+- [ ] 改智能画布保存/提示词后跑 `node tools/test-smart-canvas-guards.js`
+- [ ] 改列表页键盘交互后跑 `tools/test-canvas-list-keyboard.js`
 
 ## Patterns to Follow
 
 - 错误处理收敛到 helper：如 `require_video_base_url`（main.py）统一「Base URL 未配置」400 报错，`raise_chat_upstream_http_error` / `raise_video_provider_http_error` 统一上游 HTTP 错误转换——新 provider 接口沿用同一模式，不要内联重复 raise。
 - 轮询任务统一带 `time.monotonic()` deadline 与递增 delay（参考 `wait_for_video_task`）。
 - 文件写入后用 `?v=` 缓存戳由 `sync_static_html_versions()` 自动刷新，html 中不手改版本号。
+- JSON/文本状态统一走 `atomic_write_json()` / `atomic_write_text()`，避免崩溃或并发写留下半个文件。
 
 ## When stuck
 
 - 服务行为存疑：直接启动 `.\run.bat` 后用 `Invoke-WebRequest http://127.0.0.1:3000/...` 复现，报错看控制台输出。
 - 文档与代码冲突：以代码为准，并回头更新本文件。
 
+## Release
+
+用户说“**更新版本号推送**”时，按下面顺序执行；只推代码不会让用户端检测到更新。
+
+1. 先确认改动已通过检查：`main.py` 改动跑 `ast.parse` + 启动冒烟 + `tools/regression/security_regression.py`；画布改动跑 `python tools/regression/canvas_interaction.py --no-server`（30 条）。
+2. 把 `VERSION` 改成更大的日期式版本（如 `2026.10.17`），必须严格大于线上版本，否则 `version_gt` 判定不出更新。
+3. 同步 `static/update-notes.json`：`version` 与 `VERSION` 一致，`updated_at` 写当前时间，`items` 写本次更新。必须是严格 JSON——字符串内换行要写成 `\n`，裸换行会让 Python 解析失败。
+4. 运行 `.\python\python.exe tools\sync_static_versions.py` 刷新全站 `?v=` 缓存戳（会改动多个 `static/*.html`，属预期）。
+5. 提交 `VERSION`、`main.py`（如有）、`static/*.html`、`static/update-notes.json`，提交信息用 `release: <版本> <摘要>`；不要把 `.agents/` 加入提交。
+6. `git push origin main`。推送后 `raw.githubusercontent.com` 有约 1–5 分钟 CDN 缓存，可用 GitHub API `contents/VERSION` 核对远端真实内容。
+7. 复验：临时把本地 `VERSION` 改成旧值 → `GET /api/check-update` 应返回 `update_available: true` 且 `latest.update_notes.items` 非空 → 立即还原 `VERSION`。
+
+自动更新只覆盖 `main.py`、`VERSION`、`static/*`（见 `update_allowed_file`）；`workflows/`、`tools/`、`python/`、`packages/` 不会随更新下发。
+
 ## 版本
 
-`VERSION`：`2026.08.25`。`main.py` 读取该值用于自更新与静态资源缓存戳（`?v=` 由 `sync_static_html_versions()` 启动时自动刷新，提交时随附于 html 改动属预期）。
+`VERSION`：`2026.10.17`。`main.py` 读取该值用于自更新与静态资源缓存戳（`?v=` 由 `sync_static_html_versions()` 启动时自动刷新，提交时随附于 html 改动属预期）。

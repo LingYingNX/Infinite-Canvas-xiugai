@@ -4,12 +4,15 @@ import base64
 import hashlib
 import hmac
 import datetime
+import ipaddress
 import urllib.request
 import urllib.parse
 import urllib.error
 import os
 import re
 import random
+import secrets
+import socket
 import subprocess
 import time
 import traceback
@@ -27,7 +30,7 @@ import functools
 import html
 import xml.etree.ElementTree as ET
 from typing import List, Dict, Any, Optional, Tuple
-from threading import Lock, Thread
+from threading import Lock, RLock, Thread
 import httpx
 from PIL import Image, ImageOps
 from io import BytesIO
@@ -66,13 +69,6 @@ class QuietAccessLogFilter(logging.Filter):
 logging.getLogger("uvicorn.access").addFilter(QuietAccessLogFilter())
 
 app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # --- WebSocket 状态管理器 ---
 class ConnectionManager:
@@ -178,6 +174,9 @@ async def startup_event():
 
 @app.websocket("/ws/stats")
 async def websocket_endpoint(websocket: WebSocket, client_id: str = None):
+    if not request_is_authorized(websocket):
+        await websocket.close(code=1008)
+        return
     await manager.connect(websocket, client_id)
     try:
         while True:
@@ -229,6 +228,242 @@ DEFAULT_STORAGE_DIRS = {
     "generated": OUTPUT_OUTPUT_DIR,
     "local": LOCAL_UPLOAD_DIR,
 }
+APP_BIND_HOST = os.getenv("APP_BIND_HOST", "127.0.0.1").strip() or "127.0.0.1"
+MAX_REQUEST_BODY_BYTES = max(
+    1024 * 1024,
+    int(os.getenv("MAX_REQUEST_BODY_BYTES", str(256 * 1024 * 1024))),
+)
+MAX_UPLOAD_FILE_BYTES = max(
+    1024 * 1024,
+    int(os.getenv("MAX_UPLOAD_FILE_BYTES", str(50 * 1024 * 1024))),
+)
+MAX_ARCHIVE_BYTES = max(
+    MAX_UPLOAD_FILE_BYTES,
+    int(os.getenv("MAX_ARCHIVE_BYTES", str(256 * 1024 * 1024))),
+)
+MAX_ARCHIVE_ENTRIES = max(1, int(os.getenv("MAX_ARCHIVE_ENTRIES", "5000")))
+CANVAS_EXPORT_MAX_ITEMS = max(1, int(os.getenv("CANVAS_EXPORT_MAX_ITEMS", "200")))
+CANVAS_EXPORT_MAX_BYTES = max(
+    MAX_UPLOAD_FILE_BYTES,
+    int(os.getenv("CANVAS_EXPORT_MAX_BYTES", str(512 * 1024 * 1024))),
+)
+IMPORTED_RESOURCE_EXTS = {
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp",
+    ".mp4", ".webm", ".mov", ".m4v", ".mkv",
+    ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac",
+    ".txt", ".json", ".csv", ".srt", ".vtt", ".md",
+}
+ACCESS_TOKEN_FILE = os.path.join(DATA_DIR, ".access_token")
+ACCESS_COOKIE_NAME = "infinite_canvas_access"
+TRUSTED_WEB_ORIGINS = {
+    value.strip().rstrip("/").lower()
+    for value in os.getenv("TRUSTED_WEB_ORIGINS", "").split(",")
+    if value.strip()
+}
+
+def atomic_write_text(path: str, text: str) -> None:
+    """Replace a UTF-8 text file without exposing a partially written file."""
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.", suffix=".tmp", dir=parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    except Exception:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
+        raise
+
+def atomic_write_json(path: str, payload: Any, indent: int = 2) -> None:
+    atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=indent))
+
+async def read_upload_limited(file: UploadFile, max_bytes: int = MAX_UPLOAD_FILE_BYTES) -> bytes:
+    data = bytearray()
+    while True:
+        chunk = await file.read(1024 * 1024)
+        if not chunk:
+            return bytes(data)
+        data.extend(chunk)
+        if len(data) > max_bytes:
+            raise HTTPException(status_code=413, detail=f"{file.filename or '文件'} 超过 {max_bytes // (1024 * 1024)}MB 限制")
+
+async def read_httpx_response_limited(response, max_bytes: int) -> bytes:
+    data = bytearray()
+    async for chunk in response.aiter_bytes(1024 * 1024):
+        if not chunk:
+            continue
+        data.extend(chunk)
+        if len(data) > max_bytes:
+            raise HTTPException(status_code=413, detail="远程文件超过大小限制")
+    return bytes(data)
+
+def decode_base64_limited(value: str, max_bytes: int, label: str = "文件") -> bytes:
+    text = str(value or "").strip()
+    if len(text) > ((max_bytes + 2) // 3) * 4 + 8192:
+        raise HTTPException(status_code=413, detail=f"{label}超过大小限制")
+    try:
+        content = base64.b64decode(text, validate=False)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"{label}数据无法解码") from exc
+    if len(content) > max_bytes:
+        raise HTTPException(status_code=413, detail=f"{label}超过大小限制")
+    return content
+
+def validate_zip_limits(archive: zipfile.ZipFile, max_entries: int = MAX_ARCHIVE_ENTRIES, max_bytes: int = MAX_ARCHIVE_BYTES) -> None:
+    entries = archive.infolist()
+    if len(entries) > max_entries:
+        raise HTTPException(status_code=413, detail=f"压缩包条目超过 {max_entries} 个")
+    total = sum(max(0, int(item.file_size or 0)) for item in entries)
+    if total > max_bytes:
+        raise HTTPException(status_code=413, detail=f"压缩包解压后超过 {max_bytes // (1024 * 1024)}MB 限制")
+
+def read_zip_member_limited(archive: zipfile.ZipFile, name: str, max_bytes: int = MAX_ARCHIVE_BYTES) -> bytes:
+    data = bytearray()
+    with archive.open(name) as source:
+        while True:
+            chunk = source.read(1024 * 1024)
+            if not chunk:
+                return bytes(data)
+            data.extend(chunk)
+            if len(data) > max_bytes:
+                raise HTTPException(status_code=413, detail="压缩包成员超过大小限制")
+
+def copy_zip_member_limited(archive: zipfile.ZipFile, name: str, target: str, max_bytes: int = MAX_ARCHIVE_BYTES) -> int:
+    copied = 0
+    with archive.open(name) as source, open(target, "wb") as destination:
+        while True:
+            chunk = source.read(1024 * 1024)
+            if not chunk:
+                return copied
+            copied += len(chunk)
+            if copied > max_bytes:
+                raise HTTPException(status_code=413, detail="压缩包成员超过大小限制")
+            destination.write(chunk)
+
+def load_or_create_access_token() -> str:
+    try:
+        if os.path.isfile(ACCESS_TOKEN_FILE):
+            with open(ACCESS_TOKEN_FILE, "r", encoding="utf-8") as handle:
+                token = handle.read().strip()
+            if len(token) >= 32:
+                return token
+        token = secrets.token_urlsafe(32)
+        atomic_write_text(ACCESS_TOKEN_FILE, token + "\n")
+        return token
+    except Exception as exc:
+        print(f"创建本地访问令牌失败，本次运行使用临时令牌: {exc}")
+        return secrets.token_urlsafe(32)
+
+ACCESS_TOKEN = load_or_create_access_token()
+
+def is_loopback_address(value: str) -> bool:
+    host = str(value or "").strip().lower()
+    if host in {"localhost", "testclient"}:
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host.startswith("127.")
+
+def is_trusted_plugin_origin(origin: str) -> bool:
+    return str(origin or "").lower().startswith(("chrome-extension://", "plugin://"))
+
+def request_is_authorized(request: Request) -> bool:
+    actual = origin_from_url(request.headers.get("origin", "")) or origin_from_url(request.headers.get("referer", ""))
+    local_client = bool(request.client and is_loopback_address(request.client.host))
+    request_scheme = "https" if request.url.scheme in {"https", "wss"} else "http"
+    host_name = urllib.parse.urlsplit(f"{request_scheme}://{request.headers.get('host', '')}").hostname or ""
+    if actual:
+        expected = f"{request_scheme}://{request.headers.get('host', '')}".rstrip("/").lower()
+        origin_ok = actual == expected or actual in TRUSTED_WEB_ORIGINS or is_trusted_plugin_origin(actual)
+        if not origin_ok:
+            return False
+    if local_client and (
+        not actual
+        or is_loopback_address(host_name)
+        or actual in TRUSTED_WEB_ORIGINS
+        or is_trusted_plugin_origin(actual)
+    ):
+        return True
+    return request.cookies.get(ACCESS_COOKIE_NAME) == ACCESS_TOKEN
+
+@app.middleware("http")
+async def app_security_guard(request: Request, call_next):
+    path = request.url.path
+    if path.startswith("/api/") and not request_is_authorized(request):
+        return JSONResponse(status_code=403, content={"detail": "拒绝非受信任来源访问本机 API"})
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_REQUEST_BODY_BYTES:
+                return JSONResponse(status_code=413, content={"detail": "请求体超过大小限制"})
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Content-Length 不合法"})
+    response = await call_next(request)
+    if request.method == "GET" and (path == "/" or path.lower().endswith(".html")):
+        response.set_cookie(
+            ACCESS_COOKIE_NAME,
+            ACCESS_TOKEN,
+            max_age=365 * 24 * 60 * 60,
+            httponly=True,
+            samesite="strict",
+            secure=request.url.scheme == "https",
+            path="/",
+        )
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    return response
+
+class RequestBodyTooLarge(Exception):
+    pass
+
+class BodyLimitMiddleware:
+    def __init__(self, asgi_app):
+        self.app = asgi_app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        received = 0
+        response_started = False
+
+        async def wrapped_send(message):
+            nonlocal response_started
+            if message.get("type") == "http.response.start":
+                response_started = True
+            await send(message)
+
+        async def limited_receive():
+            nonlocal received
+            message = await receive()
+            if message.get("type") == "http.request":
+                received += len(message.get("body", b""))
+                if received > MAX_REQUEST_BODY_BYTES:
+                    raise RequestBodyTooLarge()
+            return message
+
+        try:
+            await self.app(scope, limited_receive, wrapped_send)
+        except RequestBodyTooLarge:
+            if response_started:
+                raise
+            response = JSONResponse(status_code=413, content={"detail": "请求体超过大小限制"})
+            await response(scope, receive, send)
+
+app.add_middleware(BodyLimitMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=sorted(TRUSTED_WEB_ORIGINS),
+    allow_origin_regex=r"^(chrome-extension://.*|plugin://.*)$",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 def _storage_abs_path(value, fallback):
     text = str(value or "").strip()
@@ -260,8 +495,7 @@ def save_storage_settings(payload):
     for path in dirs.values():
         os.makedirs(path, exist_ok=True)
     os.makedirs(DATA_DIR, exist_ok=True)
-    with open(STORAGE_SETTINGS_FILE, "w", encoding="utf-8") as f:
-        json.dump(dirs, f, ensure_ascii=False, indent=2)
+    atomic_write_json(STORAGE_SETTINGS_FILE, dirs)
     apply_storage_settings(dirs)
     return {"dirs": dirs}
 
@@ -279,7 +513,7 @@ QUEUE_LOCK = Lock()
 HISTORY_LOCK = Lock()
 GLOBAL_CONFIG_LOCK = Lock()
 CONVERSATION_LOCK = Lock()
-CANVAS_LOCK = Lock()
+CANVAS_LOCK = RLock()
 LOAD_LOCK = Lock()
 RUNNINGHUB_WORKFLOW_LOCK = Lock()
 NEXT_TASK_ID = 1
@@ -1293,8 +1527,7 @@ def load_api_providers():
 def save_api_providers(providers):
     os.makedirs(DATA_DIR, exist_ok=True)
     with GLOBAL_CONFIG_LOCK:
-        with open(API_PROVIDERS_FILE, "w", encoding="utf-8") as f:
-            json.dump(providers, f, ensure_ascii=False, indent=2)
+        atomic_write_json(API_PROVIDERS_FILE, providers)
 
 def default_runninghub_static_provider():
     return {
@@ -1349,9 +1582,10 @@ def mutate_static_runninghub_provider(mutator):
     changed = mutator(provider)
     if changed is False:
         return False
-    with open(STATIC_RUNNINGHUB_API_PROVIDERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(raw, f, ensure_ascii=False, indent=2)
-        f.write("\n")
+    atomic_write_text(
+        STATIC_RUNNINGHUB_API_PROVIDERS_FILE,
+        json.dumps(raw, ensure_ascii=False, indent=2) + "\n",
+    )
     return True
 
 def sync_runninghub_provider_workflows_to_static_template(provider):
@@ -1521,8 +1755,7 @@ def update_env_values(updates):
         if key not in seen:
             next_lines.append(f"{key}={env_quote(value)}")
             os.environ[key] = str(value or "")
-    with open(API_ENV_FILE, "w", encoding="utf-8") as f:
-        f.write("\n".join(next_lines).rstrip() + "\n")
+    atomic_write_text(API_ENV_FILE, "\n".join(next_lines).rstrip() + "\n")
 
 BACKEND_LOCAL_LOAD = {addr: 0 for addr in COMFYUI_INSTANCES}
 
@@ -2138,7 +2371,7 @@ def schedule_self_restart(delay_seconds: int = 3) -> bool:
         if os.name == "nt":
             launcher = os.path.join(BASE_DIR, "启动服务.bat")
             if not os.path.exists(launcher):
-                launcher = os.path.join(BASE_DIR, "start.bat")
+                launcher = os.path.join(BASE_DIR, "run.bat")
             bat_path = os.path.join(BASE_DIR, "_self_restart.bat")
             log_path = os.path.join(BASE_DIR, "_self_restart.log")
             script = (
@@ -2799,6 +3032,8 @@ class MidjourneyModalRequest(BaseModel):
 
 CANVAS_TASKS: Dict[str, Dict[str, Any]] = {}
 CANVAS_TASK_LOCK = Lock()
+CANVAS_TASK_RETENTION_SECONDS = max(60, int(os.getenv("CANVAS_TASK_RETENTION_SECONDS", "3600")))
+CANVAS_TASK_MAX_ENTRIES = max(20, int(os.getenv("CANVAS_TASK_MAX_ENTRIES", "500")))
 
 class CanvasVideoRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=VIDEO_PROMPT_MAX_LENGTH)
@@ -3400,8 +3635,7 @@ def save_to_history(record):
         if "timestamp" not in record:
             record["timestamp"] = time.time()
         history.insert(0, record)
-        with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
-            json.dump(history[:5000], f, ensure_ascii=False, indent=4)
+        atomic_write_json(HISTORY_FILE, history[:5000], indent=4)
 
 def save_and_broadcast_image(result):
     save_to_history(result)
@@ -3457,8 +3691,7 @@ def chat_assistant_message(content, model, raw_usage=None, raw=_CHAT_MESSAGE_NO_
 def save_conversation(user_id, conversation):
     with CONVERSATION_LOCK:
         path = conversation_path(user_id, conversation["id"])
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(conversation, f, ensure_ascii=False, indent=2)
+        atomic_write_json(path, conversation)
 
 def new_conversation(user_id, title="新对话"):
     timestamp = now_ms()
@@ -3509,8 +3742,7 @@ def canvas_path(canvas_id):
 
 def write_canvas_json(canvas):
     with CANVAS_LOCK:
-        with open(canvas_path(canvas["id"]), 'w', encoding='utf-8') as f:
-            json.dump(canvas, f, ensure_ascii=False, indent=2)
+        atomic_write_json(canvas_path(canvas["id"]), canvas)
 
 def save_canvas(canvas):
     canvas["updated_at"] = now_ms()
@@ -3536,8 +3768,7 @@ def load_projects():
 
 def save_projects(projects):
     with CANVAS_LOCK:
-        with open(PROJECTS_PATH, 'w', encoding='utf-8') as f:
-            json.dump({"projects": projects}, f, ensure_ascii=False, indent=2)
+        atomic_write_json(PROJECTS_PATH, {"projects": projects})
 
 def project_record(p):
     return {
@@ -3609,21 +3840,23 @@ def new_canvas(title="未命名画布", icon="layers", kind="classic", project=N
     return canvas
 
 def load_canvas(canvas_id):
-    path = canvas_path(canvas_id)
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="画布不存在")
-    with open(path, 'r', encoding='utf-8') as f:
-        canvas = json.load(f)
-    if canvas.get("deleted_at"):
-        raise HTTPException(status_code=404, detail="画布已在回收站")
-    return canvas
+    with CANVAS_LOCK:
+        path = canvas_path(canvas_id)
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="画布不存在")
+        with open(path, 'r', encoding='utf-8') as f:
+            canvas = json.load(f)
+        if canvas.get("deleted_at"):
+            raise HTTPException(status_code=404, detail="画布已在回收站")
+        return canvas
 
 def load_canvas_any(canvas_id):
-    path = canvas_path(canvas_id)
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="画布不存在")
-    with open(path, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    with CANVAS_LOCK:
+        path = canvas_path(canvas_id)
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail="画布不存在")
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
 
 CANVAS_COLORS = {"", "red", "orange", "amber", "green", "teal", "blue", "violet", "pink", "slate"}
 
@@ -5668,7 +5901,7 @@ async def generate_gemini_cli_provider_image(prompt, size, model, reference_imag
             image_prompt,
             model=model or GEMINI_CLI_DEFAULT_IMAGE_MODELS[0],
             timeout=gemini_cli_image_timeout() if is_antigravity_cli(gemini_cli_executable()) else gemini_cli_timeout(),
-            allow_tools=True,
+            allow_tools=str(os.getenv("GEMINI_CLI_IMAGE_TOOLS", "")).strip().lower() in {"1", "true", "yes", "on"},
         )
         files = codex_output_image_files(since)
         urls = []
@@ -6955,20 +7188,31 @@ async def list_storage_files(kind: str = "generated", offset: int = 0, limit: in
     os.makedirs(root, exist_ok=True)
     offset = max(0, int(offset or 0))
     limit = max(20, min(200, int(limit or 80)))
-    items = []
-    for current, dirs, files in os.walk(root):
-        dirs[:] = sorted([d for d in dirs if not d.startswith(".") and not d.startswith("._")], key=str.lower)
-        for name in sorted(files, key=str.lower):
-            if name.startswith(".") or name.startswith("._"):
-                continue
-            if os.path.splitext(name)[1].lower() not in STORAGE_IMAGE_EXTS:
-                continue
-            item = storage_file_item(kind, root, os.path.join(current, name))
-            if item:
-                items.append(item)
-    items.sort(key=lambda item: item.get("created_at") or 0, reverse=True)
-    total = len(items)
-    page_items = items[offset:offset + limit]
+    def scan_files():
+        found = []
+        for current, dirs, files in os.walk(root):
+            dirs[:] = sorted([d for d in dirs if not d.startswith(".") and not d.startswith("._")], key=str.lower)
+            for name in files:
+                if name.startswith(".") or name.startswith("._"):
+                    continue
+                if os.path.splitext(name)[1].lower() not in STORAGE_IMAGE_EXTS:
+                    continue
+                path = os.path.join(current, name)
+                try:
+                    found.append((os.path.getmtime(path), path))
+                except OSError:
+                    continue
+        found.sort(reverse=True)
+        total = len(found)
+        page = [
+            item for item in (
+                storage_file_item(kind, root, path)
+                for _created_at, path in found[offset:offset + limit]
+            )
+            if item
+        ]
+        return page, total
+    page_items, total = await asyncio.to_thread(scan_files)
     return {
         "kind": kind,
         "root": root,
@@ -7155,13 +7399,61 @@ def filename_from_media_url(url: str, fallback: str = "download.bin") -> str:
     name = os.path.basename(urllib.parse.unquote(path))
     return sanitize_export_filename(name or fallback, fallback)
 
-def fetch_remote_media_bytes(url: str, timeout: float = 30.0, max_bytes: int = 200 * 1024 * 1024):
-    text = rewrite_runninghub_file_url(str(url or "").strip())
+def ensure_public_http_url(url: str) -> str:
+    text = str(url or "").strip()
     parsed = urllib.parse.urlparse(text)
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        return None
-    with requests.get(text, stream=True, timeout=timeout, headers={"User-Agent": "ComfyUI-API-Modelscope/1.0"}) as response:
+    if parsed.scheme not in ("http", "https") or not parsed.netloc or not parsed.hostname:
+        raise HTTPException(status_code=400, detail="只支持公网 http/https 地址")
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        addresses = socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"无法解析目标地址：{exc}") from exc
+    if not addresses:
+        raise HTTPException(status_code=400, detail="目标地址没有可用 IP")
+    for info in addresses:
+        address = str(info[4][0]).split("%", 1)[0]
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="目标地址不合法")
+        if not ip.is_global:
+            raise HTTPException(status_code=403, detail="禁止访问本机、局域网或保留地址")
+    return text
+
+def open_public_stream(url: str, *, headers=None, timeout=30.0, max_redirects=5):
+    current = str(url or "").strip()
+    for _ in range(max_redirects + 1):
+        current = ensure_public_http_url(current)
+        response = requests.get(
+            current,
+            stream=True,
+            timeout=timeout,
+            headers=headers or {},
+            allow_redirects=False,
+        )
+        if response.status_code in (301, 302, 303, 307, 308):
+            location = response.headers.get("location", "")
+            response.close()
+            if not location:
+                raise HTTPException(status_code=502, detail="远程地址返回了无效跳转")
+            current = urllib.parse.urljoin(current, location)
+            continue
         response.raise_for_status()
+        return response
+    raise HTTPException(status_code=400, detail="远程地址重定向次数过多")
+
+def fetch_remote_media_bytes(url: str, timeout: float = 30.0, max_bytes: int = 200 * 1024 * 1024):
+    if max_bytes <= 0:
+        raise HTTPException(status_code=413, detail="导出素材总大小超过限制")
+    text = rewrite_runninghub_file_url(str(url or "").strip())
+    try:
+        response = open_public_stream(text, timeout=timeout, headers={"User-Agent": "ComfyUI-API-Modelscope/1.0"})
+    except HTTPException:
+        raise
+    except requests.RequestException:
+        return None
+    with response:
         content_type = response.headers.get("content-type") or "application/octet-stream"
         chunks = []
         total = 0
@@ -7574,8 +7866,7 @@ def _read_local_upload_classification(filename):
 
 def _write_local_upload_classification(filename, classification):
     path = _local_upload_classification_path(filename)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(normalize_asset_classification(classification), f, ensure_ascii=False, indent=2)
+    atomic_write_json(path, normalize_asset_classification(classification))
 
 def asset_classification_prompt(extra_prompt=""):
     base = load_asset_classification_prompt()
@@ -7701,8 +7992,7 @@ def save_asset_library(lib):
     sort_asset_library_items(lib)
     lib["updated_at"] = now_ms()
     os.makedirs(DATA_DIR, exist_ok=True)
-    with open(ASSET_LIBRARY_PATH, "w", encoding="utf-8") as f:
-        json.dump(lib, f, ensure_ascii=False, indent=2)
+    atomic_write_json(ASSET_LIBRARY_PATH, lib)
     if GLOBAL_LOOP:
         asyncio.run_coroutine_threadsafe(manager.broadcast_asset_library_updated(int(lib["updated_at"])), GLOBAL_LOOP)
 
@@ -7765,8 +8055,7 @@ def shared_folders_load():
 
 def shared_folders_save(data):
     os.makedirs(DATA_DIR, exist_ok=True)
-    with open(SHARED_FOLDERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    atomic_write_json(SHARED_FOLDERS_FILE, data)
 
 def shared_folder_by_id(folder_id):
     for entry in shared_folders_load().get("folders", []):
@@ -8035,8 +8324,7 @@ def save_prompt_libraries(data):
     data = normalize_prompt_libraries(data)
     data["updated_at"] = now_ms()
     os.makedirs(DATA_DIR, exist_ok=True)
-    with open(PROMPT_LIBRARY_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    atomic_write_json(PROMPT_LIBRARY_PATH, data)
     return data
 
 def public_prompt_libraries(data=None):
@@ -11690,19 +11978,12 @@ def download_output(request: Request, url: str, name: str = "", inline: bool = F
         filename = sanitize_export_filename(os.path.basename(name) if name else os.path.basename(path), os.path.basename(path))
         return FileResponse(path, media_type=content_type_for_path(path), filename=None if inline else filename)
     # 远程文件：流式代理，绝不把整段视频/大文件读进内存（否则多个视频同时代理会撑爆内存、拖垮单进程服务）。
-    parsed = urllib.parse.urlparse(str(url or "").strip())
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise HTTPException(status_code=400, detail="无效的下载地址")
     try:
         upstream_headers = {"User-Agent": "ComfyUI-API-Modelscope/1.0"}
         range_header = request.headers.get("range")
         if range_header:
             upstream_headers["Range"] = range_header
-        upstream = requests.get(
-            url, stream=True, timeout=(10, 60),
-            headers=upstream_headers,
-        )
-        upstream.raise_for_status()
+        upstream = open_public_stream(url, timeout=(10, 60), headers=upstream_headers)
     except requests.RequestException as exc:
         raise HTTPException(status_code=502, detail=f"远程文件下载失败：{exc}")
     content_type = upstream.headers.get("content-type") or "application/octet-stream"
@@ -11813,12 +12094,8 @@ async def export_minimax_timeline(payload: MiniMaxTimelineExportRequest):
 @app.post("/api/upload")
 async def upload_image(files: List[UploadFile] = File(...)):
     uploaded_files = []
-    files_content = []
     for file in files:
-        content = await file.read()
-        files_content.append((file, content))
-
-    for file, content in files_content:
+        content = await read_upload_limited(file)
         success_count = 0
         last_result = None
         for addr in COMFYUI_INSTANCES:
@@ -11847,11 +12124,9 @@ async def upload_ai_reference(files: List[UploadFile] = File(...)):
     doc_exts = {".pdf", ".txt", ".md", ".markdown", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".json", ".zip", ".yaml", ".yml", ".log"}
     max_upload_bytes = 50 * 1024 * 1024
     for file in files:
-        content = await file.read()
+        content = await read_upload_limited(file, max_upload_bytes)
         if not content:
             continue
-        if len(content) > max_upload_bytes:
-            raise HTTPException(status_code=413, detail=f"{file.filename or '文件'} 超过 50MB，无法上传")
         ext = os.path.splitext(file.filename or "")[1].lower()
         content_type = (file.content_type or "").lower()
         kind = "image"
@@ -11897,14 +12172,9 @@ async def upload_ai_base64(payload: Base64UploadRequest):
         header, _, raw = raw.partition(",")
         if not ct:
             ct = header[5:].split(";", 1)[0].strip().lower()
-    try:
-        content = base64.b64decode(raw, validate=False)
-    except Exception:
-        raise HTTPException(status_code=400, detail="数据无法解码")
+    content = decode_base64_limited(raw, MAX_UPLOAD_FILE_BYTES)
     if not content:
         raise HTTPException(status_code=400, detail="内容为空")
-    if len(content) > 50 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="超过 50MB")
     kind, ext = _local_upload_kind_ext(payload.name or "", ct or "image/png")
     if kind is None:
         kind, ext = "image", ".png"
@@ -11923,10 +12193,7 @@ async def upload_comfyui_base64(payload: Base64UploadRequest):
         header, _, raw = raw.partition(",")
         if not ct:
             ct = header[5:].split(";", 1)[0].strip().lower()
-    try:
-        content = base64.b64decode(raw, validate=False)
-    except Exception:
-        raise HTTPException(status_code=400, detail="数据无法解码")
+    content = decode_base64_limited(raw, MAX_UPLOAD_FILE_BYTES)
     if not content:
         raise HTTPException(status_code=400, detail="内容为空")
     _, ext = _local_upload_kind_ext(payload.name or "", ct or "image/png")
@@ -12224,7 +12491,7 @@ async def upload_local_assets(files: List[UploadFile] = File(...), folder: str =
     folder_rel, folder_abs = _local_upload_safe_folder(folder)
     os.makedirs(folder_abs, exist_ok=True)
     for file in files:
-        content = await file.read()
+        content = await read_upload_limited(file)
         if not content:
             continue
         kind, ext = _local_upload_kind_ext(file.filename, file.content_type)
@@ -12249,10 +12516,11 @@ async def upload_local_assets(files: List[UploadFile] = File(...), folder: str =
 async def import_local_assets_from_urls(payload: LocalAssetUrlImportRequest):
     uploaded = []
     results = []
+    imported_bytes = 0
     folder_rel, folder_abs = _local_upload_safe_folder(payload.folder)
     os.makedirs(folder_abs, exist_ok=True)
     timeout = httpx.Timeout(connect=20.0, read=120.0, write=30.0, pool=20.0)
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers={"User-Agent": "Infinite-Canvas-Asset-Importer/1.0"}) as client:
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, headers={"User-Agent": "Infinite-Canvas-Asset-Importer/1.0"}) as client:
         for entry in (payload.items or [])[:200]:
             src_url = str(entry.url or "").strip()
             inline_data = str(entry.data or "").strip()
@@ -12270,17 +12538,18 @@ async def import_local_assets_from_urls(payload: LocalAssetUrlImportRequest):
                         header, _, b64 = inline_data.partition(",")
                         if not content_type:
                             content_type = header[5:].split(";", 1)[0].strip().lower()
-                    try:
-                        content = base64.b64decode(b64, validate=False)
-                    except Exception:
-                        raise HTTPException(status_code=400, detail="素材数据无法解码")
+                    content = decode_base64_limited(b64, MAX_REQUEST_BODY_BYTES, "素材")
                     name_path = urllib.parse.urlparse(src_url).path
                 else:
-                    response = await client.get(src_url)
-                    response.raise_for_status()
-                    content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
-                    content = response.content
+                    src_url = ensure_public_http_url(src_url)
+                    async with client.stream("GET", src_url) as response:
+                        response.raise_for_status()
+                        content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+                        content = await read_httpx_response_limited(response, MAX_REQUEST_BODY_BYTES)
                     name_path = urllib.parse.urlparse(src_url).path
+                imported_bytes += len(content)
+                if imported_bytes > MAX_REQUEST_BODY_BYTES:
+                    raise HTTPException(status_code=413, detail="本批素材总大小超过限制")
                 kind, ext = _local_upload_kind_ext(name_path, content_type)
                 if kind == "image":
                     real = _sniff_image_ext_bytes(content[:16])   # 以真实内容为准，避免 webp 被叫成 .png 等
@@ -12875,20 +13144,23 @@ async def runninghub_upload_asset(payload: RunningHubUploadAssetRequest):
     filename = "asset.bin"
     content_type = "application/octet-stream"
     content = b""
-    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=240.0, write=240.0, pool=20.0), follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=20.0, read=240.0, write=240.0, pool=20.0), follow_redirects=False) as client:
         path = runninghub_local_asset_path(source_url)
         if path:
+            if os.path.getsize(path) > MAX_REQUEST_BODY_BYTES:
+                raise HTTPException(status_code=413, detail="素材超过上传大小限制")
             filename = os.path.basename(path)
             content_type = content_type_for_path(path)
             with open(path, "rb") as f:
                 content = f.read()
         elif source_url.startswith(("http://", "https://")):
-            response = await client.get(source_url)
-            if not response.is_success:
-                raise HTTPException(status_code=400, detail=f"下载素材失败 HTTP {response.status_code}")
-            content = response.content
-            content_type = response.headers.get("content-type") or content_type
-            filename = os.path.basename(urllib.parse.urlsplit(source_url).path) or filename
+            source_url = ensure_public_http_url(source_url)
+            async with client.stream("GET", source_url) as response:
+                if not response.is_success:
+                    raise HTTPException(status_code=400, detail=f"下载素材失败 HTTP {response.status_code}")
+                content_type = response.headers.get("content-type") or content_type
+                content = await read_httpx_response_limited(response, MAX_REQUEST_BODY_BYTES)
+                filename = os.path.basename(urllib.parse.urlsplit(source_url).path) or filename
         else:
             raise HTTPException(status_code=400, detail=f"不支持的素材地址：{source_url}")
         if not content:
@@ -13314,22 +13586,49 @@ def protocol_from_payload(payload):
     protocol = str(getattr(payload, "protocol", "") or "openai").strip().lower()
     return protocol if protocol in SUPPORTED_PROVIDER_PROTOCOLS else "openai"
 
-def api_key_from_payload(payload, protocol: str = ""):
+def same_provider_origin(left: str, right: str) -> bool:
+    def origin_parts(value):
+        parsed = urllib.parse.urlparse(str(value or "").strip())
+        scheme = parsed.scheme.lower()
+        host = (parsed.hostname or "").lower()
+        try:
+            port = parsed.port or (443 if scheme == "https" else 80 if scheme == "http" else 0)
+        except ValueError:
+            return "", "", 0
+        return scheme, host, port
+    left_parts = origin_parts(left)
+    right_parts = origin_parts(right)
+    return bool(left_parts[0] and left_parts[1] and right_parts[0] and right_parts[1] and left_parts == right_parts)
+
+def saved_provider_for_target(provider_id: str, protocol: str, base_url: str):
+    for provider in load_api_providers():
+        if provider_id and provider.get("id") != provider_id:
+            continue
+        if not provider_id and provider_protocol(provider) != protocol:
+            continue
+        if same_provider_origin(base_url, provider.get("base_url") or ""):
+            return provider
+    return None
+
+def api_key_from_payload(payload, protocol: str = "", base_url: str = ""):
     explicit = str(getattr(payload, "api_key", "") or "").strip()
     provider_id = str(getattr(payload, "provider_id", "") or "").strip().lower()
     protocol = str(protocol or protocol_from_payload(payload) or "").strip().lower()
+    base_url = str(base_url or getattr(payload, "base_url", "") or "").strip()
     if explicit:
         return explicit
-    if provider_id:
-        if provider_id == "runninghub":
-            value = os.getenv(runninghub_wallet_key_env(), "")
-            if value:
-                return value
-        value = provider_env_key_value(provider_id)
+    provider = saved_provider_for_target(provider_id, protocol, base_url)
+    if not provider:
+        return ""
+    if provider.get("id") == "runninghub":
+        value = runninghub_wallet_key_value()
         if value:
             return value
-    if protocol == "volcengine":
+    if provider.get("id") == "volcengine":
         return volcengine_provider_api_key("")
+    value = provider_env_key_value(provider.get("id") or provider_id)
+    if value:
+        return value
     return ""
 
 def upstream_models_url(base_url: str, protocol: str):
@@ -13579,7 +13878,8 @@ def jimeng_connection_payload(status):
     }
 
 async def runninghub_connection_payload(payload):
-    provider = {"id": "runninghub", "name": "RunningHub", "base_url": (payload.base_url or RUNNINGHUB_DEFAULT_BASE_URL).strip().rstrip("/"), "protocol": "runninghub", "api_key": api_key_from_payload(payload, "runninghub")}
+    base_url = (payload.base_url or RUNNINGHUB_DEFAULT_BASE_URL).strip().rstrip("/")
+    provider = {"id": "runninghub", "name": "RunningHub", "base_url": base_url, "protocol": "runninghub", "api_key": api_key_from_payload(payload, "runninghub", base_url)}
     payload_models = await runninghub_models_payload(provider)
     return {
         "ok": True,
@@ -13600,7 +13900,7 @@ def upstream_connection_credentials(payload, protocol):
         raise HTTPException(status_code=400, detail="请先填写请求地址")
     if not re.match(r"^https?://", base_url):
         raise HTTPException(status_code=400, detail="请求地址必须以 http:// 或 https:// 开头")
-    api_key = api_key_from_payload(payload, protocol)
+    api_key = api_key_from_payload(payload, protocol, base_url)
     if not api_key:
         key_name = "方舟 API Key" if protocol == "volcengine" else "API Key"
         raise HTTPException(status_code=400, detail=f"请先填写或保存 {key_name}")
@@ -13712,7 +14012,7 @@ async def probe_async_endpoint(payload: TestConnectionPayload):
         }
     if not base_url:
         raise HTTPException(status_code=400, detail="请先填写请求地址")
-    api_key = api_key_from_payload(payload, protocol)
+    api_key = api_key_from_payload(payload, protocol, base_url)
     if not api_key:
         raise HTTPException(status_code=400, detail="请先填写或保存 API Key")
     is_tudou_async = is_tudou_base_url(base_url)
@@ -13938,7 +14238,7 @@ async def fetch_models_from_upstream(base_url: str, api_key: str, protocol: str 
 async def fetch_upstream_models_from_payload(payload: TestConnectionPayload):
     """按页面当前表单值拉取模型，支持新增平台未保存时直接使用临时 Base URL / Key。"""
     protocol = protocol_from_payload(payload)
-    api_key = api_key_from_payload(payload, protocol)
+    api_key = api_key_from_payload(payload, protocol, payload.base_url)
     return await fetch_models_from_upstream(payload.base_url, api_key, protocol, payload.image_request_mode)
 
 @app.get("/api/providers/{provider_id}/fetch-models")
@@ -14374,8 +14674,28 @@ async def query_runninghub_image_task(provider, task_id):
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"查询 RunningHub 任务失败：{exc}") from exc
 
+def prune_canvas_tasks_locked() -> None:
+    cutoff = time.time() - CANVAS_TASK_RETENTION_SECONDS
+    terminal = {"succeeded", "failed"}
+    for key, task in list(CANVAS_TASKS.items()):
+        if task.get("status") in terminal and float(task.get("updated_at") or 0) < cutoff:
+            CANVAS_TASKS.pop(key, None)
+    overflow = len(CANVAS_TASKS) - CANVAS_TASK_MAX_ENTRIES
+    if overflow <= 0:
+        return
+    removable = sorted(
+        (
+            (float(task.get("updated_at") or 0), key)
+            for key, task in CANVAS_TASKS.items()
+            if task.get("status") in terminal
+        ),
+    )
+    for _, key in removable[:overflow]:
+        CANVAS_TASKS.pop(key, None)
+
 def create_canvas_task(task_id: str, task_type: str, **extra) -> None:
     with CANVAS_TASK_LOCK:
+        prune_canvas_tasks_locked()
         CANVAS_TASKS[task_id] = {
             "id": task_id,
             "type": task_type,
@@ -16023,8 +16343,7 @@ async def delete_project(project_id: str):
                 continue
             if str(data.get("project") or "") == project_id:
                 data["project"] = DEFAULT_PROJECT_ID
-                with open(path, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
+                atomic_write_json(path, data)
                 moved += 1
     return {"ok": True, "moved": moved}
 
@@ -16043,7 +16362,7 @@ async def import_canvas_file(
     board_x: float = Form(0),
     board_y: float = Form(0),
 ):
-    raw = await file.read()
+    raw = await read_upload_limited(file, MAX_ARCHIVE_BYTES)
     if not raw:
         raise HTTPException(status_code=400, detail="文件为空")
     filename = str(file.filename or "").lower()
@@ -16120,25 +16439,26 @@ async def get_canvas_meta(canvas_id: str):
 async def update_canvas_meta(canvas_id: str, payload: CanvasMetaUpdate):
     """更新画布的轻量元数据（标题/图标/负责人/颜色/置顶）。
     刻意不走 save_canvas（它会刷新 updated_at），以免打标签/置顶把画布顶到列表最前。"""
-    canvas = load_canvas(canvas_id)
-    if payload.title is not None:
-        canvas["title"] = (payload.title or canvas.get("title") or "未命名画布")[:80]
-    if payload.icon is not None:
-        canvas["icon"] = (payload.icon or "layers")[:32]
-    if payload.owner is not None:
-        canvas["owner"] = str(payload.owner).strip()[:40]
-    if payload.color is not None:
-        canvas["color"] = normalize_canvas_color(payload.color)
-    if payload.pinned is not None:
-        canvas["pinned"] = bool(payload.pinned)
-    if payload.project is not None:
-        canvas["project"] = str(payload.project).strip() or DEFAULT_PROJECT_ID
-    if payload.board_x is not None:
-        canvas["board_x"] = float(payload.board_x)
-    if payload.board_y is not None:
-        canvas["board_y"] = float(payload.board_y)
-    write_canvas_json(canvas)
-    return {"canvas": canvas_record(canvas)}
+    with CANVAS_LOCK:
+        canvas = load_canvas(canvas_id)
+        if payload.title is not None:
+            canvas["title"] = (payload.title or canvas.get("title") or "未命名画布")[:80]
+        if payload.icon is not None:
+            canvas["icon"] = (payload.icon or "layers")[:32]
+        if payload.owner is not None:
+            canvas["owner"] = str(payload.owner).strip()[:40]
+        if payload.color is not None:
+            canvas["color"] = normalize_canvas_color(payload.color)
+        if payload.pinned is not None:
+            canvas["pinned"] = bool(payload.pinned)
+        if payload.project is not None:
+            canvas["project"] = str(payload.project).strip() or DEFAULT_PROJECT_ID
+        if payload.board_x is not None:
+            canvas["board_x"] = float(payload.board_x)
+        if payload.board_y is not None:
+            canvas["board_y"] = float(payload.board_y)
+        write_canvas_json(canvas)
+        return {"canvas": canvas_record(canvas)}
 
 @app.get("/api/canvases/{canvas_id}")
 async def get_canvas(canvas_id: str):
@@ -16146,9 +16466,10 @@ async def get_canvas(canvas_id: str):
 
 @app.post("/api/canvases/{canvas_id}/touch")
 async def touch_canvas(canvas_id: str):
-    canvas = load_canvas(canvas_id)
-    save_canvas(canvas)
-    return {"canvas": canvas_record(canvas), "updated_at": canvas.get("updated_at", 0)}
+    with CANVAS_LOCK:
+        canvas = load_canvas(canvas_id)
+        save_canvas(canvas)
+        return {"canvas": canvas_record(canvas), "updated_at": canvas.get("updated_at", 0)}
 
 @app.get("/api/canvas-assets")
 async def list_canvas_assets():
@@ -16181,60 +16502,71 @@ async def check_canvas_assets(payload: CanvasAssetCheckRequest):
 
 @app.post("/api/canvas-assets/download")
 async def download_canvas_assets(payload: CanvasAssetDownloadRequest):
-    buffer = BytesIO()
-    used_names = set()
-    count = 0
-    raw_items = payload.items or [{"url": url} for url in payload.urls]
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        for raw in raw_items[:1000]:
-            if isinstance(raw, dict):
-                text = str(raw.get("url") or "").strip()
-                requested_name = str(raw.get("name") or "").strip()
-            else:
-                text = str(raw or "").strip()
-                requested_name = ""
-            if not text:
-                continue
-            path = output_file_from_url(text)
-            content = None
-            content_type = ""
-            if path and os.path.isfile(path):
-                base = sanitize_export_filename(requested_name or os.path.basename(path), os.path.basename(path) or f"image-{count + 1}.png")
-            else:
-                local_by_name = local_media_file_by_basename(filename_from_media_url(text, ""))
-                if local_by_name and os.path.isfile(local_by_name):
-                    path = local_by_name
+    def build_archive():
+        buffer = BytesIO()
+        used_names = set()
+        count = 0
+        total_bytes = 0
+        raw_items = payload.items or [{"url": url} for url in payload.urls]
+        if len(raw_items) > CANVAS_EXPORT_MAX_ITEMS:
+            raise HTTPException(status_code=413, detail=f"单次最多导出 {CANVAS_EXPORT_MAX_ITEMS} 个素材")
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            for raw in raw_items:
+                if isinstance(raw, dict):
+                    text = str(raw.get("url") or "").strip()
+                    requested_name = str(raw.get("name") or "").strip()
+                else:
+                    text = str(raw or "").strip()
+                    requested_name = ""
+                if not text:
+                    continue
+                path = output_file_from_url(text)
+                content = None
+                if path and os.path.isfile(path):
                     base = sanitize_export_filename(requested_name or os.path.basename(path), os.path.basename(path) or f"image-{count + 1}.png")
                 else:
-                    try:
-                        remote = fetch_remote_media_bytes(text)
-                    except Exception:
-                        remote = None
-                    if not remote:
-                        continue
-                    content, content_type = remote
-                    base = sanitize_export_filename(requested_name or filename_from_media_url(text, f"image-{count + 1}.bin"), f"image-{count + 1}.bin")
-            name, ext = os.path.splitext(base)
-            archive_name = base
-            suffix = 2
-            while archive_name in used_names:
-                archive_name = f"{name}-{suffix}{ext}"
-                suffix += 1
-            used_names.add(archive_name)
-            if path and os.path.isfile(path):
-                zf.write(path, archive_name)
-            else:
-                zf.writestr(archive_name, content)
-            count += 1
-    if count <= 0:
-        raise HTTPException(status_code=404, detail="没有可下载的本地图片")
-    buffer.seek(0)
+                    local_by_name = local_media_file_by_basename(filename_from_media_url(text, ""))
+                    if local_by_name and os.path.isfile(local_by_name):
+                        path = local_by_name
+                        base = sanitize_export_filename(requested_name or os.path.basename(path), os.path.basename(path) or f"image-{count + 1}.png")
+                    else:
+                        try:
+                            remote = fetch_remote_media_bytes(text, max_bytes=CANVAS_EXPORT_MAX_BYTES - total_bytes)
+                        except HTTPException:
+                            raise
+                        except Exception:
+                            remote = None
+                        if not remote:
+                            continue
+                        content = remote[0]
+                        base = sanitize_export_filename(requested_name or filename_from_media_url(text, f"image-{count + 1}.bin"), f"image-{count + 1}.bin")
+                item_size = os.path.getsize(path) if path and os.path.isfile(path) else len(content or b"")
+                total_bytes += item_size
+                if total_bytes > CANVAS_EXPORT_MAX_BYTES:
+                    raise HTTPException(status_code=413, detail="导出素材总大小超过限制")
+                name, ext = os.path.splitext(base)
+                archive_name = base
+                suffix = 2
+                while archive_name in used_names:
+                    archive_name = f"{name}-{suffix}{ext}"
+                    suffix += 1
+                used_names.add(archive_name)
+                if path and os.path.isfile(path):
+                    zf.write(path, archive_name)
+                else:
+                    zf.writestr(archive_name, content)
+                count += 1
+        if count <= 0:
+            raise HTTPException(status_code=404, detail="没有可下载的本地图片")
+        return buffer.getvalue()
+
+    archive = await asyncio.to_thread(build_archive)
     filename = re.sub(r'[\\/:*?"<>|]+', "_", payload.filename or "canvas-output-images.zip")
     if not filename.lower().endswith(".zip"):
         filename += ".zip"
     encoded = urllib.parse.quote(filename)
     headers = {"Content-Disposition": f"attachment; filename*=UTF-8''{encoded}"}
-    return Response(buffer.getvalue(), media_type="application/zip", headers=headers)
+    return Response(archive, media_type="application/zip", headers=headers)
 
 def sanitize_export_filename(name: str, fallback: str) -> str:
     base = os.path.basename(str(name or "").strip()) or fallback
@@ -16246,15 +16578,16 @@ def import_canvas_zip(raw):
     import_dir = None
     try:
         with zipfile.ZipFile(BytesIO(raw), "r") as zf:
+            validate_zip_limits(zf)
             candidates = [n for n in zf.namelist() if n.lower().endswith("canvas.json")]
             canvas_name = "canvas.json" if "canvas.json" in zf.namelist() else (candidates[0] if candidates else "")
             if not canvas_name:
                 raise HTTPException(status_code=400, detail="压缩包中没有 canvas.json")
-            canvas_data = json.loads(zf.read(canvas_name).decode("utf-8-sig"))
+            canvas_data = json.loads(read_zip_member_limited(zf, canvas_name, MAX_UPLOAD_FILE_BYTES).decode("utf-8-sig"))
             manifest = None
             if "resources-manifest.json" in zf.namelist():
                 try:
-                    manifest = json.loads(zf.read("resources-manifest.json").decode("utf-8-sig"))
+                    manifest = json.loads(read_zip_member_limited(zf, "resources-manifest.json", MAX_UPLOAD_FILE_BYTES).decode("utf-8-sig"))
                 except Exception:
                     manifest = None
             manifest_items = {}
@@ -16268,10 +16601,11 @@ def import_canvas_zip(raw):
                 normalized = entry.replace("\\", "/").lstrip("/")
                 if not normalized.startswith("resources/") or normalized.endswith("/"):
                     continue
+                if os.path.splitext(normalized)[1].lower() not in IMPORTED_RESOURCE_EXTS:
+                    continue
                 base = sanitize_export_filename(os.path.basename(normalized), os.path.basename(normalized) or "resource.bin")
                 target = os.path.join(import_dir, f"{uuid.uuid4().hex[:8]}_{base}")
-                with zf.open(entry) as src, open(target, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
+                copy_zip_member_limited(zf, entry, target, MAX_ARCHIVE_BYTES)
                 rel = os.path.relpath(target, ASSETS_DIR).replace("\\", "/")
                 new_url = f"/assets/{rel}"
                 old_url = manifest_items.get(normalized) or manifest_items.get(entry)
@@ -16397,7 +16731,7 @@ async def upload_asset_library_workflows(
     _, cat = asset_library_workflow_category(lib, library_id, category_id)
     added = []
     for file in files[:100]:
-        raw = await file.read()
+        raw = await read_upload_limited(file, MAX_ARCHIVE_BYTES)
         filename = file.filename or "canvas-workflow.zip"
         lower = filename.lower()
         if not (lower.endswith(".json") or lower.endswith(".zip") or raw[:2] == b"PK"):
@@ -16412,7 +16746,7 @@ async def upload_asset_library_workflows(
 
 @app.post("/api/canvas-workflows/import")
 async def import_canvas_workflow(file: UploadFile = File(...)):
-    raw = await file.read()
+    raw = await read_upload_limited(file, MAX_ARCHIVE_BYTES)
     if not raw:
         raise HTTPException(status_code=400, detail="文件为空")
     name = str(file.filename or "").lower()
@@ -16421,11 +16755,12 @@ async def import_canvas_workflow(file: UploadFile = File(...)):
     try:
         if name.endswith(".zip") or raw[:2] == b"PK":
             with zipfile.ZipFile(BytesIO(raw), "r") as zf:
+                validate_zip_limits(zf)
                 candidates = [n for n in zf.namelist() if n.lower().endswith("workflow.json")]
                 workflow_name = "workflow.json" if "workflow.json" in zf.namelist() else (candidates[0] if candidates else "")
                 if not workflow_name:
                     raise HTTPException(status_code=400, detail="压缩包中没有 workflow.json")
-                workflow = json.loads(zf.read(workflow_name).decode("utf-8-sig"))
+                workflow = json.loads(read_zip_member_limited(zf, workflow_name, MAX_UPLOAD_FILE_BYTES).decode("utf-8-sig"))
                 stamp = time.strftime("%Y%m%d-%H%M%S")
                 import_dir = os.path.join(OUTPUT_INPUT_DIR, f"workflow_import_{stamp}_{uuid.uuid4().hex[:6]}")
                 os.makedirs(import_dir, exist_ok=True)
@@ -16433,10 +16768,11 @@ async def import_canvas_workflow(file: UploadFile = File(...)):
                     archive = str(res.get("archive") or "").replace("\\", "/").lstrip("/")
                     if not archive or archive not in zf.namelist():
                         continue
+                    if os.path.splitext(archive)[1].lower() not in IMPORTED_RESOURCE_EXTS:
+                        continue
                     base = sanitize_export_filename(res.get("name") or os.path.basename(archive), os.path.basename(archive) or "resource.bin")
                     target = os.path.join(import_dir, f"{uuid.uuid4().hex[:8]}_{base}")
-                    with zf.open(archive) as src, open(target, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
+                    copy_zip_member_limited(zf, archive, target, MAX_ARCHIVE_BYTES)
                     rel = os.path.relpath(target, ASSETS_DIR).replace("\\", "/")
                     new_url = f"/assets/{rel}"
                     old_url = str(res.get("url") or "").strip()
@@ -17273,51 +17609,55 @@ async def batch_crop_asset_library_items(payload: AssetLibraryBatchCropRequest):
 
 @app.put("/api/canvases/{canvas_id}")
 async def update_canvas(canvas_id: str, payload: CanvasSaveRequest):
-    canvas = load_canvas(canvas_id)
-    current_updated_at = int(canvas.get("updated_at") or 0)
-    if payload.base_updated_at and current_updated_at and int(payload.base_updated_at) < current_updated_at:
-        raise HTTPException(status_code=409, detail={
-            "message": "画布已被其他页面更新，已拒绝旧版本覆盖。",
-            "canvas": canvas,
-            "updated_at": current_updated_at,
-        })
-    canvas["title"] = (payload.title or canvas.get("title") or "未命名画布")[:80]
-    canvas["icon"] = (payload.icon or canvas.get("icon") or "layers")[:32]
-    canvas["kind"] = normalize_canvas_kind(canvas.get("kind"))
-    canvas["nodes"] = payload.nodes
-    canvas["connections"] = payload.connections
-    if canvas["kind"] == "smart":
-        canvas["viewport"] = payload.viewport
-    else:
-        canvas["viewport"] = canvas.get("viewport") or {"x": 0, "y": 0, "scale": 1}
-    canvas["logs"] = payload.logs[-500:]
-    canvas["settings"] = payload.settings or {}
-    save_canvas(canvas)
+    with CANVAS_LOCK:
+        canvas = load_canvas(canvas_id)
+        current_updated_at = int(canvas.get("updated_at") or 0)
+        if payload.base_updated_at and current_updated_at and int(payload.base_updated_at) < current_updated_at:
+            raise HTTPException(status_code=409, detail={
+                "message": "画布已被其他页面更新，已拒绝旧版本覆盖。",
+                "canvas": canvas,
+                "updated_at": current_updated_at,
+            })
+        canvas["title"] = (payload.title or canvas.get("title") or "未命名画布")[:80]
+        canvas["icon"] = (payload.icon or canvas.get("icon") or "layers")[:32]
+        canvas["kind"] = normalize_canvas_kind(canvas.get("kind"))
+        canvas["nodes"] = payload.nodes
+        canvas["connections"] = payload.connections
+        if canvas["kind"] == "smart":
+            canvas["viewport"] = payload.viewport
+        else:
+            canvas["viewport"] = canvas.get("viewport") or {"x": 0, "y": 0, "scale": 1}
+        canvas["logs"] = payload.logs[-500:]
+        canvas["settings"] = payload.settings or {}
+        save_canvas(canvas)
     await manager.broadcast_canvas_updated(canvas_id, int(canvas.get("updated_at") or now_ms()), payload.client_id)
     return {"canvas": canvas}
 
 @app.delete("/api/canvases/{canvas_id}")
 async def delete_canvas(canvas_id: str):
-    canvas = load_canvas_any(canvas_id)
-    if not canvas.get("deleted_at"):
-        canvas["deleted_at"] = now_ms()
-        save_canvas(canvas)
-    return {"ok": True}
+    with CANVAS_LOCK:
+        canvas = load_canvas_any(canvas_id)
+        if not canvas.get("deleted_at"):
+            canvas["deleted_at"] = now_ms()
+            save_canvas(canvas)
+        return {"ok": True}
 
 @app.post("/api/canvases/{canvas_id}/restore")
 async def restore_canvas(canvas_id: str):
-    canvas = load_canvas_any(canvas_id)
-    if canvas.get("deleted_at"):
-        canvas.pop("deleted_at", None)
-        save_canvas(canvas)
-    return {"canvas": canvas}
+    with CANVAS_LOCK:
+        canvas = load_canvas_any(canvas_id)
+        if canvas.get("deleted_at"):
+            canvas.pop("deleted_at", None)
+            save_canvas(canvas)
+        return {"canvas": canvas}
 
 @app.delete("/api/canvases/{canvas_id}/purge")
 async def purge_canvas(canvas_id: str):
-    path = canvas_path(canvas_id)
-    if os.path.exists(path):
-        os.remove(path)
-    return {"ok": True}
+    with CANVAS_LOCK:
+        path = canvas_path(canvas_id)
+        if os.path.exists(path):
+            os.remove(path)
+        return {"ok": True}
 
 # --- GPT 对话 ---
 
@@ -17635,8 +17975,7 @@ async def delete_history(req: DeleteHistoryRequest):
                 else:
                     new_history.append(item)
             if target_record:
-                with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
-                    json.dump(new_history, f, ensure_ascii=False, indent=4)
+                atomic_write_json(HISTORY_FILE, new_history, indent=4)
 
         if target_record:
             for img_url in target_record.get("images", []):
@@ -18204,8 +18543,7 @@ def load_runninghub_workflow_store():
 
 def save_runninghub_workflow_store(store):
     os.makedirs(DATA_DIR, exist_ok=True)
-    with open(RUNNINGHUB_WORKFLOW_STORE_FILE, "w", encoding="utf-8") as f:
-        json.dump(store, f, ensure_ascii=False, indent=2)
+    atomic_write_json(RUNNINGHUB_WORKFLOW_STORE_FILE, store)
 
 def prune_runninghub_workflow_store_for_provider(provider):
     if not isinstance(provider, dict) or provider.get("id") != "runninghub":
@@ -18715,8 +19053,7 @@ def upload_workflow(payload: WorkflowUploadRequest):
     os.makedirs(custom_dir, exist_ok=True)
     stored_name = f"{CUSTOM_WORKFLOW_FOLDER}/{name}"
     path = workflow_path_from_name(stored_name)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload.workflow, f, ensure_ascii=False, indent=2)
+    atomic_write_json(path, payload.workflow)
     return {"name": stored_name}
 
 @app.put("/api/workflows/{name:path}/config")
@@ -18727,8 +19064,7 @@ def save_workflow_config(name: str, payload: WorkflowConfig):
     if not os.path.exists(workflow_path):
         raise HTTPException(status_code=404, detail="Workflow not found")
     cfg_path = workflow_config_path(name)
-    with open(cfg_path, "w", encoding="utf-8") as f:
-        json.dump(payload.dict(), f, ensure_ascii=False, indent=2)
+    atomic_write_json(cfg_path, payload.dict())
     return {"config": payload.dict()}
 
 @app.delete("/api/workflows/{name:path}")
@@ -18793,5 +19129,5 @@ if __name__ == "__main__":
     # 关闭服务端协议级 WebSocket ping：部分客户端（如 PS UXP 面板）不会自动回 pong，
     # 默认 20s ping/20s 超时会把这些连接每隔一会儿就踢掉造成"频繁断连"。
     # 客户端有自己的应用层心跳 + 断线重连兜底，这里禁用协议 ping 更稳。
-    uvicorn.run(app, host="0.0.0.0", port=3000,
+    uvicorn.run(app, host=APP_BIND_HOST, port=3000,
                 ws_ping_interval=None, ws_ping_timeout=None)
